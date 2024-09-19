@@ -487,11 +487,10 @@ impl Primitive for Str {
 impl AsBytes for Str {
     /// prepend size (2 bytes) + string bytes
     fn to_bytes(&self) -> Box<[u8]> {
-        let str = self.0.clone();
-        let size = U16(str.len() as u16);
+        let size = U16(self.0.len() as u16);
         size.to_bytes()
             .iter()
-            .chain(str.as_bytes())
+            .chain(self.0.as_bytes())
             .cloned()
             .collect::<Vec<u8>>()
             .into_boxed_slice()
