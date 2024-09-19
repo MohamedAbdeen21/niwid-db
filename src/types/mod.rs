@@ -1,9 +1,11 @@
+use serde::{Deserialize, Serialize};
+
 use crate::pages::table_page::TupleId;
 
 pub const STR_DELIMITER: char = '#';
 
 #[allow(unused)]
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub enum Types {
     U8,
     U16,

@@ -1,7 +1,7 @@
 mod frame;
 mod replacer;
 
-use crate::disk_manager::DiskManager;
+use crate::disk_manager::{DiskManager, DISK_STORAGE};
 use crate::pages::{Page, PageId, INVALID_PAGE};
 use anyhow::{anyhow, Result};
 use frame::Frame;
@@ -35,14 +35,15 @@ impl BufferPool {
     }
 
     pub fn init(size: usize) -> Self {
+        // takes a few seconds if bp size is too large, can be parallelized.
         let mut frames = Vec::with_capacity(size);
         for i in 0..size {
             frames.push(Frame::new(i));
         }
 
-        // make sure catalog page can also be fetched
-        let disk_manager = DiskManager::new("data/test.db");
+        let disk_manager = DiskManager::new(DISK_STORAGE);
 
+        // make sure catalog page can also be fetched
         match disk_manager.read_from_file(0) {
             Ok(_) => (),
             Err(_) => {
@@ -52,6 +53,7 @@ impl BufferPool {
             }
         }
 
+        // buffer pool data that must persist on disk e.g. next page id
         let next_page_id = match disk_manager.read_from_file(PageId::MAX) {
             Ok(page) => page,
             Err(_) => {
@@ -150,7 +152,6 @@ impl BufferPool {
             self.replacer.set_evictable(frame_id, true);
         }
 
-        // TODO: fix this
         if frame.get_page_read().is_dirty() {
             self.disk_manager
                 .write_to_file(frame.get_page_write())

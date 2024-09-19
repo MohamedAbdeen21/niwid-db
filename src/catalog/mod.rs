@@ -42,6 +42,11 @@ impl Catalog {
             let name = table.fetch_string(&name_bytes.to_bytes());
             let first_page_id = tuple.get_value::<I64>("first_page", &schema).unwrap().0 as PageId;
             let last_page_id = tuple.get_value::<I64>("last_page", &schema).unwrap().0 as PageId;
+            let schema_bytes = &tuple.get_value::<I128>("schema", &schema).unwrap();
+            println!("schema_bytes: {:?}", schema_bytes.to_bytes());
+            let schema = table.fetch_string(&schema_bytes.to_bytes());
+            println!("schema: {:?}", schema);
+            let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
             tables.push(
                 Table::fetch(name.0, &schema, first_page_id, last_page_id).expect("Fetch failed"),
@@ -72,11 +77,12 @@ impl Catalog {
         }
 
         let mut table = Table::new(table_name.to_string(), schema)?;
+        let schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data = vec![
             Str(table_name.to_string()).to_bytes(),
             I64(table.get_first_page_id()).to_bytes(),
             I64(table.get_last_page_id()).to_bytes(),
-            // Str(schema.to_string()).to_bytes(), // TODO: Handle schema serialization
+            Str(schema).to_bytes(),
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);
         self.table.insert(tuple)?;
@@ -121,9 +127,3 @@ impl Catalog {
         Some(())
     }
 }
-
-// impl Drop for Catalog {
-//     fn drop(&mut self) {
-//         self.bpm.unpin(&self.table.get());
-//     }
-// }

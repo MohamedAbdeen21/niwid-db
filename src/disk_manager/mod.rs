@@ -5,6 +5,8 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::path::Path;
 
+pub const DISK_STORAGE: &str = "data/test";
+
 #[derive(Debug)]
 pub struct DiskManager {
     path: String,

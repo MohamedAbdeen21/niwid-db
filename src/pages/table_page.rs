@@ -140,6 +140,7 @@ impl TablePage {
         self.latch.wlock();
 
         let tuple_size = tuple.len();
+        println!("tuple size {}", tuple_size);
         if tuple_size + SLOT_SIZE > self.free_space() {
             self.latch.wunlock();
             return Err(anyhow!("Not enough space to insert tuple"));
@@ -156,7 +157,7 @@ impl TablePage {
         };
 
         self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.to_bytes());
-        self.data.bytes[tuple_offset..(tuple_offset + tuple.len())]
+        self.data.bytes[tuple_offset..(tuple_offset + tuple_size)]
             .copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
@@ -235,6 +236,12 @@ impl TablePage {
 
         let tuple_offset = slot.offset as usize;
         let tuple_size = slot.size as usize;
+        println!(
+            "page {} offset and size {} {}",
+            self.get_page_id(),
+            tuple_offset,
+            tuple_size
+        );
 
         let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
 

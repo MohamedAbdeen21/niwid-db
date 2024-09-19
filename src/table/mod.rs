@@ -14,12 +14,11 @@ use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
 
-#[allow(unused)]
 pub struct Table {
     name: String,
-    pub first_page: RwLock<*mut TablePage>,
+    first_page: RwLock<*mut TablePage>,
     last_page: RwLock<*mut TablePage>,
-    pub blob_page: RwLock<*mut TablePage>,
+    blob_page: RwLock<*mut TablePage>,
     bpm: BufferPoolManager,
     schema: Schema,
 }
@@ -88,6 +87,11 @@ impl Table {
 
     pub fn get_name(&self) -> &str {
         &self.name
+    }
+
+    #[allow(unused)]
+    pub fn get_schema(&self) -> &Schema {
+        &self.schema
     }
 
     pub fn get_first_page_id(&self) -> PageId {
@@ -185,10 +189,11 @@ impl Table {
 
         let delimiter = STR_DELIMITER as u8;
         for byte in tuple.get_data().iter() {
-            if inside && byte != &b'#' {
+            if inside && byte != &delimiter {
                 string.push(*byte as char);
             } else if inside && byte == &delimiter {
                 let tuple_id: TupleId = self.insert_string(string.as_bytes())?;
+                string.clear();
                 processed_data.extend(tuple_id.to_bytes());
                 inside = false;
             } else if !inside && byte == &delimiter {
