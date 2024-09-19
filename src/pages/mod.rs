@@ -8,12 +8,12 @@ pub const PAGE_SIZE: usize = 4096; // 4 KBs
 
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement From<Page> and Into<Page> traits
-#[repr(C)]
+#[repr(C, align(4))]
 #[derive(Debug)]
 pub struct Page {
-    is_dirty: bool,
     /// Underlying block of memory of size [`PAGE_SIZE`]
     data: [u8; PAGE_SIZE],
+    is_dirty: bool,
 }
 
 impl Serialize for Page {
@@ -36,6 +36,10 @@ impl Page {
             data: [0u8; PAGE_SIZE],
             is_dirty: false,
         }
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        return self.is_dirty;
     }
 
     pub fn read<T: Serialize + Sized>(&self, offset: usize) -> T {

@@ -1,10 +1,14 @@
 use super::traits::Serialize;
+use crate::tuple::TupleMetaData;
 
 use super::{Page, PAGE_SIZE};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
 
+const INVALID_PAGE: i32 = -1;
+
 const SLOT_SIZE: usize = mem::size_of::<TablePageSlot>();
+const META_SIZE: usize = mem::size_of::<TupleMetaData>();
 const HEADER_SIZE: usize = mem::size_of::<TablePageHeader>();
 // We take the first [`HEADER_SIZE`] bytes from the page to store the header
 // This means that the last address in the page is [`PAGE_END`] and not [`PAGE_SIZE`].
@@ -17,7 +21,7 @@ const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 #[derive(Debug, Clone, Copy)]
 struct TablePageData {
     header: TablePageHeader,
-    data: [u8; PAGE_END],
+    bytes: [u8; PAGE_END],
 }
 
 #[repr(C)]
@@ -30,7 +34,7 @@ pub struct TablePage {
 impl TablePage {
     pub fn new() -> Self {
         let mut p: Self = Page::new().into();
-        p.header_mut().set_next_page(-1);
+        p.header_mut().set_next_page(INVALID_PAGE);
         p
     }
 
@@ -53,9 +57,13 @@ impl TablePage {
 
     #[inline]
     fn get_slot(&self, slot: usize) -> Option<TablePageSlot> {
+        if slot >= self.header().num_tuples as usize {
+            return None;
+        }
+
         let offset = slot * SLOT_SIZE;
         Some(TablePageSlot::from_bytes(
-            &self.data.data[offset..offset + SLOT_SIZE],
+            &self.data.bytes[offset..offset + SLOT_SIZE],
         ))
     }
 
@@ -84,27 +92,26 @@ impl TablePage {
     }
 
     pub fn insert_tuple(&mut self, tuple: &[u8]) -> Result<()> {
-        let tuple_size = tuple.len();
-        if tuple_size + SLOT_SIZE > self.free_space() {
+        let entry_size = tuple.len() + META_SIZE;
+        if entry_size + SLOT_SIZE > self.free_space() {
             return Err(anyhow!("Not enough space to insert tuple"));
         }
 
         let last_offset = self.last_tuple_offset();
-        let tuple_offset = last_offset - tuple_size;
+        let tuple_offset = last_offset - tuple.len();
+        let entry_offset = tuple_offset - META_SIZE;
 
-        let slot = TablePageSlot {
-            offset: tuple_offset as u16,
-            size: tuple_size as u16,
-            is_null: false,
-        };
+        let slot = TablePageSlot::new(entry_offset, entry_size);
+        let meta = TupleMetaData::new();
 
         let slot_offset = match self.last_slot_offset() {
             Some(offset) => offset + SLOT_SIZE,
             None => 0,
         };
 
-        self.data.data[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.as_bytes());
-        self.data.data[tuple_offset..(tuple_offset + tuple_size)].copy_from_slice(tuple);
+        self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.as_bytes());
+        self.data.bytes[entry_offset..(entry_offset + META_SIZE)].copy_from_slice(meta.as_bytes());
+        self.data.bytes[tuple_offset..(tuple_offset + tuple.len())].copy_from_slice(tuple);
 
         self.header_mut().add_tuple();
         self.is_dirty |= true;
@@ -112,9 +119,29 @@ impl TablePage {
         Ok(())
     }
 
-    pub fn read_tuple(&self, slot: usize) -> &[u8] {
+    pub fn delete_tuple(&mut self, slot: usize) {
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
-        &self.data.data[slot.offset as usize..(slot.offset + slot.size) as usize]
+
+        let mut deleted_meta = TupleMetaData::new();
+        deleted_meta.mark_deleted();
+
+        self.data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
+            .copy_from_slice(deleted_meta.as_bytes());
+        self.is_dirty |= true;
+    }
+
+    pub fn read_tuple(&self, slot: usize) -> (TupleMetaData, &[u8]) {
+        let slot = self.get_slot(slot).expect("Asked for invalid slot");
+
+        let meta_offset = slot.offset as usize;
+        let tuple_offset = slot.offset as usize + META_SIZE;
+        let tuple_size = slot.size as usize - META_SIZE;
+
+        let meta =
+            TupleMetaData::from_bytes(&self.data.bytes[meta_offset..(meta_offset + META_SIZE)]);
+        let tuple = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size) as usize];
+
+        return (meta, tuple);
     }
 }
 
@@ -158,7 +185,7 @@ impl Serialize for TablePage {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct TablePageHeader {
-    /// -1 if there are no more pages
+    /// INVALID_PAGE (-1) if there are no more pages
     next_page: i32,
     num_tuples: u16,
 }
@@ -189,17 +216,11 @@ impl TablePageHeader {
     }
 }
 
-// TODO: remove packed?
-// the slot should have size 2 + 2 + 1 (1 for bool) = 5
-// packed makes sure it is not padded to 6
-// can cause perf issues and prevents taking references to these fields
-// should revisit later
-#[repr(C, packed)]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct TablePageSlot {
+struct TablePageSlot {
     offset: u16,
     size: u16,
-    is_null: bool,
 }
 
 impl Serialize for TablePageSlot {
@@ -210,5 +231,14 @@ impl Serialize for TablePageSlot {
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), SLOT_SIZE);
         unsafe { *(bytes.as_ptr() as *const TablePageSlot) }
+    }
+}
+
+impl TablePageSlot {
+    pub fn new(offset: usize, size: usize) -> Self {
+        Self {
+            offset: offset as u16,
+            size: size as u16,
+        }
     }
 }
