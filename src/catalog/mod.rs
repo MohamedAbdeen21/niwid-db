@@ -1,4 +1,3 @@
-use crate::buffer_pool::{BufferPool, BufferPoolManager};
 use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
@@ -7,22 +6,17 @@ use crate::types::{AsBytes, Str, Types, I128, I64};
 use anyhow::{anyhow, Result};
 
 // preserve page_id 0 for catalog, bpm starts assigning at 1
-#[allow(unused)]
 const CATALOG_PAGE: PageId = 0;
 const CATALOG_NAME: &str = "__CATALOG__";
 
-#[allow(unused)]
 pub struct Catalog {
     table: Table,                  // first page of the catalog
     tables: Vec<(TupleId, Table)>, // TODO: handle ownership
     schema: Schema,                // A catalog is itself a table
-    bpm: BufferPoolManager,
 }
 
-#[allow(unused)]
 impl Catalog {
     pub fn new() -> Result<Self> {
-        let bpm = BufferPool::new();
         let schema = Schema::new(
             vec!["table_name", "first_page", "last_page", "schema"],
             vec![Types::Str, Types::I64, Types::I64, Types::Str],
@@ -36,7 +30,7 @@ impl Catalog {
         )?;
 
         let mut tables = vec![];
-        let mut table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
+        let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
             let name_bytes = tuple.get_value_of::<I128>("table_name", &schema)?.unwrap();
             let name = table.fetch_string(&name_bytes.to_bytes());
             let first_page_id =
@@ -61,7 +55,6 @@ impl Catalog {
             table,
             tables,
             schema,
-            bpm,
         })
     }
 
@@ -78,7 +71,7 @@ impl Catalog {
             return Err(anyhow!("Table {} already exists", table_name));
         }
 
-        let mut table = Table::new(table_name.to_string(), schema)?;
+        let table = Table::new(table_name.to_string(), schema)?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Box<dyn AsBytes>> = vec![
             Str(table_name.to_string()).into(),
@@ -103,16 +96,21 @@ impl Catalog {
 
     pub fn drop_table(&mut self, table_name: &str) -> Option<()> {
         let mut tuple_id = None;
-        self.table.scan(|(id, (_, tuple))| {
-            let name_bytes = tuple
-                .get_value_of::<I128>("table_name", &self.schema)?
-                .unwrap();
-            let name = self.table.fetch_string(&name_bytes.to_bytes()).0;
-            if name == table_name {
-                tuple_id = Some(*id);
-            }
-            Ok(())
-        });
+        self.table
+            .scan(|(id, (_, tuple))| {
+                let name_bytes = tuple
+                    .get_value_of::<I128>("table_name", &self.schema)?
+                    .unwrap()
+                    .to_bytes();
+                let name = self.table.fetch_string(&name_bytes).0;
+
+                if name == table_name {
+                    tuple_id = Some(*id);
+                }
+
+                Ok(())
+            })
+            .ok()?;
 
         self.table.delete(tuple_id?).ok()?;
 

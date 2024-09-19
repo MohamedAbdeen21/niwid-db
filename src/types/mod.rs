@@ -504,7 +504,7 @@ impl AsBytes for Str {
             String::from_utf8(bytes[2..].to_vec()).unwrap(),
         );
 
-        return Str(str);
+        Str(str)
     }
 }
 

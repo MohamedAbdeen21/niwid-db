@@ -24,14 +24,14 @@ impl Table {
     pub fn new(name: String, schema: &Schema) -> Result<Self> {
         let bpm = BufferPool::new();
 
-        let page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
+        let page: *mut TablePage = bpm.lock().new_page()?.get_page_write().into();
 
         let page_id = unsafe { (*page).get_page_id() };
 
         // increment pin count
-        let _ = bpm.write().unwrap().fetch_frame(page_id);
+        let _ = bpm.lock().fetch_frame(page_id);
 
-        let blob_page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
+        let blob_page: *mut TablePage = bpm.lock().new_page()?.get_page_write().into();
 
         Ok(Self {
             name,
@@ -52,25 +52,23 @@ impl Table {
         let bpm = BufferPool::new();
 
         let first_page: *mut TablePage = bpm
-            .write()
-            .unwrap()
+            .lock()
             .fetch_frame(first_page_id)?
             .get_page_write()
             .into();
 
         let last_page: *mut TablePage = if last_page_id != first_page_id {
-            bpm.write()
-                .unwrap()
+            bpm.lock()
                 .fetch_frame(last_page_id)?
                 .get_page_write()
                 .into()
         } else {
             // increment page pin count
-            let _ = bpm.write().unwrap().fetch_frame(first_page_id);
+            let _ = bpm.lock().fetch_frame(first_page_id);
             first_page
         };
 
-        let blob_page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
+        let blob_page: *mut TablePage = bpm.lock().new_page()?.get_page_write().into();
 
         Ok(Self {
             name,
@@ -86,11 +84,6 @@ impl Table {
         &self.name
     }
 
-    #[allow(unused)]
-    pub fn get_schema(&self) -> &Schema {
-        &self.schema
-    }
-
     pub fn get_first_page_id(&self) -> PageId {
         unsafe { self.first_page.as_ref().unwrap() }.get_page_id()
     }
@@ -99,12 +92,12 @@ impl Table {
         unsafe { self.last_page.as_ref().unwrap() }.get_page_id()
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     pub fn get_blob_page_id(&self) -> PageId {
         unsafe { self.blob_page.as_ref().unwrap() }.get_page_id()
     }
 
-    fn to_iter(&self) -> table_iterator::TableIterator {
+    fn iter(&self) -> table_iterator::TableIterator {
         table_iterator::TableIterator::new(self)
     }
 
@@ -122,17 +115,11 @@ impl Table {
         }
 
         // page is full, add another page and link to table
-        let blob_page: *mut TablePage = self
-            .bpm
-            .write()
-            .unwrap()
-            .new_page()?
-            .get_page_write()
-            .into();
+        let blob_page: *mut TablePage = self.bpm.lock().new_page()?.get_page_write().into();
 
         let last_page_id = unsafe { self.blob_page.as_ref().unwrap() }.get_page_id();
 
-        self.bpm.write().unwrap().unpin(&last_page_id);
+        self.bpm.lock().unpin(&last_page_id);
 
         self.blob_page = blob_page;
 
@@ -155,25 +142,27 @@ impl Table {
                 } else {
                     ty.size()
                 };
-                *acc = *acc + size;
+                *acc += size;
                 Some(*acc)
             })
             .collect();
 
         offsets.insert(0, 0);
 
-        let mut data = vec![];
-
-        for (ty, sizes) in self.schema.types.clone().iter().zip(offsets.windows(2)) {
-            let (offset, size) = (sizes[0], sizes[1]);
-            data.extend(match ty {
+        let data = self
+            .schema
+            .types
+            .clone()
+            .iter()
+            .zip(offsets.windows(2).map(|w| (w[0], w[1])))
+            .flat_map(|(ty, (offset, size))| match ty {
                 Types::Str => {
-                    let bytes = &tuple.get_data()[offset..size];
-                    self.insert_string(bytes)?.to_bytes()
+                    let str_bytes = &tuple.get_data()[offset..size];
+                    self.insert_string(str_bytes).unwrap().to_bytes()
                 }
                 _ => tuple.get_data()[offset..size].to_vec(),
-            });
-        }
+            })
+            .collect::<Vec<_>>();
 
         let mut new_tuple = Tuple::from_bytes(&data);
         new_tuple._null_bitmap = tuple._null_bitmap;
@@ -186,8 +175,7 @@ impl Table {
         let (page, slot) = TupleId::from_bytes(tuple_id_data);
         let blob_page: *const TablePage = self
             .bpm
-            .write()
-            .unwrap()
+            .lock()
             .fetch_frame(page)
             .unwrap()
             .get_page_read()
@@ -195,6 +183,14 @@ impl Table {
 
         let tuple = unsafe { blob_page.as_ref().unwrap() }.read_raw(slot);
         Str::from_raw_bytes(tuple.get_data())
+    }
+
+    #[allow(unused)]
+    pub fn fetch_tuple(&self, tuple_id: TupleId) -> Result<Entry> {
+        let (page_id, slot) = tuple_id;
+        let page: *const TablePage = self.bpm.lock().fetch_frame(page_id)?.get_page_read().into();
+
+        Ok(unsafe { page.as_ref().unwrap() }.read_tuple(slot))
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
@@ -210,20 +206,14 @@ impl Table {
         }
 
         // page is full, add another page and link to table
-        let page: *mut TablePage = self
-            .bpm
-            .write()
-            .unwrap()
-            .new_page()?
-            .get_page_write()
-            .into();
+        let page: *mut TablePage = self.bpm.lock().new_page()?.get_page_write().into();
 
         let page_id = unsafe { page.as_ref().unwrap().get_page_id() };
 
         last.set_next_page_id(page_id);
 
         let last_page_id = unsafe { self.last_page.as_ref().unwrap().get_page_id() };
-        self.bpm.write().unwrap().unpin(&last_page_id);
+        self.bpm.lock().unpin(&last_page_id);
 
         self.last_page = page;
 
@@ -231,7 +221,7 @@ impl Table {
     }
 
     pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>) -> Result<()> {
-        self.to_iter().try_for_each(|entry| f(&entry))
+        self.iter().try_for_each(|entry| f(&entry))
     }
 
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
@@ -239,8 +229,7 @@ impl Table {
 
         let page: *mut TablePage = self
             .bpm
-            .write()
-            .unwrap()
+            .lock()
             .fetch_frame(page_id)?
             .get_page_write()
             .into();
@@ -251,7 +240,7 @@ impl Table {
 
         let page_id = unsafe { page.as_ref().unwrap().get_page_id() };
 
-        self.bpm.write().unwrap().unpin(&page_id);
+        self.bpm.lock().unpin(&page_id);
 
         Ok(())
     }
@@ -277,7 +266,7 @@ impl Table {
 
 impl Drop for Table {
     fn drop(&mut self) {
-        let mut bpm = self.bpm.write().unwrap();
+        let mut bpm = self.bpm.lock();
 
         bpm.unpin(&unsafe { self.first_page.as_ref().unwrap() }.get_page_id());
         bpm.unpin(&unsafe { self.last_page.as_ref().unwrap() }.get_page_id());
@@ -287,23 +276,28 @@ impl Drop for Table {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     use super::*;
     use crate::{tuple::schema::Schema, types::*};
     use anyhow::Result;
+    use parking_lot::lock_api::Mutex;
 
-    fn test_table(size: usize, schema: &Schema) -> Result<Table> {
-        let bpm = Arc::new(RwLock::new(BufferPool::init(size)));
+    pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
+        let bpm = Arc::new(Mutex::new(BufferPool::init(size)));
 
-        let page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
+        let mut guard = bpm.lock();
+
+        let page: *mut TablePage = guard.new_page()?.get_page_write().into();
 
         let page_id = unsafe { (*page).get_page_id() };
 
         // increment pin count
-        let _ = bpm.write().unwrap().fetch_frame(page_id);
+        let _ = guard.fetch_frame(page_id);
 
-        let blob_page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
+        let blob_page: *mut TablePage = guard.new_page()?.get_page_write().into();
+
+        drop(guard);
 
         Ok(Table {
             name: "test".to_string(),
@@ -329,7 +323,7 @@ mod tests {
         let page_id = unsafe { table.first_page.as_ref().unwrap().get_page_id() };
 
         drop(table);
-        assert_eq!(1, bpm.read().unwrap().get_pin_count(&page_id).unwrap());
+        assert_eq!(1, bpm.lock().get_pin_count(&page_id).unwrap());
 
         Ok(())
     }
@@ -369,22 +363,10 @@ mod tests {
 
         let third_id = table.get_last_page_id();
 
-        assert_eq!(
-            2,
-            table.bpm.read().unwrap().get_pin_count(&first_id).unwrap()
-        );
-        assert_eq!(
-            2,
-            table.bpm.read().unwrap().get_pin_count(&blob_id).unwrap()
-        );
-        assert_eq!(
-            1,
-            table.bpm.read().unwrap().get_pin_count(&second_id).unwrap()
-        );
-        assert_eq!(
-            2,
-            table.bpm.read().unwrap().get_pin_count(&third_id).unwrap()
-        );
+        assert_eq!(2, table.bpm.lock().get_pin_count(&first_id).unwrap());
+        assert_eq!(2, table.bpm.lock().get_pin_count(&blob_id).unwrap());
+        assert_eq!(1, table.bpm.lock().get_pin_count(&second_id).unwrap());
+        assert_eq!(2, table.bpm.lock().get_pin_count(&third_id).unwrap());
 
         // get count of tuples
         let mut count = 0;
@@ -422,7 +404,7 @@ mod tests {
 
         let mut counter = 0;
 
-        let mut assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
+        let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple = &tuple;
             let tuple_bytes = tuple.get_value_of::<U128>("str", &schema)?.unwrap();
             let string = table.fetch_string(&tuple_bytes.to_bytes());
@@ -438,7 +420,7 @@ mod tests {
             Ok(())
         };
 
-        table.scan(|entry| assert_strings(entry))?;
+        table.scan(assert_strings)?;
 
         Ok(())
     }
@@ -481,7 +463,7 @@ mod tests {
             Ok(())
         };
 
-        table.scan(|entry| assert_strings(entry))?;
+        table.scan(assert_strings)?;
 
         Ok(())
     }

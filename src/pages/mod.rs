@@ -13,7 +13,7 @@ pub const INVALID_PAGE: PageId = -1;
 pub type PageId = i64;
 
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
-/// Other pages must implement From<Page> and Into<Page> traits
+/// Other pages must implement `From<Page>` and `Into<Page>` traits
 #[repr(C, align(4))]
 #[derive(Debug)]
 pub struct Page {

@@ -9,7 +9,7 @@ mod types;
 use anyhow::Result;
 use catalog::Catalog;
 use tuple::{schema::Schema, Tuple};
-use types::{Types, U16, U8};
+use types::{Null, Types, U16, U8};
 
 fn main() -> Result<()> {
     let mut catalog = Catalog::new()?;
@@ -18,6 +18,9 @@ fn main() -> Result<()> {
     let table = catalog.add_table("users", &schema, true)?;
 
     let tuple = Tuple::new(vec![U8(2).into(), U16(3).into()], &schema);
+    table.insert(tuple)?;
+
+    let tuple = Tuple::new(vec![Null().into(), U16(4).into()], &schema);
     table.insert(tuple)?;
 
     drop(catalog);

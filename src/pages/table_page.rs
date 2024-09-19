@@ -47,7 +47,6 @@ impl TablePage {
         self.latch.wunlock();
     }
 
-    #[allow(unused)]
     pub fn get_page_id(&self) -> PageId {
         self.page_id
     }

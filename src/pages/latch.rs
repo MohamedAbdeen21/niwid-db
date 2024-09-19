@@ -5,7 +5,6 @@ pub(super) struct Latch {
     lock: RwLock<()>,
 }
 
-#[allow(unused)]
 impl Latch {
     pub fn new() -> Self {
         Self {
@@ -13,16 +12,18 @@ impl Latch {
         }
     }
 
+    #[allow(unused)]
     pub fn rlock(&self) {
         unsafe { self.lock.raw() }.lock_shared();
     }
 
-    pub fn wlock(&self) {
-        unsafe { self.lock.raw() }.lock_exclusive();
-    }
-
+    #[allow(unused)]
     pub fn runlock(&self) {
         unsafe { self.lock.raw().unlock_shared() };
+    }
+
+    pub fn wlock(&self) {
+        unsafe { self.lock.raw() }.lock_exclusive();
     }
 
     pub fn wunlock(&self) {

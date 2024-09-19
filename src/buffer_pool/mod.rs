@@ -6,13 +6,14 @@ use crate::pages::{Page, PageId, INVALID_PAGE};
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use std::collections::{HashMap, LinkedList};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 const BUFFER_POOL_SIZE: usize = 10_000;
 
 type FrameId = usize;
-pub type BufferPoolManager = Arc<RwLock<BufferPool>>;
+pub type BufferPoolManager = Arc<Mutex<BufferPool>>;
 
 pub struct BufferPool {
     free_frames: LinkedList<FrameId>,
@@ -36,21 +37,15 @@ impl BufferPool {
 
     pub fn init(size: usize) -> Self {
         // takes a few seconds if bp size is too large, can be parallelized.
-        let mut frames = Vec::with_capacity(size);
-        for i in 0..size {
-            frames.push(Frame::new(i));
-        }
+        let frames = (0..size).map(|_| Frame::new()).collect::<Vec<_>>();
 
         let disk_manager = DiskManager::new(DISK_STORAGE);
 
         // make sure catalog page can also be fetched
-        match disk_manager.read_from_file::<Page>(0) {
-            Ok(_) => (),
-            Err(_) => {
-                let mut catalog_page = Page::new();
-                catalog_page.set_page_id(0);
-                disk_manager.write_to_file(&catalog_page).unwrap();
-            }
+        if disk_manager.read_from_file::<Page>(0).is_err() {
+            let mut catalog_page = Page::new();
+            catalog_page.set_page_id(0);
+            disk_manager.write_to_file(&catalog_page).unwrap();
         }
 
         // buffer pool data that must persist on disk e.g. next page id
@@ -159,7 +154,7 @@ impl BufferPool {
         }
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     pub fn get_pin_count(&self, page_id: &PageId) -> Option<u16> {
         let frame_id = *self.page_table.get(page_id)?;
         Some(self.frames[frame_id].get_pin_count())
@@ -168,8 +163,8 @@ impl BufferPool {
 
 fn get_buffer_pool() -> BufferPoolManager {
     lazy_static! {
-        static ref BUFFER_POOL: Arc<RwLock<BufferPool>> =
-            Arc::new(RwLock::new(BufferPool::init(BUFFER_POOL_SIZE)));
+        static ref BUFFER_POOL: BufferPoolManager =
+            Arc::new(Mutex::new(BufferPool::init(BUFFER_POOL_SIZE)));
     }
 
     BUFFER_POOL.clone()
@@ -199,20 +194,19 @@ mod tests {
 
     #[test]
     fn test_dont_evict_pinned() -> Result<()> {
-        let bpm = RwLock::new(BufferPool::init(2));
-        let mut bpmw = bpm.write().unwrap();
+        let mut bpm = BufferPool::init(2);
 
-        let p1: *const TablePage = bpmw.new_page()?.get_page_read().into();
+        let p1: *const TablePage = bpm.new_page()?.get_page_read().into();
 
-        let _: *const TablePage = bpmw.new_page()?.get_page_read().into();
+        let _: *const TablePage = bpm.new_page()?.get_page_read().into();
 
-        assert_eq!(true, bpmw.new_page().is_err());
+        assert!(bpm.new_page().is_err());
 
-        bpmw.unpin(&unsafe { p1.as_ref().unwrap() }.get_page_id());
+        bpm.unpin(&unsafe { p1.as_ref().unwrap() }.get_page_id());
 
-        let _: *const TablePage = bpmw.new_page()?.get_page_read().into();
+        let _: *const TablePage = bpm.new_page()?.get_page_read().into();
 
-        assert_eq!(true, bpmw.new_page().is_err());
+        assert!(bpm.new_page().is_err());
 
         Ok(())
     }

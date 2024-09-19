@@ -13,7 +13,7 @@ pub type Entry = (TupleMetaData, Tuple);
 pub type TupleId = (PageId, usize);
 
 #[repr(C)]
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Tuple {
     /// NOT WRITTEN TO DISK, transferred to metadata during insertion
     /// which eventaully gets written to disk.
@@ -167,7 +167,6 @@ impl TupleMetaData {
 
 pub trait TupleExt {
     fn from_bytes(bytes: &[u8]) -> Self;
-    #[allow(unused)]
     fn to_bytes(&self) -> Vec<u8>;
 }
 
