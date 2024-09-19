@@ -237,12 +237,15 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{tuple::schema::Schema, types::*};
+    use crate::disk_manager::test_path;
+    use crate::tuple::schema::Schema;
+    use crate::types::*;
     use anyhow::Result;
     use parking_lot::FairMutex;
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
-        let bpm = Arc::new(FairMutex::new(BufferPool::init(size)));
+        let path = test_path();
+        let bpm = Arc::new(FairMutex::new(BufferPool::init(size, &path)));
 
         let mut guard = bpm.lock();
 
@@ -267,6 +270,7 @@ mod tests {
         let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
 
         let mut table = test_table(2, &schema)?;
+
         let bpm = table.bpm.clone();
 
         let tuple_data: Vec<Box<dyn AsBytes>> = vec![U8(2).into(), U16(50000).into()];
@@ -284,7 +288,6 @@ mod tests {
     #[test]
     fn test_multiple_pages() -> Result<()> {
         let schema = Schema::new(vec!["a"], vec![Types::U128]);
-
         let mut table = test_table(4, &schema)?;
 
         let first_id = table.get_first_page_id();
@@ -470,6 +473,7 @@ mod tests {
         );
 
         let mut table = test_table(4, &schema)?;
+
         let tuple = Tuple::new(vec![Null().into(), Null().into(), Null().into()], &schema);
         table.insert(tuple)?;
 

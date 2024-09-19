@@ -10,3 +10,4 @@ lazy_static = "1.5.0"
 parking_lot = "0.12.3"
 priority-queue = "2.1.0"
 serde = {version = "1.0.210", features = ["derive"]}
+uuid = {version = "1.10.0", features = ["fast-rng", "v4", "macro-diagnostics"]}

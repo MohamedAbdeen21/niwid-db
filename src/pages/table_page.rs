@@ -358,25 +358,19 @@ mod tests {
 
     #[test]
     fn test_underlying_page_share() -> Result<()> {
-        println!("test_underlying_page_share");
         let page = &mut Page::new();
-        println!("test_underlying_page_share");
         let mut table_page: TablePage = page.into();
         let table_page_2: TablePage = page.into();
 
-        println!("test_underlying_page_share");
         let tuple = Tuple::new(
             vec![U16(300).into()],
             &Schema::new(vec!["a"], vec![Types::U16]),
         );
 
-        println!("{:?}", page.data);
-        println!("inserted");
         table_page.insert_tuple(&tuple)?;
         table_page.insert_tuple(&tuple)?;
 
         assert_eq!(page.read_bytes(PAGE_SIZE - 2, PAGE_SIZE), tuple.to_bytes());
-        println!("{:?}, {:?}", page.data, page.is_dirty());
         assert!(page.is_dirty());
         assert!(table_page.header().is_dirty());
         assert!(table_page_2.header().is_dirty());

@@ -2,12 +2,20 @@ mod shadow_page;
 
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use std::fs::OpenOptions;
-use std::io::prelude::*;
+use std::io::{Read, Write};
 use std::path::Path;
 
 pub const DISK_STORAGE: &str = "data/data/";
+
+#[cfg(test)]
+pub fn test_path() -> String {
+    use uuid::Uuid;
+
+    let id = Uuid::new_v4(); // Generate a unique UUID
+    format!("data/test/test_{}/", id)
+}
 
 #[derive(Debug)]
 pub struct DiskManager {
@@ -29,9 +37,12 @@ pub trait DiskWritable: Serialize {
 // TODO: Find a way to do Direct IO
 impl DiskManager {
     pub fn new(path: &str) -> Self {
+        let path = Path::new(path);
+
         std::fs::create_dir_all(path).unwrap();
+
         Self {
-            path: path.to_string(),
+            path: path.to_str().unwrap().to_string(),
         }
     }
 
@@ -49,34 +60,91 @@ impl DiskManager {
             .write(true)
             .create(true)
             .truncate(false) // don't overwrite existing file
-            .open(path)
-            .expect("file opened successfully");
+            .open(path)?;
 
         file.write_all(page.to_bytes())
             .expect("file written successfully");
+
         Ok(())
     }
 
     pub fn read_from_file<T: DiskWritable>(&self, page_id: PageId) -> Result<T> {
+        if page_id == INVALID_PAGE {
+            return Err(anyhow!("Asked to read a page with invalid ID"));
+        }
+
         let path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
 
-        let mut file = OpenOptions::new().read(true).open(path)?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(path)
+            .context("file opened for reading")?;
 
         let mut buffer = vec![0u8; T::size()];
-        file.read_exact(&mut buffer)?;
+        file.read_exact(&mut buffer)
+            .expect("Failed to read buffer from disk");
         let mut page = T::from_bytes(&buffer);
         page.set_page_id(page_id);
+
         Ok(page)
     }
 
     #[allow(dead_code)]
-    pub fn shadow_page(&self, _page_id: PageId) -> Result<()> {
-        todo!()
+    pub fn start_transaction(&self, transaction_id: u64) -> Result<()> {
+        let trans_cache = Path::join(
+            Path::new(&self.path),
+            Path::new(&transaction_id.to_string()),
+        );
+
+        std::fs::create_dir_all(&trans_cache)?;
+
+        Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn commit_shadow(&self, _page_id: PageId) -> Result<()> {
-        todo!()
+    pub fn shadow_page<T: DiskWritable>(&self, transaction_id: u64, page_id: PageId) -> Result<T> {
+        let trans_cache = Path::join(
+            Path::new(&self.path),
+            Path::new(&transaction_id.to_string()),
+        );
+
+        let to_path = Path::join(Path::new(&trans_cache), Path::new(&page_id.to_string()));
+        let from_path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
+
+        std::fs::copy(&from_path, &to_path)?;
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .open(to_path)
+            .context("file opened for reading")?;
+
+        let mut buffer = vec![0u8; T::size()];
+        file.read_exact(&mut buffer)
+            .expect("Failed to read buffer from disk");
+        let mut page = T::from_bytes(&buffer);
+        page.set_page_id(page_id);
+
+        Ok(page)
+    }
+
+    #[allow(dead_code)]
+    pub fn commit_transaction(&self, transaction_id: u64) -> Result<()> {
+        let trans_cache = Path::join(
+            Path::new(&self.path),
+            Path::new(&transaction_id.to_string()),
+        );
+
+        let trans_cache_committed = Path::join(
+            Path::new(&self.path),
+            Path::new(&format!("{}.committed", transaction_id)),
+        );
+
+        // should be atomic
+        std::fs::rename(&trans_cache, &trans_cache_committed)?;
+
+        std::fs::remove_dir_all(trans_cache_committed)?;
+
+        Ok(())
     }
 }
 
@@ -87,13 +155,7 @@ mod tests {
     use crate::tuple::schema::Schema;
     use crate::types::Types;
     use crate::{pages::table_page::TablePage, tuple::Tuple, types::Str};
-    use std::fs::remove_file;
-
-    const TEST_PATH: &str = "data/test/";
-
-    fn cleanup_disk(page: String) -> Result<()> {
-        Ok(remove_file(format!("{}/{}", TEST_PATH, page))?)
-    }
+    use std::fs::remove_dir_all;
 
     #[test]
     fn test_write_then_read() -> Result<()> {
@@ -102,7 +164,9 @@ mod tests {
         let mut page = Page::new();
         page.set_page_id(page_id);
 
-        let disk = DiskManager::new(TEST_PATH);
+        let path = test_path();
+
+        let disk = DiskManager::new(&path);
         disk.write_to_file(&page)?;
 
         let read_page = disk.read_from_file::<Page>(page_id)?;
@@ -111,14 +175,16 @@ mod tests {
         assert_eq!(read_page.get_page_id(), page.get_page_id());
         assert_eq!(read_page.to_bytes(), page.to_bytes());
 
-        cleanup_disk(page_id.to_string())?;
+        remove_dir_all(path)?;
 
         Ok(())
     }
 
     #[test]
     fn test_write_bytes_then_read() -> Result<()> {
-        let disk = DiskManager::new(TEST_PATH);
+        let path = test_path();
+
+        let disk = DiskManager::new(&path);
         let page_id = 8888;
 
         let page = &mut Page::new();
@@ -138,7 +204,7 @@ mod tests {
 
         assert_eq!(read_tuple.get_data(), tuple.get_data());
 
-        cleanup_disk(page_id.to_string())?;
+        remove_dir_all(path)?;
 
         Ok(())
     }

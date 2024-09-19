@@ -6,7 +6,7 @@ use crate::types::{AsBytes, Str, Types, I128, I64};
 use anyhow::{anyhow, Result};
 
 // preserve page_id 0 for catalog, bpm starts assigning at 1
-const CATALOG_PAGE: PageId = 0;
+pub const CATALOG_PAGE: PageId = 1;
 const CATALOG_NAME: &str = "__CATALOG__";
 
 pub struct Catalog {

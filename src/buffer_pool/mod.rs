@@ -1,6 +1,7 @@
 mod frame;
 mod replacer;
 
+use crate::catalog::CATALOG_PAGE;
 use crate::disk_manager::{DiskManager, DISK_STORAGE};
 use crate::pages::{Page, PageId, INVALID_PAGE};
 use anyhow::{anyhow, Result};
@@ -11,6 +12,7 @@ use std::collections::{HashMap, LinkedList};
 use std::sync::Arc;
 
 const BUFFER_POOL_SIZE: usize = 10_000;
+const BUFFER_POOL_PAGE: PageId = 0;
 
 type FrameId = usize;
 pub type BufferPoolManager = Arc<FairMutex<BufferPool>>;
@@ -35,25 +37,26 @@ impl BufferPool {
         println!("Page Table: {:?}", self.page_table);
     }
 
-    pub fn init(size: usize) -> Self {
+    pub fn init(size: usize, path: &str) -> Self {
         // takes a few seconds if bp size is too large, can be parallelized.
         let frames = (0..size).map(|_| Frame::new()).collect::<Vec<_>>();
 
-        let disk_manager = DiskManager::new(DISK_STORAGE);
+        let disk_manager = DiskManager::new(path);
 
         // make sure catalog page can also be fetched
-        if disk_manager.read_from_file::<Page>(0).is_err() {
+        if disk_manager.read_from_file::<Page>(CATALOG_PAGE).is_err() {
             let mut catalog_page = Page::new();
-            catalog_page.set_page_id(0);
+            catalog_page.set_page_id(CATALOG_PAGE);
             disk_manager.write_to_file(&catalog_page).unwrap();
         }
 
         // buffer pool data that must persist on disk e.g. next page id
-        let next_page_id = match disk_manager.read_from_file(PageId::MAX) {
+        let next_page_id = match disk_manager.read_from_file(BUFFER_POOL_PAGE) {
             Ok(page) => page,
             Err(_) => {
                 let mut page = Page::new();
-                page.set_page_id(PageId::MAX);
+                page.set_page_id(BUFFER_POOL_PAGE);
+                page.write_bytes(2, 10, &1_i64.to_ne_bytes());
                 page
             }
         };
@@ -64,7 +67,7 @@ impl BufferPool {
             page_table: HashMap::new(),
             replacer: Box::new(replacer::LRU::new(size)),
             disk_manager,
-            // page_id 0 is preserved for catalog
+            // page_id 0 is preserved for bp [`BUFFER_POOL_PAGE`], and 1 for catalog [`CATALOG_PAGE`]
             next_page_id,
         }
     }
@@ -160,7 +163,7 @@ impl BufferPool {
     }
 
     #[allow(dead_code)]
-    pub fn shadow_page(&mut self, _page_id: PageId, _page: Page) {
+    pub fn shadow_page(&mut self, _page_id: PageId, _page: Page) -> Result<&mut Frame> {
         todo!()
     }
 
@@ -172,8 +175,10 @@ impl BufferPool {
 
 fn get_buffer_pool() -> BufferPoolManager {
     lazy_static! {
-        static ref BUFFER_POOL: BufferPoolManager =
-            Arc::new(FairMutex::new(BufferPool::init(BUFFER_POOL_SIZE)));
+        static ref BUFFER_POOL: BufferPoolManager = Arc::new(FairMutex::new(BufferPool::init(
+            BUFFER_POOL_SIZE,
+            DISK_STORAGE
+        )));
     }
 
     BUFFER_POOL.clone()
@@ -197,11 +202,20 @@ impl Drop for BufferPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::disk_manager::test_path;
     use anyhow::Result;
+
+    fn cleanup(bpm: BufferPool, path: &str) -> Result<()> {
+        drop(bpm);
+        std::fs::remove_dir_all(&path)?;
+        Ok(())
+    }
 
     #[test]
     fn test_dont_evict_pinned() -> Result<()> {
-        let mut bpm = BufferPool::init(2);
+        let path = test_path();
+
+        let mut bpm = BufferPool::init(2, &path);
 
         let p1 = bpm.new_page()?.reader().get_page_id();
         let p2 = bpm.new_page()?.reader().get_page_id();
@@ -220,12 +234,16 @@ mod tests {
 
         assert!(bpm.new_page().is_err());
 
+        cleanup(bpm, &path)?;
+
         Ok(())
     }
 
     #[test]
     fn test_shared_latch() -> Result<()> {
-        let mut bpm = BufferPool::init(2);
+        let path = test_path();
+
+        let mut bpm = BufferPool::init(2, &path);
 
         let frame = bpm.new_page()?;
         let page = frame.writer();
@@ -233,6 +251,8 @@ mod tests {
         page.wlock();
         assert!(frame.latch.is_locked());
         frame.latch.wunlock();
+
+        cleanup(bpm, &path)?;
 
         Ok(())
     }
