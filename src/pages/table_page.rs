@@ -1,4 +1,4 @@
-use super::{traits::Serialize, PageId, INVALID_PAGE};
+use super::{latch::Latch, traits::Serialize, PageId, INVALID_PAGE};
 use crate::tuple::{Entry, Tuple, TupleMetaData};
 
 use super::{Page, PAGE_SIZE};
@@ -57,11 +57,12 @@ struct TablePageData {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TablePage {
     data: TablePageData,
     is_dirty: bool,
     page_id: PageId,
+    latch: Latch,
 }
 
 impl TablePage {
@@ -69,8 +70,14 @@ impl TablePage {
         &self.data.header
     }
 
-    pub fn header_mut(&mut self) -> &mut TablePageHeader {
+    fn header_mut(&mut self) -> &mut TablePageHeader {
         &mut self.data.header
+    }
+
+    pub fn set_next_page_id(&mut self, page_id: PageId) {
+        self.latch.wlock();
+        self.header_mut().set_next_page_id(page_id);
+        self.latch.wunlock();
     }
 
     #[allow(unused)]
@@ -130,8 +137,11 @@ impl TablePage {
     /// similar to insert tuple but avoids adding the tuple metadata
     /// used mainly in blob pages
     pub fn insert_raw(&mut self, tuple: &Tuple) -> Result<TupleId> {
+        self.latch.wlock();
+
         let tuple_size = tuple.len();
         if tuple_size + SLOT_SIZE > self.free_space() {
+            self.latch.wunlock();
             return Err(anyhow!("Not enough space to insert tuple"));
         }
 
@@ -152,12 +162,17 @@ impl TablePage {
         self.header_mut().add_tuple();
         self.is_dirty |= true;
 
+        self.latch.wunlock();
+
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
 
     pub fn insert_tuple(&mut self, tuple: &Tuple) -> Result<TupleId> {
+        self.latch.wlock();
+
         let entry_size = tuple.len() + META_SIZE;
         if entry_size + SLOT_SIZE > self.free_space() {
+            self.latch.wunlock();
             return Err(anyhow!("Not enough space to insert tuple"));
         }
 
@@ -181,10 +196,13 @@ impl TablePage {
         self.header_mut().add_tuple();
         self.is_dirty |= true;
 
+        self.latch.wunlock();
+
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
 
     pub fn delete_tuple(&mut self, slot: usize) {
+        let _wguard = self.latch.wguard();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
         let mut deleted_meta = TupleMetaData::new();
@@ -196,6 +214,7 @@ impl TablePage {
     }
 
     pub fn read_tuple(&self, slot: usize) -> Entry {
+        let _rguard = self.latch.rguard();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
         let meta_offset = slot.offset as usize;
@@ -211,6 +230,7 @@ impl TablePage {
 
     /// Read tuple data without the metadata
     pub fn read_raw(&self, slot: usize) -> Tuple {
+        let _rguard = self.latch.rguard();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
         let tuple_offset = slot.offset as usize;
@@ -224,38 +244,30 @@ impl TablePage {
 
 impl<'a> From<&'a mut Page> for *mut TablePage {
     fn from(page: &'a mut Page) -> *mut TablePage {
+        let p = page as *mut Page as *mut TablePage;
         unsafe {
-            let p = page as *mut Page as *mut TablePage;
             (*p).set_page_id(page.get_page_id());
             (*p).is_dirty = page.is_dirty();
             if (*p).header().get_next_page() == 0 {
                 (*p).header_mut().set_next_page_id(INVALID_PAGE);
             }
-            p
-        }
-    }
-}
-
-impl<'a> From<&'a Page> for TablePage {
-    fn from(page: &'a Page) -> TablePage {
-        let mut p = unsafe { (page as *const Page as *const TablePage).as_ref().unwrap() }.clone();
-        p.set_page_id(page.get_page_id());
-        p.is_dirty = page.is_dirty();
-        if p.header().get_next_page() == 0 {
-            p.header_mut().set_next_page_id(INVALID_PAGE);
         }
         p
     }
 }
 
-// impl From<&Page> for TablePage {
-//     fn from(page: &Page) -> Self {
-//         let mut p = Self::from_bytes(page.as_bytes());
-//         p.set_page_id(page.get_page_id());
-//         p.is_dirty = page.is_dirty();
-//         p
-//     }
-// }
+impl<'a> From<&'a Page> for *const TablePage {
+    fn from(page: &'a Page) -> *const TablePage {
+        let table_page_pointer: *mut TablePage = page as *const Page as *mut TablePage;
+        let p = unsafe { table_page_pointer.as_mut() }.unwrap();
+        p.set_page_id(page.get_page_id());
+        p.is_dirty = page.is_dirty();
+        if p.header().get_next_page() == 0 {
+            p.header_mut().set_next_page_id(INVALID_PAGE);
+        }
+        p as *const TablePage
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

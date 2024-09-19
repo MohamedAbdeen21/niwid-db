@@ -1,6 +1,5 @@
-use std::sync::RwLock;
-
 use crate::buffer_pool::{BufferPool, BufferPoolManager};
+use crate::pages::table_page::TupleId;
 use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
@@ -15,9 +14,9 @@ const CATALOG_NAME: &str = "__CATALOG__";
 
 #[allow(unused)]
 pub struct Catalog {
-    table: Table,               // first page of the catalog
-    tables: Vec<RwLock<Table>>, // TODO: handle ownership
-    schema: Schema,             // A catalog is itself a table
+    table: Table,       // first page of the catalog
+    tables: Vec<Table>, // TODO: handle ownership
+    schema: Schema,     // A catalog is itself a table
     bpm: BufferPoolManager,
 }
 
@@ -37,16 +36,16 @@ impl Catalog {
             CATALOG_PAGE,
         )?;
 
-        let mut tables: Vec<RwLock<Table>> = vec![];
-        let mut table_builder = |(_, tuple): &Entry| {
+        let mut tables: Vec<Table> = vec![];
+        let mut table_builder = |(_, (_, tuple)): &(TupleId, Entry)| {
             let name_bytes = tuple.get_value::<I128>("table_name", &schema).unwrap();
             let name = table.fetch_string(&name_bytes.to_bytes());
             let first_page_id = tuple.get_value::<I64>("first_page", &schema).unwrap().0 as PageId;
             let last_page_id = tuple.get_value::<I64>("last_page", &schema).unwrap().0 as PageId;
 
-            tables.push(RwLock::new(
+            tables.push(
                 Table::fetch(name.0, &schema, first_page_id, last_page_id).expect("Fetch failed"),
-            ))
+            )
         };
 
         table.scan(table_builder);
@@ -64,7 +63,7 @@ impl Catalog {
         table_name: &str,
         schema: &Schema,
         ignore_if_exists: bool,
-    ) -> Result<&RwLock<Table>> {
+    ) -> Result<&mut Table> {
         if self.get_table(table_name).is_some() {
             if ignore_if_exists {
                 return Ok(self.get_table(table_name).unwrap());
@@ -80,22 +79,22 @@ impl Catalog {
             // Str(schema.to_string()).to_bytes(), // TODO: Handle schema serialization
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);
-        println!(
-            "Inserting tuple {:?}: {:?}: {:?}",
-            tuple,
-            table.get_first_page_id(),
-            table.get_last_page_id()
-        );
         self.table.insert(tuple)?;
 
-        self.tables.push(RwLock::new(table));
+        self.tables.push(table);
 
-        Ok(self.tables.last().unwrap())
+        Ok(self.tables.last_mut().unwrap())
     }
 
-    pub fn get_table(&self, table_name: &str) -> Option<&RwLock<Table>> {
+    pub fn get_table(&mut self, table_name: &str) -> Option<&mut Table> {
         self.tables
-            .iter()
-            .find(|table| table.read().unwrap().get_name() == table_name)
+            .iter_mut()
+            .find(|table| table.get_name() == table_name)
     }
 }
+
+// impl Drop for Catalog {
+//     fn drop(&mut self) {
+//         self.bpm.unpin(&self.table.get());
+//     }
+// }

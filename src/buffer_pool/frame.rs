@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU16, Ordering};
+
 use crate::pages::Page;
 
 use super::FrameId;
@@ -6,7 +8,7 @@ use super::FrameId;
 pub struct Frame {
     id: FrameId,
     page: Page,
-    counter: u16,
+    counter: AtomicU16,
 }
 
 #[allow(unused)]
@@ -15,7 +17,7 @@ impl Frame {
         Self {
             id,
             page: Page::new(),
-            counter: 1,
+            counter: AtomicU16::new(1),
         }
     }
 
@@ -24,15 +26,15 @@ impl Frame {
     }
 
     pub(super) fn pin(&mut self) {
-        self.counter += 1;
+        self.counter.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(super) fn unpin(&mut self) {
-        self.counter -= 1;
+        self.counter.fetch_sub(1, Ordering::Relaxed);
     }
 
     pub(super) fn get_pin_count(&self) -> u16 {
-        self.counter
+        self.counter.load(Ordering::Relaxed)
     }
 
     pub(super) fn set_page(&mut self, page: Page) {

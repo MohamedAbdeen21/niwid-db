@@ -19,14 +19,14 @@ fn main() -> Result<()> {
 
     let tuple_data = vec![U8(2).to_bytes(), U16(3).to_bytes()];
     let tuple = Tuple::new(tuple_data, &schema);
-    table.write().unwrap().insert(tuple)?;
+    table.insert(tuple)?;
 
     drop(catalog);
 
-    let catalog = Catalog::new()?;
+    let mut catalog = Catalog::new()?;
     let table = catalog.get_table("users").unwrap();
 
-    table.read().unwrap().scan(|entry| println!("{:?}", entry));
+    table.scan(|entry| println!("{:?}", entry));
 
     Ok(())
     //
@@ -53,35 +53,3 @@ fn main() -> Result<()> {
     //
     // Ok(())
 }
-
-// fn insert_write_read(table: &mut Table) -> Result<()> {
-// println!("Data after write: {:?}", table_page);
-//
-// bp.write_to_file(table_page, path)?;
-//
-// let mut loaded_data = disk.read_from_file::<TablePage>(path, 0)?;
-//
-// println!("Data after write: {:?}", loaded_data);
-//
-// let t1 = loaded_data.read_tuple(0);
-// println!("Data after write: {:?}", t1);
-//
-// let t2 = loaded_data.read_tuple(1);
-// println!("Data after write: {:?}", t2);
-//
-// // let t3 = loaded_data.read_tuple(2);
-// // println!("Data after write: {:?}", t3);
-//
-// loaded_data.delete_tuple(0);
-//
-// let t1 = loaded_data.read_tuple(0);
-// println!("Data after write: {:?}", t1);
-//
-// println!("{}", t1.1.get_value::<U16>("age", &schema)?.0);
-//
-// table.delete(1);
-//
-// // std::fs::remove_file(path)?;
-
-//     Ok(())
-// }

@@ -1,6 +1,8 @@
+mod latch;
 pub(crate) mod table_page;
 pub(crate) mod traits;
 
+use latch::Latch;
 use traits::Serialize;
 
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
@@ -17,6 +19,7 @@ pub struct Page {
     data: [u8; PAGE_SIZE],
     is_dirty: bool,
     page_id: PageId,
+    latch: Latch,
 }
 
 impl Serialize for Page {
@@ -44,6 +47,7 @@ impl Page {
             data: [0u8; PAGE_SIZE],
             is_dirty: false,
             page_id: INVALID_PAGE,
+            latch: Latch::new(),
         }
     }
 

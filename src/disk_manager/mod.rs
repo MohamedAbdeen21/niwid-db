@@ -109,8 +109,8 @@ mod tests {
 
         disk.write_to_file(page)?;
 
-        let page: TablePage = (&disk.read_from_file(page_id)?).into();
-        let read_tuple = page.read_raw(write_slot_id);
+        let page: *const TablePage = (&disk.read_from_file(page_id)?).into();
+        let read_tuple = unsafe { page.as_ref().unwrap() }.read_raw(write_slot_id);
 
         assert_eq!(read_tuple.get_data(), tuple.get_data());
 

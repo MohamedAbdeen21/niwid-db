@@ -205,7 +205,7 @@ impl Table {
     /// (page_id, slot_id)
     pub fn fetch_string(&self, tuple_id_data: &[u8]) -> Str {
         let (page, slot) = TupleId::from_bytes(tuple_id_data);
-        let blob_page: TablePage = self
+        let blob_page: *const TablePage = self
             .bpm
             .write()
             .unwrap()
@@ -214,7 +214,7 @@ impl Table {
             .get_page_read()
             .into();
 
-        let tuple = blob_page.read_raw(slot);
+        let tuple = unsafe { blob_page.as_ref().unwrap() }.read_raw(slot);
         let string = String::from_utf8(tuple.get_data().to_vec()).unwrap();
         Str(string)
     }
@@ -242,7 +242,7 @@ impl Table {
 
         let page_id = unsafe { page.as_ref().unwrap().get_page_id() };
 
-        last.header_mut().set_next_page_id(page_id);
+        last.set_next_page_id(page_id);
 
         let last_page_id = unsafe {
             self.last_page
@@ -268,11 +268,10 @@ impl Table {
         Ok(())
     }
 
-    pub fn scan(&self, mut f: impl FnMut(&Entry)) {
+    pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry))) {
         self.to_iter().for_each(|entry| f(&entry))
     }
 
-    #[allow(unused)]
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
         let (page_id, slot_id) = id;
 
@@ -293,6 +292,23 @@ impl Table {
         self.bpm.write().unwrap().unpin(&page_id);
 
         Ok(())
+    }
+
+    #[allow(unused)]
+    pub fn update(&mut self, old_tuple: Tuple, new_tuple: Tuple) -> Result<()> {
+        let mut tuple_id = None;
+        self.scan(|(id, (_, tuple))| {
+            if *tuple == old_tuple {
+                tuple_id = Some(*id)
+            }
+        });
+
+        if tuple_id.is_none() {
+            return Err(anyhow!("Tuple not found"));
+        }
+
+        self.delete(tuple_id.unwrap())?;
+        self.insert(new_tuple)
     }
 }
 
@@ -462,7 +478,7 @@ mod tests {
 
         let mut counter = 0;
 
-        let mut assert_strings = |(_, tuple): &Entry| {
+        let mut assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple = &tuple;
             let tuple_bytes = tuple.get_value::<U128>("str", &schema).unwrap();
             let string = table.fetch_string(&tuple_bytes.to_bytes());

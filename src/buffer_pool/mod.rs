@@ -201,15 +201,15 @@ mod tests {
         let bpm = RwLock::new(BufferPool::init(2));
         let mut bpmw = bpm.write().unwrap();
 
-        let p1: TablePage = bpmw.new_page()?.get_page_read().into();
+        let p1: *const TablePage = bpmw.new_page()?.get_page_read().into();
 
-        let _: TablePage = bpmw.new_page()?.get_page_read().into();
+        let _: *const TablePage = bpmw.new_page()?.get_page_read().into();
 
         assert_eq!(true, bpmw.new_page().is_err());
 
-        bpmw.unpin(&p1.get_page_id());
+        bpmw.unpin(&unsafe { p1.as_ref().unwrap() }.get_page_id());
 
-        let _: TablePage = bpmw.new_page()?.get_page_read().into();
+        let _: *const TablePage = bpmw.new_page()?.get_page_read().into();
 
         assert_eq!(true, bpmw.new_page().is_err());
 

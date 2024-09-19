@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 pub type Entry = (TupleMetaData, Tuple);
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Tuple {
     data: Box<[u8]>,
 }
