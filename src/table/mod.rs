@@ -6,7 +6,7 @@ use crate::pages::{
 };
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
-use crate::types::{AsBytes, Str, Types, STR_DELIMITER};
+use crate::types::{AsBytes, Str, Types, U16};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
@@ -108,13 +108,13 @@ impl Table {
         table_iterator::TableIterator::new(self)
     }
 
-    fn insert_string(&mut self, string: String) -> Result<TupleId> {
-        if string.len() > PAGE_END - SLOT_SIZE {
+    fn insert_string(&mut self, bytes: &[u8]) -> Result<TupleId> {
+        if bytes.len() > PAGE_END - SLOT_SIZE {
             return Err(anyhow!("Tuple is too long"));
         }
 
         let dummy_schema = Schema::new(vec![], vec![]);
-        let tuple = Tuple::new(vec![Str(string).into()], &dummy_schema);
+        let tuple = Tuple::new(vec![Str::from_bytes(bytes).into()], &dummy_schema);
 
         let blob = unsafe { self.blob_page.as_mut().unwrap() };
 
@@ -141,31 +141,46 @@ impl Table {
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
+        println!("inserting: {:?}", tuple);
         if !self.schema.types.contains(&Types::Str) {
             return Ok(tuple);
         }
 
-        let mut string = "".to_string();
-        let mut processed_data = Vec::with_capacity(tuple.len());
-        let mut inside = false;
+        let mut offsets: Vec<_> = self
+            .schema
+            .types
+            .iter()
+            .scan(0, |acc, ty| {
+                let size = if ty == &Types::Str {
+                    let slice = &tuple.get_data()[*acc..*acc + 2];
+                    println!("slice: {:?}", slice);
+                    U16::from_bytes(slice).0 as usize + 2
+                } else {
+                    ty.size()
+                };
+                *acc = *acc + size;
+                println!("size: {size}, type: {ty:?}");
+                Some(*acc)
+            })
+            .collect();
 
-        let delimiter = STR_DELIMITER as u8;
-        for byte in tuple.get_data().iter() {
-            if inside && byte != &delimiter {
-                string.push(*byte as char);
-            } else if inside && byte == &delimiter {
-                let tuple_id: TupleId = self.insert_string(string.clone())?;
-                string.clear();
-                processed_data.extend(tuple_id.to_bytes());
-                inside = false;
-            } else if !inside && byte == &delimiter {
-                inside = true;
+        offsets.insert(0, 0);
+        println!("offsets: {:?}", offsets);
+
+        let mut data = vec![];
+
+        for (ty, sizes) in self.schema.types.clone().iter().zip(offsets.windows(2)) {
+            let (offset, size) = (sizes[0], sizes[1]);
+            println!("offset: {offset}, size: {size}");
+            data.extend(if ty == &Types::Str {
+                let bytes = &tuple.get_data()[offset..size];
+                self.insert_string(bytes)?.to_bytes()
             } else {
-                processed_data.push(*byte);
-            }
+                tuple.get_data()[offset..size].to_vec()
+            });
         }
 
-        let mut new_tuple = Tuple::from_bytes(&processed_data);
+        let mut new_tuple = Tuple::from_bytes(&data);
         new_tuple._null_bitmap = tuple._null_bitmap;
         Ok(new_tuple)
     }

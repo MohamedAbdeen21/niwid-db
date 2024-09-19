@@ -131,7 +131,6 @@ impl Catalog {
             .iter()
             .position(|(_, table)| table.get_name() == table_name)?;
 
-        println!("index: {index}");
         self.tables.remove(index);
 
         Some(())
