@@ -25,16 +25,10 @@ impl Frame {
 
     pub(super) fn pin(&mut self) {
         self.counter += 1;
-        println!("Pinned frame {}: Count {:?}", self.id, self.get_pin_count());
     }
 
     pub(super) fn unpin(&mut self) {
         self.counter -= 1;
-        println!(
-            "Unpinned frame {}: Count {:?}",
-            self.id,
-            self.get_pin_count()
-        );
     }
 
     pub(super) fn get_pin_count(&self) -> u16 {

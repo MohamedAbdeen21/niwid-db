@@ -61,7 +61,8 @@ impl Tuple {
             .take(field_id as usize)
             .fold(0, |acc, t| acc + t.size());
 
-        Ok(T::from_bytes(&self.data[offset..offset + dtype.size()]))
+        let slice = &self.data[offset..offset + dtype.size()];
+        Ok(T::from_bytes(slice))
     }
 
     pub fn get_data(&self) -> &[u8] {

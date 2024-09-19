@@ -20,7 +20,7 @@ pub struct BufferPool {
     page_table: HashMap<PageId, FrameId>,
     replacer: Box<dyn replacer::Replacer>,
     disk_manager: DiskManager,
-    next_page_id: PageId,
+    next_page_id: Page,
 }
 
 impl BufferPool {
@@ -40,24 +40,50 @@ impl BufferPool {
             frames.push(Frame::new(i));
         }
 
+        // make sure catalog page can also be fetched
+        let disk_manager = DiskManager::new("data/test.db");
+
+        match disk_manager.read_from_file(0) {
+            Ok(_) => (),
+            Err(_) => {
+                let mut catalog_page = Page::new();
+                catalog_page.set_page_id(0);
+                disk_manager.write_to_file(&catalog_page).unwrap();
+            }
+        }
+
+        let next_page_id = match disk_manager.read_from_file(PageId::max_value()) {
+            Ok(page) => page,
+            Err(_) => {
+                let mut page = Page::new();
+                page.set_page_id(PageId::max_value());
+                page
+            }
+        };
+
         Self {
             free_frames: LinkedList::from_iter(0..size),
             frames: frames.into_boxed_slice(),
             page_table: HashMap::new(),
             replacer: Box::new(replacer::LRU::new(size)),
-            disk_manager: DiskManager::new("data/test.db"),
+            disk_manager,
             // page_id 0 is preserved for catalog
-            next_page_id: 1,
+            next_page_id,
         }
     }
 
+    pub fn increment_page_id(&mut self) -> Result<PageId> {
+        let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(0, 8).try_into().unwrap());
+        self.next_page_id.write_bytes(0, 8, &(id + 1).to_ne_bytes());
+        self.disk_manager.write_to_file(&self.next_page_id)?;
+        Ok(id + 1)
+    }
+
     pub fn fetch_frame(&mut self, page_id: PageId) -> Result<&mut Frame> {
-        println!("fetching frame {}", page_id);
         let frame_id = if let Some(frame_id) = self.page_table.get(&page_id) {
             *frame_id
         } else {
-            println!("reading frame {}", page_id);
-            let page = self.disk_manager.read_from_file(page_id).unwrap();
+            let page = self.disk_manager.read_from_file(page_id)?;
             let frame_id = if !self.free_frames.is_empty() {
                 self.free_frames.pop_front().unwrap()
             } else if self.replacer.can_evict() {
@@ -88,15 +114,16 @@ impl BufferPool {
             return Err(anyhow!("no free frames to evict"));
         };
 
+        let page_id = self.increment_page_id()?;
+
         let frame = &mut self.frames[frame_id];
         frame.pin();
         self.replacer.record_access(frame_id);
 
-        let page_id = self.next_page_id;
-        self.next_page_id += 1;
-
         let mut page = Page::new();
         page.set_page_id(page_id);
+        self.disk_manager.write_to_file(&page)?;
+
         frame.set_page(page);
         self.page_table.insert(page_id, frame_id);
 
@@ -111,10 +138,6 @@ impl BufferPool {
 
         self.page_table.remove(&page.get_page_id());
 
-        if page.is_dirty() {
-            self.disk_manager.write_to_file(page).unwrap();
-        }
-
         frame_id
     }
 
@@ -125,6 +148,13 @@ impl BufferPool {
 
         if frame.get_pin_count() == 1 {
             self.replacer.set_evictable(frame_id, true);
+        }
+
+        // TODO: fix this
+        if frame.get_page_read().is_dirty() {
+            self.disk_manager
+                .write_to_file(frame.get_page_write())
+                .unwrap();
         }
     }
 

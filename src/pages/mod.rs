@@ -58,4 +58,13 @@ impl Page {
     pub fn set_page_id(&mut self, page_id: PageId) {
         self.page_id = page_id;
     }
+
+    pub fn read_bytes(&self, start: usize, end: usize) -> &[u8] {
+        &self.data[start..end]
+    }
+
+    pub fn write_bytes(&mut self, start: usize, end: usize, bytes: &[u8]) {
+        self.data[start..end].copy_from_slice(bytes);
+        self.is_dirty = true;
+    }
 }

@@ -1,5 +1,7 @@
 use crate::pages::table_page::TupleId;
 
+pub const STR_DELIMITER: char = '#';
+
 #[allow(unused)]
 #[derive(PartialEq, Eq, Clone)]
 pub enum Types {
@@ -360,16 +362,17 @@ impl Primitive for Str {
     }
     fn to_bytes(&self) -> Box<[u8]> {
         let mut str = self.0.clone();
-        str.insert(0, '\0');
-        str.push('\0');
+        str.insert(0, STR_DELIMITER);
+        str.push(STR_DELIMITER);
         str.as_bytes().to_vec().into_boxed_slice()
     }
     fn from_bytes(bytes: &[u8]) -> Self {
+        let delimiter_byte = STR_DELIMITER as u8;
         let mut v = bytes.to_vec();
-        if v.first() == Some(&b'\0') {
+        if v.first() == Some(&delimiter_byte) {
             v.remove(0);
         }
-        if v.last() == Some(&b'\0') {
+        if v.last() == Some(&delimiter_byte) {
             v.pop();
         }
         Str(String::from_utf8(v).unwrap())

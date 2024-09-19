@@ -61,12 +61,12 @@ mod tests {
         tuple::{schema::Schema, Tuple},
         types::{Primitive, Str, Types},
     };
-    use std::fs::remove_dir_all;
+    use std::fs::remove_file;
 
     const TEST_PATH: &str = "data/test/";
 
-    fn cleanup_disk(dm: DiskManager) -> Result<()> {
-        Ok(remove_dir_all(dm.path)?)
+    fn cleanup_disk(page: String) -> Result<()> {
+        Ok(remove_file(format!("{}/{}", TEST_PATH, page))?)
     }
 
     #[test]
@@ -85,7 +85,7 @@ mod tests {
         assert_eq!(read_page.get_page_id(), page.get_page_id());
         assert_eq!(read_page.to_bytes(), page.to_bytes());
 
-        cleanup_disk(disk)?;
+        cleanup_disk(page_id.to_string())?;
 
         Ok(())
     }
@@ -114,7 +114,7 @@ mod tests {
 
         assert_eq!(read_tuple.get_data(), tuple.get_data());
 
-        cleanup_disk(disk)?;
+        cleanup_disk(page_id.to_string())?;
 
         Ok(())
     }

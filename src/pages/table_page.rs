@@ -6,12 +6,12 @@ use anyhow::{anyhow, Result};
 use std::{mem, slice};
 
 const HEADER_SIZE: usize = mem::size_of::<TablePageHeader>();
-const SLOT_SIZE: usize = mem::size_of::<TablePageSlot>();
-const META_SIZE: usize = mem::size_of::<TupleMetaData>();
+pub const SLOT_SIZE: usize = mem::size_of::<TablePageSlot>();
+pub const META_SIZE: usize = mem::size_of::<TupleMetaData>();
 
 // We take the first [`HEADER_SIZE`] bytes from the page to store the header
 // This means that the last address in the page is [`PAGE_END`] and not [`PAGE_SIZE`].
-const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
+pub const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 
 /// Page Id and slot Id
 pub type TupleId = (PageId, usize);
