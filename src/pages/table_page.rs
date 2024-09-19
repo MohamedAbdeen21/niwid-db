@@ -16,15 +16,33 @@ const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 /// Page Id and slot Id
 pub type TupleId = (PageId, usize);
 
-impl Serialize for TupleId {
+pub trait TupleExt {
+    #[allow(unused)]
+    fn from_bytes(bytes: &[u8]) -> Self;
+    fn to_bytes(&self) -> Vec<u8>;
+}
+
+impl TupleExt for TupleId {
     fn from_bytes(bytes: &[u8]) -> Self {
-        let page_id = isize::from_ne_bytes(bytes[0..8].try_into().unwrap());
-        let slot_id = usize::from_le_bytes(bytes[8..16].try_into().unwrap());
+        let page_offset = std::mem::size_of::<PageId>();
+        let slot_size = std::mem::size_of::<usize>();
+        let page_id = isize::from_ne_bytes(bytes[0..page_offset].try_into().unwrap());
+        let slot_id = usize::from_le_bytes(
+            bytes[page_offset..page_offset + slot_size]
+                .try_into()
+                .unwrap(),
+        );
         (page_id, slot_id)
     }
 
-    fn to_bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts((self as *const TupleId) as *const u8, 8) }
+    fn to_bytes(&self) -> Vec<u8> {
+        let page_id_size = std::mem::size_of::<PageId>();
+        let slot_id_size = std::mem::size_of::<usize>();
+        let mut bytes = Vec::with_capacity(page_id_size + slot_id_size);
+        bytes.extend_from_slice(&self.0.to_ne_bytes());
+        bytes.extend_from_slice(&self.1.to_ne_bytes());
+
+        bytes
     }
 }
 
@@ -107,6 +125,35 @@ impl TablePage {
         let slots = self.header().get_num_tuples() * SLOT_SIZE;
         let offset = self.last_tuple_offset();
         offset - slots
+    }
+
+    /// similar to insert tuple but avoids adding the tuple metadata
+    /// used mainly in blob pages
+    pub fn insert_raw(&mut self, tuple: &Tuple) -> Result<TupleId> {
+        let entry_size = tuple.len();
+        if entry_size + SLOT_SIZE > self.free_space() {
+            return Err(anyhow!("Not enough space to insert tuple"));
+        }
+
+        let last_offset = self.last_tuple_offset();
+        let tuple_offset = last_offset - tuple.len();
+        let entry_offset = tuple_offset;
+
+        let slot = TablePageSlot::new(entry_offset, entry_size);
+
+        let slot_offset = match self.last_slot_offset() {
+            Some(offset) => offset + SLOT_SIZE,
+            None => 0,
+        };
+
+        self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.to_bytes());
+        self.data.bytes[tuple_offset..(tuple_offset + tuple.len())]
+            .copy_from_slice(tuple.to_bytes());
+
+        self.header_mut().add_tuple();
+        self.is_dirty |= true;
+
+        Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
 
     pub fn insert_tuple(&mut self, tuple: &Tuple) -> Result<TupleId> {

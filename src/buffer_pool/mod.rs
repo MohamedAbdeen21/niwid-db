@@ -154,17 +154,19 @@ mod tests {
     #[test]
     fn test_dont_evict_pinned() -> Result<()> {
         let bpm = RwLock::new(BufferPool::init(2));
-        let p1: TablePage = bpm.write().unwrap().new_page()?.get_page_read().into();
+        let mut bpmw = bpm.write().unwrap();
 
-        let _: TablePage = bpm.write().unwrap().new_page()?.get_page_read().into();
+        let p1: TablePage = bpmw.new_page()?.get_page_read().into();
 
-        assert_eq!(true, bpm.write().unwrap().new_page().is_err());
+        let _: TablePage = bpmw.new_page()?.get_page_read().into();
 
-        bpm.write().unwrap().unpin(&p1.get_page_id());
+        assert_eq!(true, bpmw.new_page().is_err());
 
-        let _: TablePage = bpm.write().unwrap().new_page()?.get_page_read().into();
+        bpmw.unpin(&p1.get_page_id());
 
-        assert_eq!(true, bpm.write().unwrap().new_page().is_err());
+        let _: TablePage = bpmw.new_page()?.get_page_read().into();
+
+        assert_eq!(true, bpmw.new_page().is_err());
 
         Ok(())
     }

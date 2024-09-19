@@ -3,11 +3,11 @@ use std::sync::RwLock;
 use crate::{
     buffer_pool::{BufferPool, BufferPoolManager},
     pages::{
-        table_page::{TablePage, TupleId},
+        table_page::{TablePage, TupleExt, TupleId},
         traits::Serialize,
     },
     tuple::{schema::Schema, Entry, Tuple},
-    types::Types,
+    types::{Str, Types},
 };
 use anyhow::Result;
 
@@ -86,7 +86,7 @@ impl Table {
                 .unwrap()
                 .as_mut()
                 .unwrap()
-                .insert_tuple(&tuple)
+                .insert_raw(&tuple)
         }
     }
 
@@ -103,10 +103,8 @@ impl Table {
             if inside && byte != &b'\0' {
                 string.push(*byte as char);
             } else if inside && byte == &b'\0' {
-                let (page_id, slot_id) = self.insert_string(string.as_bytes())?;
-                processed_data.extend_from_slice(&page_id.to_ne_bytes());
-                processed_data.extend_from_slice(&slot_id.to_ne_bytes());
-                string.clear();
+                let tuple_id: TupleId = self.insert_string(string.as_bytes())?;
+                processed_data.extend(tuple_id.to_bytes());
                 inside = false;
             } else if !inside && byte == &b'\0' {
                 inside = true;
@@ -116,6 +114,23 @@ impl Table {
         }
 
         Ok(Tuple::from_bytes(&processed_data))
+    }
+
+    #[allow(unused)]
+    fn fetch_string(&self, str_id: TupleId) -> Str {
+        let (page, slot) = str_id;
+        let blob_page: TablePage = self
+            .bpm
+            .write()
+            .unwrap()
+            .fetch_frame(page)
+            .unwrap()
+            .get_page_read()
+            .into();
+
+        let (_, tuple) = blob_page.read_tuple(slot);
+        let string = String::from_utf8(tuple.get_data().to_vec()).unwrap();
+        Str(string)
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<()> {
@@ -163,7 +178,7 @@ impl Table {
         Ok(())
     }
 
-    pub fn scan(&mut self, mut f: impl FnMut(&Entry)) {
+    pub fn scan(&self, mut f: impl FnMut(&Entry)) {
         self.to_iter().for_each(|entry| f(&entry))
     }
 
@@ -196,6 +211,7 @@ impl Drop for Table {
 
         bpm.unpin(&unsafe { self.first_page.read().unwrap().as_ref().unwrap() }.get_page_id());
         bpm.unpin(&unsafe { self.last_page.read().unwrap().as_ref().unwrap() }.get_page_id());
+        bpm.unpin(&unsafe { self.blob_page.read().unwrap().as_ref().unwrap() }.get_page_id());
     }
 }
 
@@ -334,16 +350,15 @@ mod tests {
         );
         table.insert(tuple)?;
 
-        let blob_page = unsafe { table.blob_page.read().unwrap().as_ref().unwrap() };
         let mut counter = 0;
 
         let mut assert_strings = |entry: &Entry| {
             let tuple = &entry.1;
             let tuple_bytes = tuple.get_value::<U128>("str", &schema).unwrap();
-            let (_, slot_id) = TupleId::from_bytes(&tuple_bytes.to_bytes());
-            let (_, string) = blob_page.read_tuple(slot_id);
+            let str_id = TupleId::from_bytes(&tuple_bytes.to_bytes());
+            let string = table.fetch_string(str_id);
             assert_eq!(
-                Str::from_bytes(string.to_bytes()),
+                string,
                 if counter == 0 {
                     Str(s1.to_string())
                 } else {
