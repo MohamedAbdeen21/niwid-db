@@ -2,7 +2,7 @@ mod frame;
 mod replacer;
 
 use crate::disk_manager::DiskManager;
-use crate::pages::Page;
+use crate::pages::{Page, PageId};
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
@@ -17,7 +17,7 @@ pub type BufferPoolManager = &'static RwLock<BufferPool>;
 pub struct BufferPool {
     free_frames: LinkedList<FrameId>,
     frames: Box<[RwLock<Frame>]>,
-    page_table: HashMap<i32, FrameId>,
+    page_table: HashMap<PageId, FrameId>,
     replacer: Box<dyn replacer::Replacer>,
     disk_manager: DiskManager,
 }
@@ -48,7 +48,7 @@ impl BufferPool {
         }
     }
 
-    pub fn fetch_page(&mut self, page_id: i32) -> Result<&RwLock<Frame>> {
+    pub fn fetch_page(&mut self, page_id: PageId) -> Result<&mut RwLock<Frame>> {
         let frame_id = if self.page_table.contains_key(&page_id) {
             *self.page_table.get(&page_id).unwrap()
         } else {
@@ -67,7 +67,7 @@ impl BufferPool {
             frame_id
         };
 
-        let frame = &self.frames[frame_id];
+        let frame = &mut self.frames[frame_id];
         frame.write().unwrap().pin();
         self.replacer.record_access(frame_id);
 
@@ -100,9 +100,9 @@ impl BufferPool {
 
     pub fn evict_frame(&mut self) -> FrameId {
         let frame_id = self.replacer.evict();
-        let frame = &self.frames[frame_id].write().unwrap();
+        let frame = &mut self.frames[frame_id].write().unwrap();
         assert!(frame.get_pin_count() == 1);
-        let page = frame.get_page();
+        let page = frame.get_page_write();
 
         if page.is_dirty() {
             self.disk_manager.write_to_file(&page).unwrap();

@@ -1,6 +1,6 @@
 use crate::buffer_pool::{BufferPool, BufferPoolManager};
 use crate::pages::table_page::TablePage;
-use crate::pages::INVALID_PAGE;
+use crate::pages::{PageId, INVALID_PAGE};
 use crate::tuple::Entry;
 
 use super::Table;
@@ -9,19 +9,19 @@ use super::Table;
 pub struct TableIterator {
     page: TablePage,
     current: usize,
-    next_page: i32,
+    next_page: PageId,
     buffer_pool: BufferPoolManager,
 }
 
 #[allow(unused)]
 impl TableIterator {
     pub fn new(table: Table) -> Self {
-        let page = table.first_page.clone();
+        let page: TablePage = unsafe { *(table.first_page) };
         TableIterator {
-            page,
             current: 0,
             next_page: page.header().get_next_page(),
             buffer_pool: BufferPool::new(),
+            page,
         }
     }
 }
@@ -30,6 +30,7 @@ impl Iterator for TableIterator {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Entry> {
+        println!("{} {}", self.current, self.page.header().get_next_page());
         if self.current >= self.page.header().get_num_tuples() && self.next_page == INVALID_PAGE {
             return None;
         }
@@ -43,7 +44,7 @@ impl Iterator for TableIterator {
                 .ok()? // TODO: idk
                 .read()
                 .unwrap()
-                .get_page()
+                .get_page_read()
                 .into();
 
             self.current = 0;

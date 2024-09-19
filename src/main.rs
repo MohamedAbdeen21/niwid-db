@@ -6,42 +6,13 @@ mod tuple;
 mod types;
 
 use anyhow::Result;
-use buffer_pool::{BufferPool, BufferPoolManager};
-use pages::table_page::TablePage;
 use table::Table;
 use tuple::{schema::Schema, Tuple};
 use types::{Primitive, Types, U16, U8};
 
 fn main() -> Result<()> {
-    let path = "my_struct.bin";
-    let bpm = BufferPool::new();
+    let mut table = Table::new()?;
 
-    let mut table_page: TablePage = bpm
-        .write()
-        .unwrap()
-        .new_page()?
-        .write()
-        .unwrap()
-        .get_page()
-        .into();
-
-    insert_write_read(&bpm, &mut table_page, path)?;
-    let table = Table::new(table_page, table_page);
-
-    let iter = table.to_iter();
-
-    iter.for_each(|(meta, data)| {
-        println!("{:?}, {:?}", data, meta);
-    });
-
-    Ok(())
-}
-
-fn insert_write_read(
-    _bp: BufferPoolManager,
-    table_page: &mut TablePage,
-    _path: &str,
-) -> Result<()> {
     let schema = Schema::new(
         vec!["id".to_string(), "age".to_string()],
         vec![Types::U8, Types::U16],
@@ -49,39 +20,49 @@ fn insert_write_read(
 
     let tuple_data = vec![U8(2).to_bytes(), U16(50000).to_bytes()];
     let tuple = Tuple::new(tuple_data, &schema);
-    table_page.insert_tuple(tuple)?;
+    table.insert(tuple)?;
 
     let tuple_data = vec![U8(4).to_bytes(), U16(5).to_bytes()];
     let tuple = Tuple::new(tuple_data, &schema);
-    table_page.insert_tuple(tuple)?;
+    table.insert(tuple)?;
 
-    // println!("Data after write: {:?}", table_page);
-    //
-    // bp.write_to_file(table_page, path)?;
-    //
-    // let mut loaded_data = disk.read_from_file::<TablePage>(path, 0)?;
-    //
-    // println!("Data after write: {:?}", loaded_data);
-    //
-    // let t1 = loaded_data.read_tuple(0);
-    // println!("Data after write: {:?}", t1);
-    //
-    // let t2 = loaded_data.read_tuple(1);
-    // println!("Data after write: {:?}", t2);
-    //
-    // // let t3 = loaded_data.read_tuple(2);
-    // // println!("Data after write: {:?}", t3);
-    //
-    // loaded_data.delete_tuple(0);
-    //
-    // let t1 = loaded_data.read_tuple(0);
-    // println!("Data after write: {:?}", t1);
-    //
-    // println!("{}", t1.1.get_value::<U16>("age", &schema)?.0);
-    //
-    table_page.delete_tuple(1);
-    //
-    // // std::fs::remove_file(path)?;
+    table.scan(|entry| println!("{:?}", entry));
+
+    table.delete((1, 0))?;
+
+    table.scan(|entry| println!("{:?}", entry));
 
     Ok(())
 }
+
+// fn insert_write_read(table: &mut Table) -> Result<()> {
+// println!("Data after write: {:?}", table_page);
+//
+// bp.write_to_file(table_page, path)?;
+//
+// let mut loaded_data = disk.read_from_file::<TablePage>(path, 0)?;
+//
+// println!("Data after write: {:?}", loaded_data);
+//
+// let t1 = loaded_data.read_tuple(0);
+// println!("Data after write: {:?}", t1);
+//
+// let t2 = loaded_data.read_tuple(1);
+// println!("Data after write: {:?}", t2);
+//
+// // let t3 = loaded_data.read_tuple(2);
+// // println!("Data after write: {:?}", t3);
+//
+// loaded_data.delete_tuple(0);
+//
+// let t1 = loaded_data.read_tuple(0);
+// println!("Data after write: {:?}", t1);
+//
+// println!("{}", t1.1.get_value::<U16>("age", &schema)?.0);
+//
+// table.delete(1);
+//
+// // std::fs::remove_file(path)?;
+
+//     Ok(())
+// }

@@ -39,7 +39,11 @@ impl Frame {
         self.page = page;
     }
 
-    pub fn get_page(&self) -> &Page {
+    pub fn get_page_write(&mut self) -> &mut Page {
+        unsafe { &mut *(&mut self.page as *mut Page) }
+    }
+
+    pub fn get_page_read(&self) -> &Page {
         &self.page
     }
 }

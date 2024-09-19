@@ -90,11 +90,13 @@ mod tests {
         assert_eq!(replacer.peek(), Some(1));
         replacer.record_access(1);
         // no evictable
+        assert_eq!(replacer.can_evict(), false);
         assert_eq!(replacer.peek(), None);
         replacer.record_access(2);
-        replacer.set_evictable(1, true);
-        replacer.set_evictable(2, true);
         replacer.set_evictable(3, true);
+        assert_eq!(replacer.can_evict(), true);
+        replacer.set_evictable(2, true);
+        replacer.set_evictable(1, true);
         assert_eq!(replacer.evict(), 3);
         assert_eq!(replacer.evict(), 1);
         assert_eq!(replacer.evict(), 2);

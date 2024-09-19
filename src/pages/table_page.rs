@@ -1,43 +1,40 @@
-use super::traits::Serialize;
+use super::{traits::Serialize, PageId, INVALID_PAGE};
 use crate::tuple::{Entry, Tuple, TupleMetaData};
 
-use super::{Page, INVALID_PAGE, PAGE_SIZE};
+use super::{Page, PAGE_SIZE};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
 
+const HEADER_SIZE: usize = mem::size_of::<TablePageHeader>();
 const SLOT_SIZE: usize = mem::size_of::<TablePageSlot>();
 const META_SIZE: usize = mem::size_of::<TupleMetaData>();
-const HEADER_SIZE: usize = mem::size_of::<TablePageHeader>();
+
 // We take the first [`HEADER_SIZE`] bytes from the page to store the header
 // This means that the last address in the page is [`PAGE_END`] and not [`PAGE_SIZE`].
 const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
+
+/// Page Id and slot Id
+pub type TupleId = (PageId, usize);
 
 /// The Table Page data that persists on disk
 /// all other fields are helpers (pointers and flags)
 /// that are computed on the fly
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 struct TablePageData {
     header: TablePageHeader,
     bytes: [u8; PAGE_END],
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 pub struct TablePage {
     data: TablePageData,
     is_dirty: bool,
-    page_id: i32,
+    page_id: PageId,
 }
 
 impl TablePage {
-    // pub fn new(page_id: i32) -> Self {
-    //     let mut p: Self = Page::new().into();
-    //     p.header_mut().set_next_page(INVALID_PAGE);
-    //     p.set_page_id(page_id);
-    //     p
-    // }
-    //
     pub fn header(&self) -> &TablePageHeader {
         &self.data.header
     }
@@ -47,11 +44,11 @@ impl TablePage {
     }
 
     #[allow(unused)]
-    pub fn get_page_id(&self) -> i32 {
+    pub fn get_page_id(&self) -> PageId {
         self.page_id
     }
 
-    pub fn set_page_id(&mut self, page_id: i32) {
+    pub fn set_page_id(&mut self, page_id: PageId) {
         self.page_id = page_id;
     }
 
@@ -100,7 +97,7 @@ impl TablePage {
         offset - slots
     }
 
-    pub fn insert_tuple(&mut self, tuple: Tuple) -> Result<()> {
+    pub fn insert_tuple(&mut self, tuple: &Tuple) -> Result<()> {
         let entry_size = tuple.len() + META_SIZE;
         if entry_size + SLOT_SIZE > self.free_space() {
             return Err(anyhow!("Not enough space to insert tuple"));
@@ -155,82 +152,55 @@ impl TablePage {
     }
 }
 
-impl From<&Page> for TablePage {
-    fn from(page: &Page) -> Self {
-        let mut p = Self::from_bytes(page.as_bytes());
-        p.set_page_id(page.page_id());
-        p.is_dirty = page.is_dirty();
-        p
-    }
-}
-
-impl Into<Page> for TablePage {
-    fn into(self) -> Page {
-        let mut page = Page::from_bytes(self.as_bytes());
-        page.is_dirty = self.is_dirty;
-        page.page_id = self.page_id;
-        page
-    }
-}
-
-impl From<Page> for TablePage {
-    fn from(page: Page) -> Self {
-        assert_eq!(page.data.len(), PAGE_SIZE);
-        let mut table_page = Self::from_bytes(page.as_bytes());
-        table_page.is_dirty = page.is_dirty;
-        table_page.page_id = page.page_id;
-        table_page
-    }
-}
-
-impl Serialize for TablePage {
-    fn as_bytes(&self) -> &[u8] {
+impl<'a> From<&'a mut Page> for *mut TablePage {
+    fn from(page: &'a mut Page) -> *mut TablePage {
         unsafe {
-            slice::from_raw_parts(
-                (&self.data as *const TablePageData) as *const u8,
-                mem::size_of::<TablePageData>(),
-            )
+            let p = page as *mut Page as *mut TablePage;
+            (*p).set_page_id(page.get_page_id());
+            (*p).is_dirty = page.is_dirty();
+            if (*p).header().get_next_page() == 0 {
+                (*p).header_mut().set_next_page_id(INVALID_PAGE);
+            }
+            p
         }
     }
+}
 
-    fn from_bytes(bytes: &[u8]) -> Self {
-        assert_eq!(bytes.len(), mem::size_of::<TablePageData>());
-        let page_data = unsafe { *(bytes.as_ptr() as *const TablePageData) };
-        let mut p = TablePage {
-            data: page_data,
-            is_dirty: false,
-            page_id: INVALID_PAGE,
-        };
-        p.header_mut().set_next_page(INVALID_PAGE);
+impl<'a> From<&'a Page> for TablePage {
+    fn from(page: &'a Page) -> TablePage {
+        let mut p = unsafe { *(page as *const Page as *mut TablePage) };
+        p.set_page_id(page.get_page_id());
+        p.is_dirty = page.is_dirty();
+        if p.header().get_next_page() == 0 {
+            p.header_mut().set_next_page_id(INVALID_PAGE);
+        }
         p
     }
 }
+
+// impl From<&Page> for TablePage {
+//     fn from(page: &Page) -> Self {
+//         let mut p = Self::from_bytes(page.as_bytes());
+//         p.set_page_id(page.get_page_id());
+//         p.is_dirty = page.is_dirty();
+//         p
+//     }
+// }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct TablePageHeader {
     /// INVALID_PAGE (-1) if there are no more pages
-    next_page: i32,
+    next_page: PageId,
     num_tuples: u16,
 }
 
-impl Serialize for TablePageHeader {
-    fn as_bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts((self as *const TablePageHeader) as *const u8, HEADER_SIZE) }
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        assert_eq!(bytes.len(), HEADER_SIZE);
-        unsafe { *(bytes.as_ptr() as *const TablePageHeader) }
-    }
-}
-
 impl TablePageHeader {
-    pub fn set_next_page(&mut self, next_page: i32) {
+    pub fn set_next_page_id(&mut self, next_page: PageId) {
         self.next_page = next_page;
     }
 
-    pub fn get_next_page(&self) -> i32 {
+    pub fn get_next_page(&self) -> PageId {
         self.next_page
     }
 

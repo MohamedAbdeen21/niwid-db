@@ -4,7 +4,9 @@ pub(crate) mod traits;
 use traits::Serialize;
 
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
-pub const INVALID_PAGE: i32 = -1;
+pub const INVALID_PAGE: PageId = -1;
+
+pub type PageId = isize;
 
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement From<Page> and Into<Page> traits
@@ -14,7 +16,7 @@ pub struct Page {
     /// Underlying block of memory of size [`PAGE_SIZE`]
     data: [u8; PAGE_SIZE],
     is_dirty: bool,
-    page_id: i32,
+    page_id: PageId,
 }
 
 impl Serialize for Page {
@@ -44,11 +46,11 @@ impl Page {
         return self.is_dirty;
     }
 
-    pub fn page_id(&self) -> i32 {
+    pub fn get_page_id(&self) -> PageId {
         return self.page_id;
     }
 
-    pub fn set_page_id(&mut self, page_id: i32) {
+    pub fn set_page_id(&mut self, page_id: PageId) {
         self.page_id = page_id;
     }
 }
