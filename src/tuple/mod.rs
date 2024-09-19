@@ -2,6 +2,8 @@ use std::{mem, slice};
 
 use crate::pages::traits::Serialize;
 
+pub type Entry = (TupleMetaData, Vec<u8>);
+
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct TupleMetaData {
@@ -44,5 +46,9 @@ impl TupleMetaData {
 
     pub fn set_null(&mut self, field_id: u8) {
         self.null_bitmap |= 1 << field_id;
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        self.is_deleted
     }
 }

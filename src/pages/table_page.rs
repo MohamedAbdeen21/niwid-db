@@ -1,11 +1,9 @@
-use super::traits::Serialize;
-use crate::tuple::TupleMetaData;
+use super::{table_page_iterator::TablePageIterator, traits::Serialize};
+use crate::tuple::{Entry, TupleMetaData};
 
-use super::{Page, PAGE_SIZE};
+use super::{Page, INVALID_PAGE, PAGE_SIZE};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
-
-const INVALID_PAGE: i32 = -1;
 
 const SLOT_SIZE: usize = mem::size_of::<TablePageSlot>();
 const META_SIZE: usize = mem::size_of::<TupleMetaData>();
@@ -29,12 +27,14 @@ struct TablePageData {
 pub struct TablePage {
     data: TablePageData,
     is_dirty: bool,
+    page_id: i32,
 }
 
 impl TablePage {
-    pub fn new() -> Self {
+    pub fn new(page_id: i32) -> Self {
         let mut p: Self = Page::new().into();
         p.header_mut().set_next_page(INVALID_PAGE);
+        p.set_page_id(page_id);
         p
     }
 
@@ -46,8 +46,17 @@ impl TablePage {
         &mut self.data.header
     }
 
+    #[allow(unused)]
+    pub fn get_page_id(&self) -> i32 {
+        self.page_id
+    }
+
+    pub fn set_page_id(&mut self, page_id: i32) {
+        self.page_id = page_id;
+    }
+
     fn last_slot_offset(&self) -> Option<usize> {
-        let num_tuples = self.header().num_tuples as usize;
+        let num_tuples = self.header().get_num_tuples();
         if num_tuples == 0 {
             None
         } else {
@@ -57,7 +66,7 @@ impl TablePage {
 
     #[inline]
     fn get_slot(&self, slot: usize) -> Option<TablePageSlot> {
-        if slot >= self.header().num_tuples as usize {
+        if slot >= self.header().get_num_tuples() {
             return None;
         }
 
@@ -69,10 +78,10 @@ impl TablePage {
 
     #[inline]
     fn last_slot(&self) -> Option<TablePageSlot> {
-        if self.header().num_tuples == 0 {
+        if self.header().get_num_tuples() == 0 {
             None
         } else {
-            self.get_slot(self.header().num_tuples as usize - 1)
+            self.get_slot(self.header().get_num_tuples() - 1)
         }
     }
 
@@ -86,7 +95,7 @@ impl TablePage {
 
     #[inline]
     fn free_space(&self) -> usize {
-        let slots = self.header().num_tuples as usize * SLOT_SIZE;
+        let slots = self.header().get_num_tuples() * SLOT_SIZE;
         let offset = self.last_tuple_offset();
         offset - slots
     }
@@ -130,7 +139,7 @@ impl TablePage {
         self.is_dirty |= true;
     }
 
-    pub fn read_tuple(&self, slot: usize) -> (TupleMetaData, &[u8]) {
+    pub fn read_tuple(&self, slot: usize) -> Entry {
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
         let meta_offset = slot.offset as usize;
@@ -141,7 +150,11 @@ impl TablePage {
             TupleMetaData::from_bytes(&self.data.bytes[meta_offset..(meta_offset + META_SIZE)]);
         let tuple = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size) as usize];
 
-        return (meta, tuple);
+        return (meta, tuple.to_vec());
+    }
+
+    pub fn to_iter(self) -> TablePageIterator {
+        TablePageIterator::new(self)
     }
 }
 
@@ -178,6 +191,7 @@ impl Serialize for TablePage {
         TablePage {
             data: page_data,
             is_dirty: false,
+            page_id: INVALID_PAGE,
         }
     }
 }
@@ -206,13 +220,16 @@ impl TablePageHeader {
         self.next_page = next_page;
     }
 
-    #[allow(unused)]
     pub fn get_next_page(&self) -> i32 {
         self.next_page
     }
 
     pub fn add_tuple(&mut self) {
         self.num_tuples += 1;
+    }
+
+    pub fn get_num_tuples(&self) -> usize {
+        self.num_tuples as usize
     }
 }
 

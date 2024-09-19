@@ -1,10 +1,12 @@
 pub(crate) mod table_page;
+pub(crate) mod table_page_iterator;
 pub(crate) mod traits;
 
 use std::mem;
 use traits::Serialize;
 
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
+const INVALID_PAGE: i32 = -1;
 
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement From<Page> and Into<Page> traits

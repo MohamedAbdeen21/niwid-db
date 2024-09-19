@@ -10,17 +10,28 @@ fn main() -> Result<()> {
     let path = "my_struct.bin";
     let disk = DiskManager::new("data/");
 
-    let mut table_page = TablePage::new();
+    let mut table_page = TablePage::new(0);
+    insert_write_read(disk, &mut table_page, path)?;
+
+    let iter = table_page.to_iter();
+
+    iter.filter(|(meta, _)| !meta.is_deleted())
+        .for_each(|(meta, data)| {
+            println!("{:?}, {:?}", data, meta);
+        });
+
+    Ok(())
+}
+
+fn insert_write_read(disk: DiskManager, table_page: &mut TablePage, path: &str) -> Result<()> {
     table_page.insert_tuple(&[2, 3])?;
     table_page.insert_tuple(&[4, 5])?;
     // string as a byte array
     table_page.insert_tuple(&[b'a', b'b', b'c', b'd'])?;
 
-    disk.write_to_file(&table_page, path)?;
+    disk.write_to_file(table_page, path)?;
 
     let mut loaded_data = disk.read_from_file::<TablePage>(path)?;
-
-    println!("{:?}", loaded_data);
 
     let t1 = loaded_data.read_tuple(0);
     println!("Data after write: {:?}", t1);
@@ -35,6 +46,8 @@ fn main() -> Result<()> {
 
     let t1 = loaded_data.read_tuple(0);
     println!("Data after write: {:?}", t1);
+
+    table_page.delete_tuple(1);
 
     // std::fs::remove_file(path)?;
 
