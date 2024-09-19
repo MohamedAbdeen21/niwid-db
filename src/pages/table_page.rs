@@ -16,6 +16,18 @@ const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 /// Page Id and slot Id
 pub type TupleId = (PageId, usize);
 
+impl Serialize for TupleId {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let page_id = isize::from_ne_bytes(bytes[0..8].try_into().unwrap());
+        let slot_id = usize::from_le_bytes(bytes[8..16].try_into().unwrap());
+        (page_id, slot_id)
+    }
+
+    fn to_bytes(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts((self as *const TupleId) as *const u8, 8) }
+    }
+}
+
 /// The Table Page data that persists on disk
 /// all other fields are helpers (pointers and flags)
 /// that are computed on the fly
@@ -115,10 +127,10 @@ impl TablePage {
             None => 0,
         };
 
-        self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.as_bytes());
-        self.data.bytes[entry_offset..(entry_offset + META_SIZE)].copy_from_slice(meta.as_bytes());
+        self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.to_bytes());
+        self.data.bytes[entry_offset..(entry_offset + META_SIZE)].copy_from_slice(meta.to_bytes());
         self.data.bytes[tuple_offset..(tuple_offset + tuple.len())]
-            .copy_from_slice(tuple.as_bytes());
+            .copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
         self.is_dirty |= true;
@@ -133,7 +145,7 @@ impl TablePage {
         deleted_meta.mark_deleted();
 
         self.data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
-            .copy_from_slice(deleted_meta.as_bytes());
+            .copy_from_slice(deleted_meta.to_bytes());
         self.is_dirty |= true;
     }
 
@@ -221,7 +233,7 @@ struct TablePageSlot {
 }
 
 impl Serialize for TablePageSlot {
-    fn as_bytes(&self) -> &[u8] {
+    fn to_bytes(&self) -> &[u8] {
         unsafe { slice::from_raw_parts((self as *const TablePageSlot) as *const u8, SLOT_SIZE) }
     }
 

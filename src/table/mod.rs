@@ -2,7 +2,10 @@ use std::sync::RwLock;
 
 use crate::{
     buffer_pool::{BufferPool, BufferPoolManager},
-    pages::table_page::{TablePage, TupleId},
+    pages::{
+        table_page::{TablePage, TupleId},
+        traits::Serialize,
+    },
     tuple::{schema::Schema, Entry, Tuple},
     types::Types,
 };
@@ -45,9 +48,9 @@ impl Table {
         table_iterator::TableIterator::new(self)
     }
 
-    fn insert_string(&mut self, data: Box<[u8]>) -> Result<TupleId> {
-        let schema = Schema::new(vec!["a".to_string()], vec![Types::Str]);
-        let tuple = Tuple::new(vec![data], &schema);
+    fn insert_string(&mut self, data: &[u8]) -> Result<TupleId> {
+        let schema = Schema::new(vec!["a"], vec![Types::Str]);
+        let tuple = Tuple::new(vec![data.into()], &schema);
 
         let blob = unsafe { self.blob_page.write().unwrap().as_mut().unwrap() };
 
@@ -87,8 +90,36 @@ impl Table {
         }
     }
 
+    fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
+        if !self.schema.types.contains(&Types::Str) {
+            return Ok(tuple);
+        }
+
+        let mut string = "".to_string();
+        let mut processed_data = Vec::with_capacity(tuple.len());
+        let mut inside = false;
+
+        for byte in tuple.get_data().iter() {
+            if inside && byte != &b'\0' {
+                string.push(*byte as char);
+            } else if inside && byte == &b'\0' {
+                let (page_id, slot_id) = self.insert_string(string.as_bytes())?;
+                processed_data.extend_from_slice(&page_id.to_ne_bytes());
+                processed_data.extend_from_slice(&slot_id.to_ne_bytes());
+                string.clear();
+                inside = false;
+            } else if !inside && byte == &b'\0' {
+                inside = true;
+            } else {
+                processed_data.push(*byte);
+            }
+        }
+
+        Ok(Tuple::from_bytes(&processed_data))
+    }
+
     pub fn insert(&mut self, tuple: Tuple) -> Result<()> {
-        // TODO: find strings and replace them with their ids
+        let tuple = self.insert_strings(tuple)?;
         let last = unsafe { self.last_page.write().unwrap().as_mut().unwrap() };
 
         if last.insert_tuple(&tuple).is_ok() {
@@ -173,10 +204,7 @@ mod tests {
     use std::sync::{Arc, RwLock};
 
     use super::*;
-    use crate::{
-        tuple::schema::Schema,
-        types::{Primitive, Types, U128, U16, U8},
-    };
+    use crate::{tuple::schema::Schema, types::*};
     use anyhow::Result;
 
     fn test_table(size: usize, schema: &Schema) -> Result<Table> {
@@ -202,10 +230,7 @@ mod tests {
 
     #[test]
     fn test_unpin_drop() -> Result<()> {
-        let schema = Schema::new(
-            vec!["id".to_string(), "age".to_string()],
-            vec![Types::U8, Types::U16],
-        );
+        let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
 
         let mut table = test_table(2, &schema)?;
         let bpm = table.bpm.clone();
@@ -232,9 +257,9 @@ mod tests {
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let schema = Schema::new(vec!["a".to_string()], vec![Types::U128]);
+        let schema = Schema::new(vec!["a"], vec![Types::U128]);
 
-        let mut table = test_table(3, &schema)?;
+        let mut table = test_table(4, &schema)?;
 
         // entry size = 25 (9 header + 16 data)
         // slot size = 4
@@ -266,13 +291,69 @@ mod tests {
         }
 
         assert_eq!(2, table.bpm.read().unwrap().get_pin_count(&1).unwrap());
-        assert_eq!(1, table.bpm.read().unwrap().get_pin_count(&2).unwrap());
-        assert_eq!(2, table.bpm.read().unwrap().get_pin_count(&3).unwrap());
+        assert_eq!(2, table.bpm.read().unwrap().get_pin_count(&2).unwrap()); // blob page
+        assert_eq!(1, table.bpm.read().unwrap().get_pin_count(&3).unwrap());
+        assert_eq!(2, table.bpm.read().unwrap().get_pin_count(&4).unwrap());
 
         // get count of tuples
         let mut count = 0;
         table.scan(|_| count += 1);
         assert_eq!(281, count);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_string() -> Result<()> {
+        let s1 = "Hello, World!";
+        let s2 = "Hello, Again";
+        let schema = Schema::new(
+            vec!["a", "str", "b"],
+            vec![Types::U8, Types::Str, Types::Str, Types::U8],
+        );
+
+        let mut table = test_table(4, &schema)?;
+
+        let tuple = Tuple::new(
+            vec![
+                U8(100).to_bytes(),
+                Str(s1.to_string()).to_bytes(),
+                U8(50).to_bytes(),
+            ],
+            &schema,
+        );
+        table.insert(tuple)?;
+
+        let tuple = Tuple::new(
+            vec![
+                U8(20).to_bytes(),
+                Str(s2.to_string()).to_bytes(),
+                U8(10).to_bytes(),
+            ],
+            &schema,
+        );
+        table.insert(tuple)?;
+
+        let blob_page = unsafe { table.blob_page.read().unwrap().as_ref().unwrap() };
+        let mut counter = 0;
+
+        let mut assert_strings = |entry: &Entry| {
+            let tuple = &entry.1;
+            let tuple_bytes = tuple.get_value::<U128>("str", &schema).unwrap();
+            let (_, slot_id) = TupleId::from_bytes(&tuple_bytes.to_bytes());
+            let (_, string) = blob_page.read_tuple(slot_id);
+            assert_eq!(
+                Str::from_bytes(string.to_bytes()),
+                if counter == 0 {
+                    Str(s1.to_string())
+                } else {
+                    Str(s2.to_string())
+                }
+            );
+            counter += 1;
+        };
+
+        table.scan(|entry| assert_strings(entry));
 
         Ok(())
     }

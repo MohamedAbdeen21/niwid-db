@@ -42,8 +42,6 @@ impl Tuple {
         self.data.len()
     }
 
-    // not used yet
-    #[allow(dead_code)]
     pub fn get_value<T: Primitive>(&self, field: &str, schema: &Schema) -> Result<T> {
         let field_id = schema
             .fields
@@ -65,10 +63,14 @@ impl Tuple {
 
         Ok(T::from_bytes(&self.data[offset..offset + dtype.size()]))
     }
+
+    pub fn get_data(&self) -> &[u8] {
+        &self.data
+    }
 }
 
 impl Serialize for Tuple {
-    fn as_bytes(&self) -> &[u8] {
+    fn to_bytes(&self) -> &[u8] {
         &self.data
     }
 
@@ -87,7 +89,7 @@ pub struct TupleMetaData {
 }
 
 impl Serialize for TupleMetaData {
-    fn as_bytes(&self) -> &[u8] {
+    fn to_bytes(&self) -> &[u8] {
         unsafe {
             slice::from_raw_parts(
                 (self as *const TupleMetaData) as *const u8,

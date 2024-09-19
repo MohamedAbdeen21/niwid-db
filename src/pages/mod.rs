@@ -20,7 +20,7 @@ pub struct Page {
 }
 
 impl Serialize for Page {
-    fn as_bytes(&self) -> &[u8] {
+    fn to_bytes(&self) -> &[u8] {
         &self.data
     }
 
@@ -41,7 +41,6 @@ impl Page {
         }
     }
 
-    #[allow(unused)]
     pub fn is_dirty(&self) -> bool {
         return self.is_dirty;
     }

@@ -360,12 +360,18 @@ impl Primitive for Str {
     }
     fn to_bytes(&self) -> Box<[u8]> {
         let mut str = self.0.clone();
+        str.insert(0, '\0');
         str.push('\0');
         str.as_bytes().to_vec().into_boxed_slice()
     }
     fn from_bytes(bytes: &[u8]) -> Self {
         let mut v = bytes.to_vec();
-        v.remove(v.len() - 1); // the '\0' is the last byte
+        if v.first() == Some(&b'\0') {
+            v.remove(0);
+        }
+        if v.last() == Some(&b'\0') {
+            v.pop();
+        }
         Str(String::from_utf8(v).unwrap())
     }
 }

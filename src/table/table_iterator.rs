@@ -1,6 +1,7 @@
 use crate::buffer_pool::BufferPoolManager;
 use crate::pages::table_page::TablePage;
 use crate::pages::{PageId, INVALID_PAGE};
+use crate::tuple::schema::Schema;
 use crate::tuple::Entry;
 
 use super::Table;
@@ -11,6 +12,8 @@ pub struct TableIterator {
     current: usize,
     next_page: PageId,
     bpm: BufferPoolManager,
+    #[allow(unused)]
+    schema: Schema,
 }
 
 #[allow(unused)]
@@ -32,6 +35,7 @@ impl TableIterator {
             next_page: page.header().get_next_page(),
             bpm,
             page,
+            schema: table.schema.clone(),
         }
     }
 }

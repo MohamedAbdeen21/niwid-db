@@ -34,7 +34,7 @@ impl DiskManager {
             .custom_flags(O_DIRECT)
             .open(path)?;
 
-        file.write_all(page.as_bytes())?;
+        file.write_all(page.to_bytes())?;
         Ok(())
     }
 
