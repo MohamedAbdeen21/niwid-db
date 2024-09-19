@@ -230,8 +230,8 @@ impl Table {
         unsafe { self.last_page.as_mut().unwrap().insert_tuple(&tuple) }
     }
 
-    pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry))) {
-        self.to_iter().for_each(|entry| f(&entry))
+    pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>) -> Result<()> {
+        self.to_iter().try_for_each(|entry| f(&entry))
     }
 
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
@@ -263,7 +263,8 @@ impl Table {
             if *tuple == old_tuple {
                 tuple_id = Some(*id)
             }
-        });
+            Ok(())
+        })?;
 
         if tuple_id.is_none() {
             return Err(anyhow!("Tuple not found"));
@@ -387,7 +388,10 @@ mod tests {
 
         // get count of tuples
         let mut count = 0;
-        table.scan(|_| count += 1);
+        table.scan(|_| {
+            count += 1;
+            Ok(())
+        })?;
         assert_eq!(tuples_per_page * 2 + 1, count);
 
         Ok(())
@@ -420,7 +424,7 @@ mod tests {
 
         let mut assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple = &tuple;
-            let tuple_bytes = tuple.get_value_of::<U128>("str", &schema).unwrap().unwrap();
+            let tuple_bytes = tuple.get_value_of::<U128>("str", &schema)?.unwrap();
             let string = table.fetch_string(&tuple_bytes.to_bytes());
             assert_eq!(
                 string,
@@ -431,9 +435,94 @@ mod tests {
                 }
             );
             counter += 1;
+            Ok(())
         };
 
-        table.scan(|entry| assert_strings(entry));
+        table.scan(|entry| assert_strings(entry))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multi_string() -> Result<()> {
+        let s1 = "Hello, World!";
+        let s2 = "Hello, Again";
+        let schema = Schema::new(
+            vec!["s1", "a", "s2"],
+            vec![Types::Str, Types::U8, Types::Str],
+        );
+
+        let mut table = test_table(4, &schema)?;
+
+        let tuple = Tuple::new(
+            vec![
+                Str(s1.to_string()).into(),
+                U8(100).into(),
+                Str(s2.to_string()).into(),
+            ],
+            &schema,
+        );
+        table.insert(tuple)?;
+
+        let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
+            let tuple = &tuple;
+            let tuple_bytes = tuple.get_value_at::<U128>(0, &schema)?.unwrap();
+            let read_s1 = table.fetch_string(&tuple_bytes.to_bytes());
+
+            let a = tuple.get_value_at::<U8>(1, &schema)?.unwrap();
+
+            let tuple_bytes = tuple.get_value_at::<U128>(2, &schema)?.unwrap();
+            let read_s2 = table.fetch_string(&tuple_bytes.to_bytes());
+
+            assert_eq!(read_s1.0, s1);
+            assert_eq!(a.0, 100);
+            assert_eq!(read_s2.0, s2);
+
+            Ok(())
+        };
+
+        table.scan(|entry| assert_strings(entry))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_delete() -> Result<()> {
+        let schema = Schema::new(
+            vec!["a", "b", "c"],
+            vec![Types::U128, Types::F64, Types::I8],
+        );
+
+        let mut table = test_table(4, &schema)?;
+        let tuple = Tuple::new(
+            vec![U128(10).into(), F64(10.0).into(), I8(10).into()],
+            &schema,
+        );
+        let t1_id = table.insert(tuple)?;
+
+        let tuple = Tuple::new(
+            vec![U128(20).into(), F64(20.0).into(), I8(20).into()],
+            &schema,
+        );
+        let t2_id = table.insert(tuple)?;
+
+        table.delete(t1_id)?;
+
+        let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
+            assert_eq!(tuple.get_value_at::<U128>(0, &schema)?.unwrap().0, 20);
+            assert_eq!(tuple.get_value_at::<F64>(1, &schema)?.unwrap().0, 20.0);
+            assert_eq!(tuple.get_value_at::<I8>(2, &schema)?.unwrap().0, 20);
+
+            Ok(())
+        };
+
+        table.scan(scanner_1)?;
+
+        table.delete(t2_id)?;
+
+        let scanner_2 = |_: &(TupleId, Entry)| Err(anyhow!("Should not run")); // should never run
+
+        table.scan(scanner_2)?;
 
         Ok(())
     }
@@ -453,12 +542,14 @@ mod tests {
             assert!(meta.is_null(0));
             assert!(meta.is_null(1));
             assert!(meta.is_null(2));
-            assert!(tuple.get_value_at::<U128>(0, &schema).unwrap().is_none());
-            assert!(tuple.get_value_at::<Str>(1, &schema).unwrap().is_none());
-            assert!(tuple.get_value_at::<I8>(2, &schema).unwrap().is_none());
+            assert!(tuple.get_value_at::<U128>(0, &schema)?.is_none());
+            assert!(tuple.get_value_at::<Str>(1, &schema)?.is_none());
+            assert!(tuple.get_value_at::<I8>(2, &schema)?.is_none());
+
+            Ok(())
         };
 
-        table.scan(validator);
+        table.scan(validator)?;
 
         Ok(())
     }

@@ -37,35 +37,25 @@ impl Catalog {
 
         let mut tables = vec![];
         let mut table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
-            let name_bytes = tuple
-                .get_value_of::<I128>("table_name", &schema)
-                .unwrap()
-                .unwrap();
+            let name_bytes = tuple.get_value_of::<I128>("table_name", &schema)?.unwrap();
             let name = table.fetch_string(&name_bytes.to_bytes());
-            let first_page_id = tuple
-                .get_value_of::<I64>("first_page", &schema)
-                .unwrap()
-                .unwrap()
-                .0 as PageId;
-            let last_page_id = tuple
-                .get_value_of::<I64>("last_page", &schema)
-                .unwrap()
-                .unwrap()
-                .0 as PageId;
-            let schema_bytes = &tuple
-                .get_value_of::<I128>("schema", &schema)
-                .unwrap()
-                .unwrap();
+            let first_page_id =
+                tuple.get_value_of::<I64>("first_page", &schema)?.unwrap().0 as PageId;
+            let last_page_id =
+                tuple.get_value_of::<I64>("last_page", &schema)?.unwrap().0 as PageId;
+            let schema_bytes = &tuple.get_value_of::<I128>("schema", &schema)?.unwrap();
             let schema = table.fetch_string(&schema_bytes.to_bytes());
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
             tables.push((
                 *id,
                 Table::fetch(name.0, &schema, first_page_id, last_page_id).expect("Fetch failed"),
-            ))
+            ));
+
+            Ok(())
         };
 
-        table.scan(table_builder);
+        table.scan(table_builder)?;
 
         Ok(Catalog {
             table,
@@ -115,13 +105,13 @@ impl Catalog {
         let mut tuple_id = None;
         self.table.scan(|(id, (_, tuple))| {
             let name_bytes = tuple
-                .get_value_of::<I128>("table_name", &self.schema)
-                .unwrap()
+                .get_value_of::<I128>("table_name", &self.schema)?
                 .unwrap();
             let name = self.table.fetch_string(&name_bytes.to_bytes()).0;
             if name == table_name {
                 tuple_id = Some(*id);
             }
+            Ok(())
         });
 
         self.table.delete(tuple_id?).ok()?;
