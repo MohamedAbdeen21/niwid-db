@@ -39,6 +39,9 @@ impl Types {
 }
 
 pub trait AsBytes {
+    fn is_null(&self) -> bool {
+        false
+    }
     fn to_bytes(&self) -> Box<[u8]>;
     fn from_bytes(bytes: &[u8]) -> Self
     where
@@ -81,6 +84,10 @@ pub struct F64(pub f64);
 pub struct Bool(pub bool);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Str(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Char(pub char);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Null();
 
 impl Primitive for U8 {
     fn add(self, other: Self) -> Self {
@@ -393,6 +400,31 @@ impl AsBytes for Bool {
     }
 }
 
+impl Primitive for Char {
+    fn add(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+    fn subtract(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+    fn multiply(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+    fn divide(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+}
+
+impl AsBytes for Char {
+    fn to_bytes(&self) -> Box<[u8]> {
+        vec![self.0 as u8].into_boxed_slice()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        Char(bytes[0] as char)
+    }
+}
+
 impl Primitive for Str {
     fn add(self, _other: Self) -> Self {
         unimplemented!()
@@ -432,6 +464,18 @@ impl AsBytes for Str {
     }
 }
 
+impl AsBytes for Null {
+    fn to_bytes(&self) -> Box<[u8]> {
+        panic!("Null cannot be converted to bytes")
+    }
+    fn from_bytes(_bytes: &[u8]) -> Self {
+        panic!("Null cannot be created from bytes")
+    }
+    fn is_null(&self) -> bool {
+        true
+    }
+}
+
 macro_rules! impl_into_box {
     ($type:ty) => {
         impl Into<Box<dyn AsBytes>> for $type {
@@ -456,3 +500,5 @@ impl_into_box!(F32);
 impl_into_box!(F64);
 impl_into_box!(Bool);
 impl_into_box!(Str);
+impl_into_box!(Char);
+impl_into_box!(Null);

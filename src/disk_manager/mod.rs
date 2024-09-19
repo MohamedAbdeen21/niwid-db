@@ -72,6 +72,8 @@ impl DiskManager {
 mod tests {
     use super::*;
     use crate::pages::Page;
+    use crate::tuple::schema::Schema;
+    use crate::types::Types;
     use crate::{pages::table_page::TablePage, tuple::Tuple, types::Str};
     use std::fs::remove_file;
 
@@ -111,7 +113,8 @@ mod tests {
         page.set_page_id(page_id);
         let table_page: *mut TablePage = page.into();
 
-        let tuple = Tuple::new(vec![Str("Hello!".to_string()).into()]);
+        let dummy_schema = Schema::new(vec!["str"], vec![Types::Str]);
+        let tuple = Tuple::new(vec![Str("Hello!".to_string()).into()], &dummy_schema);
         let (write_page_id, write_slot_id) =
             unsafe { table_page.as_mut().unwrap() }.insert_raw(&tuple)?;
 

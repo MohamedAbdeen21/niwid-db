@@ -1,9 +1,9 @@
 pub mod schema;
 
-use crate::pages::traits::Serialize;
 use crate::pages::PageId;
 use crate::tuple::schema::Schema;
-use crate::types::AsBytes;
+use crate::types::{AsBytes, *};
+use crate::{pages::traits::Serialize, types::Types};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
 
@@ -19,10 +19,43 @@ pub struct Tuple {
 }
 
 impl Tuple {
-    pub fn new(data: Vec<Box<dyn AsBytes>>) -> Self {
-        let data = data.iter().flat_map(|t| t.to_bytes()).collect::<Vec<u8>>();
+    pub fn new(values: Vec<Box<dyn AsBytes>>, schema: &Schema) -> Self {
+        let has_nulls = values.iter().any(|t| t.is_null());
+        let data = if has_nulls {
+            values
+                .into_iter()
+                .zip(schema.types.iter())
+                .map(|(t, ty)| -> Box<dyn AsBytes> {
+                    if t.is_null() {
+                        match ty {
+                            Types::Str => Str("".to_string()).into(),
+                            Types::I64 => I64(0).into(),
+                            Types::I128 => I128(0).into(),
+                            Types::U64 => U64(0).into(),
+                            Types::U128 => U128(0).into(),
+                            Types::F64 => F64(0.0).into(),
+                            Types::F32 => F32(0.0).into(),
+                            Types::Bool => Bool(false).into(),
+                            Types::I8 => I8(0).into(),
+                            Types::I16 => I16(0).into(),
+                            Types::I32 => I32(0).into(),
+                            Types::U8 => U8(0).into(),
+                            Types::U16 => U16(0).into(),
+                            Types::U32 => U32(0).into(),
+                            Types::Char => Char('0').into(),
+                        }
+                    } else {
+                        t
+                    }
+                })
+                .collect()
+        } else {
+            values
+        };
 
-        Self::from_bytes(&data)
+        let x = data.iter().flat_map(|t| t.to_bytes()).collect::<Vec<u8>>();
+
+        Self::from_bytes(&x)
     }
 
     pub fn len(&self) -> usize {

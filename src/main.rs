@@ -17,7 +17,7 @@ fn main() -> Result<()> {
     let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
     let table = catalog.add_table("users", &schema, true)?;
 
-    let tuple = Tuple::new(vec![U8(2).into(), U16(3).into()]);
+    let tuple = Tuple::new(vec![U8(2).into(), U16(3).into()], &schema);
     table.insert(tuple)?;
 
     drop(catalog);

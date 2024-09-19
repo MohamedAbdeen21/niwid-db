@@ -77,14 +77,14 @@ impl Catalog {
         }
 
         let mut table = Table::new(table_name.to_string(), schema)?;
-        let schema = String::from_utf8(schema.to_bytes().to_vec())?;
+        let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Box<dyn AsBytes>> = vec![
             Str(table_name.to_string()).into(),
             I64(table.get_first_page_id()).into(),
             I64(table.get_last_page_id()).into(),
-            Str(schema).into(),
+            Str(serialized_schema).into(),
         ];
-        let tuple = Tuple::new(tuple_data);
+        let tuple = Tuple::new(tuple_data, &schema);
         let tuple_id = self.table.insert(tuple)?;
 
         self.tables.push((tuple_id, table));

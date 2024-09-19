@@ -6,7 +6,7 @@ use crate::pages::{
 };
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
-use crate::types::{Str, Types, STR_DELIMITER};
+use crate::types::{AsBytes, Str, Types, STR_DELIMITER};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
@@ -113,7 +113,8 @@ impl Table {
             return Err(anyhow!("Tuple is too long"));
         }
 
-        let tuple = Tuple::new(vec![Str(string).into()]);
+        let dummy_schema = Schema::new(vec![], vec![]);
+        let tuple = Tuple::new(vec![Str(string).into()], &dummy_schema);
 
         let blob = unsafe { self.blob_page.as_mut().unwrap() };
 
@@ -181,8 +182,7 @@ impl Table {
             .into();
 
         let tuple = unsafe { blob_page.as_ref().unwrap() }.read_raw(slot);
-        let string = String::from_utf8(tuple.get_data().to_vec()).unwrap();
-        Str(string)
+        Str::from_bytes(tuple.get_data())
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
@@ -310,7 +310,7 @@ mod tests {
         let bpm = table.bpm.clone();
 
         let tuple_data: Vec<Box<dyn AsBytes>> = vec![U8(2).into(), U16(50000).into()];
-        let tuple = Tuple::new(tuple_data);
+        let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
 
         let page_id = unsafe { table.first_page.as_ref().unwrap().get_page_id() };
@@ -335,20 +335,20 @@ mod tests {
         // free page = 4080
         // 140 * 29 = 4080
         for i in 0..140 {
-            let tuple = Tuple::new(vec![U128(i).into()]);
+            let tuple = Tuple::new(vec![U128(i).into()], &schema);
             table.insert(tuple)?;
         }
 
         assert_eq!(table.first_page, table.last_page);
 
-        table.insert(Tuple::new(vec![U128(9999).into()]))?;
+        table.insert(Tuple::new(vec![U128(9999).into()], &schema))?;
         let second_id = table.get_last_page_id();
 
         assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..140 {
-            let tuple = Tuple::new(vec![U128(i).into()]);
+            let tuple = Tuple::new(vec![U128(i).into()], &schema);
             table.insert(tuple)?;
         }
 
@@ -385,23 +385,21 @@ mod tests {
         let s2 = "Hello, Again";
         let schema = Schema::new(
             vec!["a", "str", "b"],
-            vec![Types::U8, Types::Str, Types::Str, Types::U8],
+            vec![Types::U8, Types::Str, Types::U8],
         );
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(vec![
-            U8(100).into(),
-            Str(s1.to_string()).into(),
-            U8(50).into(),
-        ]);
+        let tuple = Tuple::new(
+            vec![U8(100).into(), Str(s1.to_string()).into(), U8(50).into()],
+            &schema,
+        );
         table.insert(tuple)?;
 
-        let tuple = Tuple::new(vec![
-            U8(20).into(),
-            Str(s2.to_string()).into(),
-            U8(10).into(),
-        ]);
+        let tuple = Tuple::new(
+            vec![U8(20).into(), Str(s2.to_string()).into(), U8(10).into()],
+            &schema,
+        );
         table.insert(tuple)?;
 
         let mut counter = 0;
