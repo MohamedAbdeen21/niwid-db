@@ -1,31 +1,29 @@
-mod pages;
 mod disk_manager;
+mod pages;
 
-use disk_manager::{write_to_file, read_from_file};
-use pages::Page;
-use pages::table_page::TablePage;
 use anyhow::Result;
+use disk_manager::{read_from_file, write_to_file};
+use pages::table_page::TablePage;
 
 fn main() -> Result<()> {
     let path = "my_struct.bin";
 
-    let my_data = Page::new();
-    let mut table_page: TablePage = my_data.into();
-    table_page.header_mut().add_tuple();
-
+    let mut table_page = TablePage::new();
+    table_page.insert_tuple(&[2, 3])?;
+    table_page.insert_tuple(&[4, 5])?;
 
     write_to_file(&table_page, path)?;
 
-    let mut loaded_data = read_from_file::<TablePage>(path)?;
+    let loaded_data = read_from_file::<TablePage>(path)?;
 
-    let header = loaded_data.header_mut();
-    println!("Header after write: {:?}", header);
+    println!("{:?}", loaded_data);
 
-    header.add_tuple();
-    let header = loaded_data.header();
-    println!("Header after direct modification: {:?}", header);
+    let header = loaded_data.read_tuple(0);
+    println!("Data after write: {:?}", header);
 
-    //remove the file
+    let header = loaded_data.read_tuple(1);
+    println!("Data after write: {:?}", header);
+
     std::fs::remove_file(path)?;
 
     Ok(())

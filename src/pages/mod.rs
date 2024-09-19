@@ -1,5 +1,5 @@
-mod traits;
-pub mod table_page;
+pub(crate) mod table_page;
+pub(crate) mod traits;
 
 use std::mem;
 use traits::Serialize;
@@ -11,10 +11,22 @@ pub const PAGE_SIZE: usize = 4096; // 4 KBs
 #[repr(C)]
 #[derive(Debug)]
 pub struct Page {
+    is_dirty: bool,
     /// Underlying block of memory of size [`PAGE_SIZE`]
     data: [u8; PAGE_SIZE],
-    /// u32 instead of boolean to avoid alignment issues
-    is_dirty: u32,
+}
+
+impl Serialize for Page {
+    fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        assert_eq!(bytes.len(), PAGE_SIZE);
+        let mut page = Page::new();
+        page.data.copy_from_slice(bytes);
+        page
+    }
 }
 
 #[allow(dead_code)]
@@ -22,19 +34,8 @@ impl Page {
     pub fn new() -> Self {
         Page {
             data: [0u8; PAGE_SIZE],
-            is_dirty: 0,
+            is_dirty: false,
         }
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.data
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        assert_eq!(bytes.len(), PAGE_SIZE);
-        let mut page = Page::new();
-        page.data.copy_from_slice(bytes);
-        page
     }
 
     pub fn read<T: Serialize + Sized>(&self, offset: usize) -> T {
@@ -55,4 +56,3 @@ impl Page {
         self.data[offset..offset + size].copy_from_slice(bytes);
     }
 }
-
