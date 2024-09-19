@@ -30,7 +30,6 @@ impl Iterator for TableIterator {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Entry> {
-        println!("{} {}", self.current, self.page.header().get_next_page());
         if self.current >= self.page.header().get_num_tuples() && self.next_page == INVALID_PAGE {
             return None;
         }

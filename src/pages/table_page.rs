@@ -168,7 +168,7 @@ impl<'a> From<&'a mut Page> for *mut TablePage {
 
 impl<'a> From<&'a Page> for TablePage {
     fn from(page: &'a Page) -> TablePage {
-        let mut p = unsafe { *(page as *const Page as *mut TablePage) };
+        let mut p = unsafe { *(page as *const Page as *const TablePage) };
         p.set_page_id(page.get_page_id());
         p.is_dirty = page.is_dirty();
         if p.header().get_next_page() == 0 {
