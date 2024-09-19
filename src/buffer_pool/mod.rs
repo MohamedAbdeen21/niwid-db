@@ -7,12 +7,12 @@ use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
 use std::collections::{HashMap, LinkedList};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 const BUFFER_POOL_SIZE: usize = 10_000;
 
 type FrameId = usize;
-pub type BufferPoolManager = &'static RwLock<BufferPool>;
+pub type BufferPoolManager = Arc<RwLock<BufferPool>>;
 
 pub struct BufferPool {
     free_frames: LinkedList<FrameId>,
@@ -34,7 +34,7 @@ impl BufferPool {
         println!("Page Table: {:?}", self.page_table);
     }
 
-    fn init(size: usize) -> Self {
+    pub fn init(size: usize) -> Self {
         let mut frames = Vec::with_capacity(size);
         for i in 0..size {
             frames.push(RwLock::new(Frame::new(i)));
@@ -51,9 +51,11 @@ impl BufferPool {
     }
 
     pub fn fetch_frame(&mut self, page_id: PageId) -> Result<&mut RwLock<Frame>> {
-        let frame_id = if self.page_table.contains_key(&page_id) {
-            *self.page_table.get(&page_id).unwrap()
+        println!("fetching frame {}", page_id);
+        let frame_id = if let Some(frame_id) = self.page_table.get(&page_id) {
+            *frame_id
         } else {
+            println!("reading frame {}", page_id);
             let page = self.disk_manager.read_from_file(page_id).unwrap();
             let frame_id = if !self.free_frames.is_empty() {
                 self.free_frames.pop_front().unwrap()
@@ -126,18 +128,19 @@ impl BufferPool {
     }
 
     #[allow(unused)]
-    pub fn get_pin_count(&self, page_id: &PageId) -> u16 {
-        let frame_id = *self.page_table.get(page_id).unwrap();
-        self.frames[frame_id].read().unwrap().get_pin_count()
+    pub fn get_pin_count(&self, page_id: &PageId) -> Option<u16> {
+        let frame_id = *self.page_table.get(page_id)?;
+        Some(self.frames[frame_id].read().unwrap().get_pin_count())
     }
 }
 
-lazy_static! {
-    static ref BUFFER_POOL: RwLock<BufferPool> = RwLock::new(BufferPool::init(BUFFER_POOL_SIZE));
-}
-
 fn get_buffer_pool() -> BufferPoolManager {
-    &BUFFER_POOL
+    lazy_static! {
+        static ref BUFFER_POOL: Arc<RwLock<BufferPool>> =
+            Arc::new(RwLock::new(BufferPool::init(BUFFER_POOL_SIZE)));
+    }
+
+    BUFFER_POOL.clone()
 }
 
 #[cfg(test)]
@@ -147,17 +150,9 @@ mod tests {
     use super::*;
     use anyhow::Result;
 
-    lazy_static! {
-        static ref BUFFER_POOL: RwLock<BufferPool> = RwLock::new(BufferPool::init(2));
-    }
-
-    fn get_buffer_pool() -> BufferPoolManager {
-        &BUFFER_POOL
-    }
-
     #[test]
     fn test_dont_evict_pinned() -> Result<()> {
-        let bpm = get_buffer_pool();
+        let bpm = RwLock::new(BufferPool::init(2));
         let p1: TablePage = bpm
             .write()
             .unwrap()

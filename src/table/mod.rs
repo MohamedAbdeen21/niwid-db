@@ -14,7 +14,6 @@ pub struct Table {
     last_page: *mut TablePage,
     bpm: BufferPoolManager,
 }
-
 impl Table {
     pub fn new() -> Result<Self> {
         let bpm = BufferPool::new();
@@ -66,8 +65,8 @@ impl Table {
 
         last.header_mut().set_next_page_id(page_id);
 
-        let page_id = unsafe { self.last_page.as_ref().unwrap().get_page_id() };
-        self.bpm.write().unwrap().unpin(&page_id);
+        let last_page_id = unsafe { self.last_page.as_ref().unwrap().get_page_id() };
+        self.bpm.write().unwrap().unpin(&last_page_id);
 
         self.last_page = page;
 
@@ -118,17 +117,43 @@ impl Drop for Table {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, RwLock};
+
+    use super::*;
     use crate::{
         tuple::schema::Schema,
         types::{Primitive, Types, U128, U16, U8},
     };
-
-    use super::*;
     use anyhow::Result;
+
+    fn test_table(size: usize) -> Result<Table> {
+        let bpm = Arc::new(RwLock::new(BufferPool::init(size)));
+
+        let page: *mut TablePage = bpm
+            .write()
+            .unwrap()
+            .new_page()?
+            .write()
+            .unwrap()
+            .get_page_write()
+            .into();
+
+        let page_id = unsafe { (*page).get_page_id() };
+
+        // increment pin count
+        let _ = bpm.write().unwrap().fetch_frame(page_id);
+
+        Ok(Table {
+            first_page: page,
+            last_page: page,
+            bpm,
+        })
+    }
 
     #[test]
     fn test_unpin_drop() -> Result<()> {
-        let mut table = Table::new()?;
+        let mut table = test_table(2)?;
+        let bpm = table.bpm.clone();
 
         let schema = Schema::new(
             vec!["id".to_string(), "age".to_string()],
@@ -141,15 +166,14 @@ mod tests {
 
         let page_id = unsafe { table.first_page.as_ref().unwrap().get_page_id() };
         drop(table);
-        let bpm = BufferPool::new();
-        assert_eq!(1, bpm.read().unwrap().get_pin_count(&page_id));
+        assert_eq!(1, bpm.read().unwrap().get_pin_count(&page_id).unwrap());
 
         Ok(())
     }
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let mut table = Table::new()?;
+        let mut table = test_table(3)?;
 
         let schema = Schema::new(vec!["a".to_string()], vec![Types::U128]);
 
@@ -169,7 +193,21 @@ mod tests {
 
         assert_ne!(table.first_page, table.last_page);
 
-        // table.scan(|entry| println!("{:?}", entry));
+        // add a third page, make sure that page 2 is unpinned
+        for i in 0..140 {
+            let tuple_data = vec![U128(i).to_bytes()];
+            let tuple = Tuple::new(tuple_data, &schema);
+            table.insert(tuple)?;
+        }
+
+        assert_eq!(2, table.bpm.read().unwrap().get_pin_count(&1).unwrap());
+        assert_eq!(1, table.bpm.read().unwrap().get_pin_count(&2).unwrap());
+        assert_eq!(2, table.bpm.read().unwrap().get_pin_count(&3).unwrap());
+
+        // get count of tuples
+        let mut count = 0;
+        table.scan(|_| count += 1);
+        assert_eq!(281, count);
 
         Ok(())
     }
