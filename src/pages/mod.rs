@@ -5,6 +5,8 @@ pub(crate) mod traits;
 use latch::Latch;
 use traits::Serialize;
 
+use crate::disk_manager::DiskWritable;
+
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
 pub const INVALID_PAGE: PageId = -1;
 
@@ -32,6 +34,20 @@ impl Serialize for Page {
         let mut page = Page::new();
         page.data.copy_from_slice(bytes);
         page
+    }
+}
+
+impl DiskWritable for Page {
+    fn size() -> usize {
+        PAGE_SIZE
+    }
+
+    fn set_page_id(&mut self, page_id: PageId) {
+        self.page_id = page_id;
+    }
+
+    fn get_page_id(&self) -> PageId {
+        self.page_id
     }
 }
 

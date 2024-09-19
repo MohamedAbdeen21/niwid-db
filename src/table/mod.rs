@@ -1,10 +1,11 @@
 use crate::buffer_pool::{BufferPool, BufferPoolManager};
 use crate::pages::{
-    table_page::{TablePage, TupleExt, TupleId, META_SIZE, PAGE_END, SLOT_SIZE},
+    table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE},
     traits::Serialize,
     PageId,
 };
 use crate::tuple::{schema::Schema, Entry, Tuple};
+use crate::tuple::{TupleExt, TupleId};
 use crate::types::{Str, Types, STR_DELIMITER};
 use anyhow::{anyhow, Result};
 
@@ -107,13 +108,12 @@ impl Table {
         table_iterator::TableIterator::new(self)
     }
 
-    fn insert_string(&mut self, data: &[u8]) -> Result<TupleId> {
-        if data.len() > PAGE_END - SLOT_SIZE {
+    fn insert_string(&mut self, string: String) -> Result<TupleId> {
+        if string.len() > PAGE_END - SLOT_SIZE {
             return Err(anyhow!("Tuple is too long"));
         }
 
-        let schema = Schema::new(vec!["a"], vec![Types::Str]);
-        let tuple = Tuple::new(vec![data.into()], &schema);
+        let tuple = Tuple::new(vec![Str(string).into()]);
 
         let blob = unsafe { self.blob_page.as_mut().unwrap() };
 
@@ -153,7 +153,7 @@ impl Table {
             if inside && byte != &delimiter {
                 string.push(*byte as char);
             } else if inside && byte == &delimiter {
-                let tuple_id: TupleId = self.insert_string(string.as_bytes())?;
+                let tuple_id: TupleId = self.insert_string(string.clone())?;
                 string.clear();
                 processed_data.extend(tuple_id.to_bytes());
                 inside = false;
@@ -309,8 +309,8 @@ mod tests {
         let mut table = test_table(2, &schema)?;
         let bpm = table.bpm.clone();
 
-        let tuple_data = vec![U8(2).to_bytes(), U16(50000).to_bytes()];
-        let tuple = Tuple::new(tuple_data, &schema);
+        let tuple_data: Vec<Box<dyn AsBytes>> = vec![U8(2).into(), U16(50000).into()];
+        let tuple = Tuple::new(tuple_data);
         table.insert(tuple)?;
 
         let page_id = unsafe { table.first_page.as_ref().unwrap().get_page_id() };
@@ -335,22 +335,20 @@ mod tests {
         // free page = 4080
         // 140 * 29 = 4080
         for i in 0..140 {
-            let tuple_data = vec![U128(i).to_bytes()];
-            let tuple = Tuple::new(tuple_data, &schema);
+            let tuple = Tuple::new(vec![U128(i).into()]);
             table.insert(tuple)?;
         }
 
         assert_eq!(table.first_page, table.last_page);
 
-        table.insert(Tuple::new(vec![U128(9999).to_bytes()], &schema))?;
+        table.insert(Tuple::new(vec![U128(9999).into()]))?;
         let second_id = table.get_last_page_id();
 
         assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..140 {
-            let tuple_data = vec![U128(i).to_bytes()];
-            let tuple = Tuple::new(tuple_data, &schema);
+            let tuple = Tuple::new(vec![U128(i).into()]);
             table.insert(tuple)?;
         }
 
@@ -392,24 +390,18 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(
-            vec![
-                U8(100).to_bytes(),
-                Str(s1.to_string()).to_bytes(),
-                U8(50).to_bytes(),
-            ],
-            &schema,
-        );
+        let tuple = Tuple::new(vec![
+            U8(100).into(),
+            Str(s1.to_string()).into(),
+            U8(50).into(),
+        ]);
         table.insert(tuple)?;
 
-        let tuple = Tuple::new(
-            vec![
-                U8(20).to_bytes(),
-                Str(s2.to_string()).to_bytes(),
-                U8(10).to_bytes(),
-            ],
-            &schema,
-        );
+        let tuple = Tuple::new(vec![
+            U8(20).into(),
+            Str(s2.to_string()).into(),
+            U8(10).into(),
+        ]);
         table.insert(tuple)?;
 
         let mut counter = 0;

@@ -9,7 +9,7 @@ mod types;
 use anyhow::Result;
 use catalog::Catalog;
 use tuple::{schema::Schema, Tuple};
-use types::{Primitive, Types, U16, U8};
+use types::{Types, U16, U8};
 
 fn main() -> Result<()> {
     let mut catalog = Catalog::new()?;
@@ -17,8 +17,7 @@ fn main() -> Result<()> {
     let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
     let table = catalog.add_table("users", &schema, true)?;
 
-    let tuple_data = vec![U8(2).to_bytes(), U16(3).to_bytes()];
-    let tuple = Tuple::new(tuple_data, &schema);
+    let tuple = Tuple::new(vec![U8(2).into(), U16(3).into()]);
     table.insert(tuple)?;
 
     drop(catalog);

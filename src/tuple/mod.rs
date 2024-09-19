@@ -1,12 +1,16 @@
 pub mod schema;
 
+use crate::pages::traits::Serialize;
+use crate::pages::PageId;
+use crate::tuple::schema::Schema;
+use crate::types::AsBytes;
+use anyhow::{anyhow, Result};
 use std::{mem, slice};
 
-use crate::tuple::schema::Schema;
-use crate::{pages::traits::Serialize, types::Primitive};
-use anyhow::{anyhow, Result};
-
+/// Tuple Meta Data + the Tuple itself
 pub type Entry = (TupleMetaData, Tuple);
+/// Page Id and slot Id
+pub type TupleId = (PageId, usize);
 
 #[repr(C)]
 #[derive(Debug, Eq, PartialEq)]
@@ -15,34 +19,17 @@ pub struct Tuple {
 }
 
 impl Tuple {
-    pub fn new(data: Vec<Box<[u8]>>, _schema: &Schema) -> Self {
-        // let strings = schema
-        //     .types
-        //     .iter()
-        //     .enumerate()
-        //     .filter(|(_, t)| t == &&Types::Str);
-        //
-        // let _size = schema.types.iter().fold(0, |acc, t| acc + t.size());
+    pub fn new(data: Vec<Box<dyn AsBytes>>) -> Self {
+        let data = data.iter().flat_map(|t| t.to_bytes()).collect::<Vec<u8>>();
 
-        let data = data
-            .iter()
-            .flat_map(|b| b.iter())
-            .cloned()
-            .collect::<Vec<u8>>();
-
-        // TODO: validate input and careful with strings
-        // if data.len() != size {
-        //     panic!("data length mismatch");
-        // }
-
-        Self::from_bytes(data.as_slice())
+        Self::from_bytes(&data)
     }
 
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    pub fn get_value<T: Primitive>(&self, field: &str, schema: &Schema) -> Result<T> {
+    pub fn get_value<T: AsBytes>(&self, field: &str, schema: &Schema) -> Result<T> {
         let field_id = schema
             .fields
             .iter()
@@ -111,7 +98,6 @@ impl Default for TupleMetaData {
     }
 }
 
-#[allow(unused)]
 impl TupleMetaData {
     pub fn new() -> Self {
         Self {
@@ -134,5 +120,35 @@ impl TupleMetaData {
 
     pub fn is_deleted(&self) -> bool {
         self.is_deleted
+    }
+}
+
+pub trait TupleExt {
+    fn from_bytes(bytes: &[u8]) -> Self;
+    #[allow(unused)]
+    fn to_bytes(&self) -> Vec<u8>;
+}
+
+impl TupleExt for TupleId {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let page_offset = std::mem::size_of::<PageId>();
+        let slot_size = std::mem::size_of::<usize>();
+        let page_id = PageId::from_ne_bytes(bytes[0..page_offset].try_into().unwrap());
+        let slot_id = usize::from_le_bytes(
+            bytes[page_offset..page_offset + slot_size]
+                .try_into()
+                .unwrap(),
+        );
+        (page_id, slot_id)
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let page_id_size = std::mem::size_of::<PageId>();
+        let slot_id_size = std::mem::size_of::<usize>();
+        let mut bytes = Vec::with_capacity(page_id_size + slot_id_size);
+        bytes.extend_from_slice(&self.0.to_ne_bytes());
+        bytes.extend_from_slice(&self.1.to_ne_bytes());
+
+        bytes
     }
 }

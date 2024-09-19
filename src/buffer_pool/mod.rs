@@ -44,7 +44,7 @@ impl BufferPool {
         let disk_manager = DiskManager::new(DISK_STORAGE);
 
         // make sure catalog page can also be fetched
-        match disk_manager.read_from_file(0) {
+        match disk_manager.read_from_file::<Page>(0) {
             Ok(_) => (),
             Err(_) => {
                 let mut catalog_page = Page::new();

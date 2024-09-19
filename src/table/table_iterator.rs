@@ -1,8 +1,8 @@
 use crate::buffer_pool::BufferPoolManager;
-use crate::pages::table_page::{TablePage, TupleId};
+use crate::pages::table_page::TablePage;
 use crate::pages::{PageId, INVALID_PAGE};
 use crate::tuple::schema::Schema;
-use crate::tuple::Entry;
+use crate::tuple::{Entry, TupleId};
 
 use super::Table;
 

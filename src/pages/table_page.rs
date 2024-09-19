@@ -1,5 +1,5 @@
 use super::{latch::Latch, traits::Serialize, PageId, INVALID_PAGE};
-use crate::tuple::{Entry, Tuple, TupleMetaData};
+use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
 
 use super::{Page, PAGE_SIZE};
 use anyhow::{anyhow, Result};
@@ -12,39 +12,6 @@ pub const META_SIZE: usize = mem::size_of::<TupleMetaData>();
 // We take the first [`HEADER_SIZE`] bytes from the page to store the header
 // This means that the last address in the page is [`PAGE_END`] and not [`PAGE_SIZE`].
 pub const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
-
-/// Page Id and slot Id
-pub type TupleId = (PageId, usize);
-
-pub trait TupleExt {
-    #[allow(unused)]
-    fn from_bytes(bytes: &[u8]) -> Self;
-    fn to_bytes(&self) -> Vec<u8>;
-}
-
-impl TupleExt for TupleId {
-    fn from_bytes(bytes: &[u8]) -> Self {
-        let page_offset = std::mem::size_of::<PageId>();
-        let slot_size = std::mem::size_of::<usize>();
-        let page_id = PageId::from_ne_bytes(bytes[0..page_offset].try_into().unwrap());
-        let slot_id = usize::from_le_bytes(
-            bytes[page_offset..page_offset + slot_size]
-                .try_into()
-                .unwrap(),
-        );
-        (page_id, slot_id)
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let page_id_size = std::mem::size_of::<PageId>();
-        let slot_id_size = std::mem::size_of::<usize>();
-        let mut bytes = Vec::with_capacity(page_id_size + slot_id_size);
-        bytes.extend_from_slice(&self.0.to_ne_bytes());
-        bytes.extend_from_slice(&self.1.to_ne_bytes());
-
-        bytes
-    }
-}
 
 /// The Table Page data that persists on disk
 /// all other fields are helpers (pointers and flags)

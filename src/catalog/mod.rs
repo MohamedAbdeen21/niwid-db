@@ -1,10 +1,9 @@
 use crate::buffer_pool::{BufferPool, BufferPoolManager};
-use crate::pages::table_page::TupleId;
 use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
-use crate::tuple::{Entry, Tuple};
-use crate::types::{Primitive, Str, Types, I128, I64};
+use crate::tuple::{Entry, Tuple, TupleId};
+use crate::types::{AsBytes, Str, Types, I128, I64};
 use anyhow::{anyhow, Result};
 
 // preserve page_id 0 for catalog, bpm starts assigning at 1
@@ -79,13 +78,13 @@ impl Catalog {
 
         let mut table = Table::new(table_name.to_string(), schema)?;
         let schema = String::from_utf8(schema.to_bytes().to_vec())?;
-        let tuple_data = vec![
-            Str(table_name.to_string()).to_bytes(),
-            I64(table.get_first_page_id()).to_bytes(),
-            I64(table.get_last_page_id()).to_bytes(),
-            Str(schema).to_bytes(),
+        let tuple_data: Vec<Box<dyn AsBytes>> = vec![
+            Str(table_name.to_string()).into(),
+            I64(table.get_first_page_id()).into(),
+            I64(table.get_last_page_id()).into(),
+            Str(schema).into(),
         ];
-        let tuple = Tuple::new(tuple_data, &self.schema);
+        let tuple = Tuple::new(tuple_data);
         let tuple_id = self.table.insert(tuple)?;
 
         self.tables.push((tuple_id, table));
