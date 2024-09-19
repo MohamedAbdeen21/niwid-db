@@ -151,7 +151,7 @@ impl TablePage {
             TupleMetaData::from_bytes(&self.data.bytes[meta_offset..(meta_offset + META_SIZE)]);
         let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size) as usize];
 
-        return (meta, Tuple::new(tuple_data));
+        return (meta, Tuple::from_bytes(tuple_data));
     }
 
     pub fn to_iter(self) -> TablePageIterator {
