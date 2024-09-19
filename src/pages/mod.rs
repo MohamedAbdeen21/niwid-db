@@ -89,4 +89,33 @@ impl Page {
         self.data[start..end].copy_from_slice(bytes);
         self.data[0] = 1;
     }
+
+    pub fn set_latch(&mut self, latch: Arc<Latch>) {
+        self.latch = latch;
+    }
+
+    #[allow(unused)]
+    pub fn is_locked(&self) -> bool {
+        self.latch.is_locked()
+    }
+
+    #[cfg(test)]
+    pub fn wlock(&self) {
+        self.latch.wlock();
+    }
+
+    #[allow(unused)]
+    pub fn wunlock(&self) {
+        self.latch.wunlock();
+    }
+
+    #[allow(unused)]
+    pub fn rlock(&self) {
+        self.latch.rlock();
+    }
+
+    #[allow(unused)]
+    pub fn runlock(&self) {
+        self.latch.runlock();
+    }
 }

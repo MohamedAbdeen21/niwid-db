@@ -1,17 +1,22 @@
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::{
+    atomic::{AtomicU16, Ordering},
+    Arc,
+};
 
-use crate::pages::Page;
+use crate::pages::{latch::Latch, Page};
 
 pub struct Frame {
     page: Page,
     counter: AtomicU16,
+    pub latch: Arc<Latch>,
 }
 
 impl Frame {
     pub fn new() -> Self {
         Self {
             page: Page::new(),
-            counter: AtomicU16::new(1),
+            counter: AtomicU16::new(0),
+            latch: Arc::new(Latch::new()),
         }
     }
 
@@ -29,6 +34,7 @@ impl Frame {
 
     pub(super) fn set_page(&mut self, page: Page) {
         self.page = page;
+        self.page.set_latch(self.latch.clone());
     }
 
     pub fn writer(&mut self) -> &mut Page {

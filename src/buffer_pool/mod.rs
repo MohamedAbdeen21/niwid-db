@@ -115,8 +115,8 @@ impl BufferPool {
         let page_id = self.increment_page_id()?;
 
         let frame = &mut self.frames[frame_id];
-        frame.pin();
         self.replacer.record_access(frame_id);
+        self.replacer.set_evictable(frame_id, true);
 
         let mut page = Page::new();
         page.set_page_id(page_id);
@@ -131,7 +131,7 @@ impl BufferPool {
     pub fn evict_frame(&mut self) -> FrameId {
         let frame_id = self.replacer.evict();
         let frame = &mut self.frames[frame_id];
-        assert!(frame.get_pin_count() == 1);
+        assert!(frame.get_pin_count() == 0);
         let page = frame.writer();
 
         self.page_table.remove(&page.get_page_id());
@@ -144,7 +144,7 @@ impl BufferPool {
         let frame = &mut self.frames[frame_id];
         frame.unpin();
 
-        if frame.get_pin_count() == 1 {
+        if frame.get_pin_count() == 0 {
             self.replacer.set_evictable(frame_id, true);
         }
 
@@ -196,8 +196,6 @@ impl Drop for BufferPool {
 
 #[cfg(test)]
 mod tests {
-    use crate::pages::table_page::TablePage;
-
     use super::*;
     use anyhow::Result;
 
@@ -205,17 +203,36 @@ mod tests {
     fn test_dont_evict_pinned() -> Result<()> {
         let mut bpm = BufferPool::init(2);
 
-        let p1: TablePage = bpm.new_page()?.reader().into();
+        let p1 = bpm.new_page()?.reader().get_page_id();
+        let p2 = bpm.new_page()?.reader().get_page_id();
 
-        let _: TablePage = bpm.new_page()?.reader().into();
+        // pin the page
+        let _ = bpm.fetch_frame(p1);
+        let _ = bpm.fetch_frame(p2);
+
+        assert!(bpm.new_page().is_err());
+
+        bpm.unpin(&p1);
+
+        assert!(bpm.new_page().is_ok());
+
+        let _ = bpm.fetch_frame(p1);
 
         assert!(bpm.new_page().is_err());
 
-        bpm.unpin(&p1.get_page_id());
+        Ok(())
+    }
 
-        let _: TablePage = bpm.new_page()?.reader().into();
+    #[test]
+    fn test_shared_latch() -> Result<()> {
+        let mut bpm = BufferPool::init(2);
 
-        assert!(bpm.new_page().is_err());
+        let frame = bpm.new_page()?;
+        let page = frame.writer();
+
+        page.wlock();
+        assert!(frame.latch.is_locked());
+        frame.latch.wunlock();
 
         Ok(())
     }

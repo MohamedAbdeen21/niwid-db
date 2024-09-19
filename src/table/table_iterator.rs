@@ -19,7 +19,7 @@ impl TableIterator {
         let bpm = table.bpm.clone();
         let page: TablePage = bpm
             .lock()
-            .fetch_frame(table.first_page.get_page_id())
+            .fetch_frame(table.first_page)
             .unwrap()
             .reader()
             .into();
@@ -84,6 +84,7 @@ impl Iterator for TableIterator {
 mod tests {
     use anyhow::Result;
 
+    use crate::pages::table_page::TablePage;
     use crate::table::tests::test_table;
     use crate::tuple::schema::Schema;
     use crate::tuple::{Entry, Tuple, TupleId};
@@ -134,20 +135,21 @@ mod tests {
             table.insert(tuple)?;
         }
 
-        assert_eq!(
-            table.first_page.get_page_id(),
-            table.last_page.get_page_id()
-        );
+        let first_page: TablePage = table
+            .bpm
+            .lock()
+            .fetch_frame(table.first_page)?
+            .writer()
+            .into();
 
-        assert!(table.first_page.header().is_dirty());
+        assert_eq!(table.first_page, table.last_page);
+
+        assert!(first_page.header().is_dirty());
 
         let tuple = Tuple::new(vec![Null().into(), Null().into()], &schema);
         table.insert(tuple)?;
 
-        assert_ne!(
-            table.first_page.get_page_id(),
-            table.last_page.get_page_id()
-        );
+        assert_ne!(table.first_page, table.last_page);
 
         let mut counter = 0;
         let scanner = |_: (TupleId, Entry)| -> Result<()> {
@@ -161,7 +163,7 @@ mod tests {
                 .lock()
                 .get_pin_count(&table.get_first_page_id())
                 .unwrap(),
-            2
+            1
         );
 
         TableIterator::new(&table).try_for_each(scanner)?;

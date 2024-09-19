@@ -1,7 +1,7 @@
 use parking_lot::{lock_api::RawRwLock, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
 
 #[derive(Debug)]
-pub(super) struct Latch {
+pub struct Latch {
     lock: RwLock<()>,
 }
 
@@ -39,7 +39,6 @@ impl Latch {
         self.lock.upgradable_read()
     }
 
-    #[cfg(test)]
     pub fn is_locked(&self) -> bool {
         self.lock.is_locked()
     }

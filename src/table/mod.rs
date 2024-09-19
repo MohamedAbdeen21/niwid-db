@@ -13,9 +13,9 @@ pub mod table_iterator;
 
 pub struct Table {
     name: String,
-    first_page: TablePage,
-    last_page: TablePage,
-    blob_page: TablePage,
+    first_page: PageId,
+    last_page: PageId,
+    blob_page: PageId,
     bpm: BufferPoolManager,
     schema: Schema,
 }
@@ -24,19 +24,14 @@ impl Table {
     pub fn new(name: String, schema: &Schema) -> Result<Self> {
         let bpm = BufferPool::new();
 
-        let page: TablePage = bpm.lock().new_page()?.writer().into();
+        let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
-        let page_id = page.get_page_id();
-
-        // increment pin count
-        let _ = bpm.lock().fetch_frame(page_id);
-
-        let blob_page: TablePage = bpm.lock().new_page()?.writer().into();
+        let blob_page = bpm.lock().new_page()?.reader().get_page_id();
 
         Ok(Self {
             name,
-            first_page: page.clone(),
-            last_page: page,
+            first_page: page_id,
+            last_page: page_id,
             blob_page,
             bpm,
             schema: schema.clone(),
@@ -46,22 +41,12 @@ impl Table {
     pub fn fetch(
         name: String,
         schema: &Schema,
-        first_page_id: PageId,
-        last_page_id: PageId,
+        first_page: PageId,
+        last_page: PageId,
     ) -> Result<Self> {
         let bpm = BufferPool::new();
 
-        let first_page: TablePage = bpm.lock().fetch_frame(first_page_id)?.writer().into();
-
-        let last_page: TablePage = if last_page_id != first_page_id {
-            bpm.lock().fetch_frame(last_page_id)?.writer().into()
-        } else {
-            // increment page pin count
-            let _ = bpm.lock().fetch_frame(first_page_id);
-            first_page.clone()
-        };
-
-        let blob_page: TablePage = bpm.lock().new_page()?.writer().into();
+        let blob_page = bpm.lock().new_page()?.reader().get_page_id();
 
         Ok(Self {
             name,
@@ -78,16 +63,16 @@ impl Table {
     }
 
     pub fn get_first_page_id(&self) -> PageId {
-        self.first_page.get_page_id()
+        self.first_page
     }
 
     pub fn get_last_page_id(&self) -> PageId {
-        self.last_page.get_page_id()
+        self.last_page
     }
 
     #[cfg(test)]
     pub fn get_blob_page_id(&self) -> PageId {
-        self.blob_page.get_page_id()
+        self.blob_page
     }
 
     fn iter(&self) -> table_iterator::TableIterator {
@@ -101,20 +86,20 @@ impl Table {
 
         let tuple = Tuple::new(vec![Str::from_raw_bytes(bytes).into()], &Schema::default());
 
-        if let Ok(id) = self.blob_page.insert_raw(&tuple) {
+        let mut blob_page: TablePage = self.bpm.lock().fetch_frame(self.blob_page)?.writer().into();
+
+        if let Ok(id) = blob_page.insert_raw(&tuple) {
             return Ok(id);
         }
 
-        // page is full, add another page and link to table
-        let blob_page: TablePage = self.bpm.lock().new_page()?.writer().into();
+        // page is full, add another page
+        let mut new_blob_page: TablePage = self.bpm.lock().new_page()?.writer().into();
 
-        let last_page_id = self.blob_page.get_page_id();
+        self.bpm.lock().unpin(&self.blob_page);
 
-        self.bpm.lock().unpin(&last_page_id);
+        self.blob_page = new_blob_page.get_page_id();
 
-        self.blob_page = blob_page;
-
-        self.blob_page.insert_raw(&tuple)
+        new_blob_page.insert_raw(&tuple)
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
@@ -167,6 +152,7 @@ impl Table {
         let blob_page: TablePage = self.bpm.lock().fetch_frame(page).unwrap().reader().into();
 
         let tuple = blob_page.read_raw(slot);
+        self.bpm.lock().unpin(&page);
         Str::from_raw_bytes(tuple.get_data())
     }
 
@@ -175,7 +161,11 @@ impl Table {
         let (page_id, slot) = tuple_id;
         let page: TablePage = self.bpm.lock().fetch_frame(page_id)?.reader().into();
 
-        Ok(page.read_tuple(slot))
+        let entry = page.read_tuple(slot);
+
+        self.bpm.lock().unpin(&page_id);
+
+        Ok(entry)
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
@@ -184,25 +174,25 @@ impl Table {
         }
 
         let tuple = self.insert_strings(tuple)?;
-        let last = &mut self.last_page;
+        let mut last_page: TablePage = self.bpm.lock().fetch_frame(self.last_page)?.writer().into();
 
-        if let Ok(id) = last.insert_tuple(&tuple) {
+        if let Ok(id) = last_page.insert_tuple(&tuple) {
+            self.bpm.lock().unpin(&self.last_page);
             return Ok(id);
         }
 
         // page is full, add another page and link to table
-        let page: TablePage = self.bpm.lock().new_page()?.writer().into();
+        let mut new_page: TablePage = self.bpm.lock().new_page()?.writer().into();
 
-        let page_id = page.get_page_id();
+        let page_id = new_page.get_page_id();
 
-        last.set_next_page_id(page_id);
+        last_page.set_next_page_id(page_id);
 
-        let last_page_id = self.last_page.get_page_id();
-        self.bpm.lock().unpin(&last_page_id);
+        self.bpm.lock().unpin(&self.last_page);
 
-        self.last_page = page;
+        self.last_page = page_id;
 
-        self.last_page.insert_tuple(&tuple)
+        new_page.insert_tuple(&tuple)
     }
 
     pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>) -> Result<()> {
@@ -242,16 +232,6 @@ impl Table {
     }
 }
 
-impl Drop for Table {
-    fn drop(&mut self) {
-        let mut bpm = self.bpm.lock();
-
-        bpm.unpin(&self.first_page.get_page_id());
-        bpm.unpin(&self.last_page.get_page_id());
-        bpm.unpin(&self.blob_page.get_page_id());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -266,18 +246,15 @@ mod tests {
 
         let mut guard = bpm.lock();
 
-        let page: TablePage = guard.new_page()?.writer().into();
+        let page = guard.new_page()?.reader().get_page_id();
 
-        // increment pin count as it's also the last page
-        let _ = guard.fetch_frame(page.get_page_id());
-
-        let blob_page: TablePage = guard.new_page()?.writer().into();
+        let blob_page = guard.new_page()?.reader().get_page_id();
 
         drop(guard);
 
         Ok(Table {
             name: "test".to_string(),
-            first_page: page.clone(),
+            first_page: page,
             last_page: page,
             blob_page,
             bpm,
@@ -296,10 +273,10 @@ mod tests {
         let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
 
-        let page_id = table.first_page.get_page_id();
+        let page_id = table.first_page;
 
         drop(table);
-        assert_eq!(1, bpm.lock().get_pin_count(&page_id).unwrap());
+        assert_eq!(0, bpm.lock().get_pin_count(&page_id).unwrap());
 
         Ok(())
     }
@@ -324,18 +301,12 @@ mod tests {
             table.insert(tuple)?;
         }
 
-        assert_eq!(
-            table.first_page.get_page_id(),
-            table.last_page.get_page_id()
-        );
+        assert_eq!(table.first_page, table.last_page);
 
         table.insert(Tuple::new(vec![U128(9999).into()], &schema))?;
         let second_id = table.get_last_page_id();
 
-        assert_ne!(
-            table.first_page.get_page_id(),
-            table.last_page.get_page_id()
-        );
+        assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {
@@ -345,10 +316,10 @@ mod tests {
 
         let third_id = table.get_last_page_id();
 
-        assert_eq!(2, table.bpm.lock().get_pin_count(&first_id).unwrap());
-        assert_eq!(2, table.bpm.lock().get_pin_count(&blob_id).unwrap());
-        assert_eq!(1, table.bpm.lock().get_pin_count(&second_id).unwrap());
-        assert_eq!(2, table.bpm.lock().get_pin_count(&third_id).unwrap());
+        assert_eq!(0, table.bpm.lock().get_pin_count(&first_id).unwrap());
+        assert_eq!(0, table.bpm.lock().get_pin_count(&blob_id).unwrap());
+        assert_eq!(0, table.bpm.lock().get_pin_count(&second_id).unwrap());
+        assert_eq!(0, table.bpm.lock().get_pin_count(&third_id).unwrap());
 
         // get count of tuples
         let mut count = 0;
