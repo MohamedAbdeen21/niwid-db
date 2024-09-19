@@ -5,6 +5,7 @@ mod tuple;
 use anyhow::Result;
 use disk_manager::DiskManager;
 use pages::table_page::TablePage;
+use tuple::Tuple;
 
 fn main() -> Result<()> {
     let path = "my_struct.bin";
@@ -24,10 +25,14 @@ fn main() -> Result<()> {
 }
 
 fn insert_write_read(disk: DiskManager, table_page: &mut TablePage, path: &str) -> Result<()> {
-    table_page.insert_tuple(&[2, 3])?;
-    table_page.insert_tuple(&[4, 5])?;
-    // string as a byte array
-    table_page.insert_tuple(&[b'a', b'b', b'c', b'd'])?;
+    let tuple = Tuple::new(&[2, 3]);
+    table_page.insert_tuple(tuple)?;
+
+    let tuple = Tuple::new(&[4, 5]);
+    table_page.insert_tuple(tuple)?;
+
+    let tuple = Tuple::new(&[b'a', b'b', b'c', b'd']);
+    table_page.insert_tuple(tuple)?;
 
     disk.write_to_file(table_page, path)?;
 

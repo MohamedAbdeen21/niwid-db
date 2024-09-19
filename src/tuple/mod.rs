@@ -2,7 +2,35 @@ use std::{mem, slice};
 
 use crate::pages::traits::Serialize;
 
-pub type Entry = (TupleMetaData, Vec<u8>);
+pub type Entry = (TupleMetaData, Tuple);
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct Tuple {
+    data: Box<[u8]>,
+}
+
+impl Tuple {
+    pub fn new(data: &[u8]) -> Self {
+        Self::from_bytes(data)
+    }
+
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+
+impl Serialize for Tuple {
+    fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Self {
+        Self {
+            data: bytes.to_vec().into_boxed_slice(),
+        }
+    }
+}
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]

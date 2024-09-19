@@ -1,5 +1,5 @@
 use super::{table_page_iterator::TablePageIterator, traits::Serialize};
-use crate::tuple::{Entry, TupleMetaData};
+use crate::tuple::{Entry, Tuple, TupleMetaData};
 
 use super::{Page, INVALID_PAGE, PAGE_SIZE};
 use anyhow::{anyhow, Result};
@@ -100,7 +100,7 @@ impl TablePage {
         offset - slots
     }
 
-    pub fn insert_tuple(&mut self, tuple: &[u8]) -> Result<()> {
+    pub fn insert_tuple(&mut self, tuple: Tuple) -> Result<()> {
         let entry_size = tuple.len() + META_SIZE;
         if entry_size + SLOT_SIZE > self.free_space() {
             return Err(anyhow!("Not enough space to insert tuple"));
@@ -120,7 +120,8 @@ impl TablePage {
 
         self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.as_bytes());
         self.data.bytes[entry_offset..(entry_offset + META_SIZE)].copy_from_slice(meta.as_bytes());
-        self.data.bytes[tuple_offset..(tuple_offset + tuple.len())].copy_from_slice(tuple);
+        self.data.bytes[tuple_offset..(tuple_offset + tuple.len())]
+            .copy_from_slice(tuple.as_bytes());
 
         self.header_mut().add_tuple();
         self.is_dirty |= true;
@@ -148,9 +149,9 @@ impl TablePage {
 
         let meta =
             TupleMetaData::from_bytes(&self.data.bytes[meta_offset..(meta_offset + META_SIZE)]);
-        let tuple = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size) as usize];
+        let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size) as usize];
 
-        return (meta, tuple.to_vec());
+        return (meta, Tuple::new(tuple_data));
     }
 
     pub fn to_iter(self) -> TablePageIterator {
