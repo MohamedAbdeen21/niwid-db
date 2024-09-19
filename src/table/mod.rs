@@ -13,9 +13,9 @@ pub mod table_iterator;
 
 pub struct Table {
     name: String,
-    first_page: *mut TablePage,
-    last_page: *mut TablePage,
-    blob_page: *mut TablePage,
+    first_page: TablePage,
+    last_page: TablePage,
+    blob_page: TablePage,
     bpm: BufferPoolManager,
     schema: Schema,
 }
@@ -24,18 +24,18 @@ impl Table {
     pub fn new(name: String, schema: &Schema) -> Result<Self> {
         let bpm = BufferPool::new();
 
-        let page: *mut TablePage = bpm.lock().new_page()?.writer().into();
+        let page: TablePage = bpm.lock().new_page()?.writer().into();
 
-        let page_id = unsafe { (*page).get_page_id() };
+        let page_id = page.get_page_id();
 
         // increment pin count
         let _ = bpm.lock().fetch_frame(page_id);
 
-        let blob_page: *mut TablePage = bpm.lock().new_page()?.writer().into();
+        let blob_page: TablePage = bpm.lock().new_page()?.writer().into();
 
         Ok(Self {
             name,
-            first_page: page,
+            first_page: page.clone(),
             last_page: page,
             blob_page,
             bpm,
@@ -51,17 +51,17 @@ impl Table {
     ) -> Result<Self> {
         let bpm = BufferPool::new();
 
-        let first_page: *mut TablePage = bpm.lock().fetch_frame(first_page_id)?.writer().into();
+        let first_page: TablePage = bpm.lock().fetch_frame(first_page_id)?.writer().into();
 
-        let last_page: *mut TablePage = if last_page_id != first_page_id {
+        let last_page: TablePage = if last_page_id != first_page_id {
             bpm.lock().fetch_frame(last_page_id)?.writer().into()
         } else {
             // increment page pin count
             let _ = bpm.lock().fetch_frame(first_page_id);
-            first_page
+            first_page.clone()
         };
 
-        let blob_page: *mut TablePage = bpm.lock().new_page()?.writer().into();
+        let blob_page: TablePage = bpm.lock().new_page()?.writer().into();
 
         Ok(Self {
             name,
@@ -78,16 +78,16 @@ impl Table {
     }
 
     pub fn get_first_page_id(&self) -> PageId {
-        unsafe { self.first_page.as_ref().unwrap() }.get_page_id()
+        self.first_page.get_page_id()
     }
 
     pub fn get_last_page_id(&self) -> PageId {
-        unsafe { self.last_page.as_ref().unwrap() }.get_page_id()
+        self.last_page.get_page_id()
     }
 
     #[cfg(test)]
     pub fn get_blob_page_id(&self) -> PageId {
-        unsafe { self.blob_page.as_ref().unwrap() }.get_page_id()
+        self.blob_page.get_page_id()
     }
 
     fn iter(&self) -> table_iterator::TableIterator {
@@ -101,22 +101,20 @@ impl Table {
 
         let tuple = Tuple::new(vec![Str::from_raw_bytes(bytes).into()], &Schema::default());
 
-        let blob = unsafe { self.blob_page.as_mut().unwrap() };
-
-        if let Ok(id) = blob.insert_raw(&tuple) {
+        if let Ok(id) = self.blob_page.insert_raw(&tuple) {
             return Ok(id);
         }
 
         // page is full, add another page and link to table
-        let blob_page: *mut TablePage = self.bpm.lock().new_page()?.writer().into();
+        let blob_page: TablePage = self.bpm.lock().new_page()?.writer().into();
 
-        let last_page_id = unsafe { self.blob_page.as_ref().unwrap() }.get_page_id();
+        let last_page_id = self.blob_page.get_page_id();
 
         self.bpm.lock().unpin(&last_page_id);
 
         self.blob_page = blob_page;
 
-        unsafe { self.blob_page.as_mut().unwrap() }.insert_raw(&tuple)
+        self.blob_page.insert_raw(&tuple)
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
@@ -166,19 +164,18 @@ impl Table {
     /// (page_id, slot_id)
     pub fn fetch_string(&self, tuple_id_data: &[u8]) -> Str {
         let (page, slot) = TupleId::from_bytes(tuple_id_data);
-        let blob_page: *const TablePage =
-            self.bpm.lock().fetch_frame(page).unwrap().reader().into();
+        let blob_page: TablePage = self.bpm.lock().fetch_frame(page).unwrap().reader().into();
 
-        let tuple = unsafe { blob_page.as_ref().unwrap() }.read_raw(slot);
+        let tuple = blob_page.read_raw(slot);
         Str::from_raw_bytes(tuple.get_data())
     }
 
     #[allow(unused)]
     pub fn fetch_tuple(&self, tuple_id: TupleId) -> Result<Entry> {
         let (page_id, slot) = tuple_id;
-        let page: *const TablePage = self.bpm.lock().fetch_frame(page_id)?.reader().into();
+        let page: TablePage = self.bpm.lock().fetch_frame(page_id)?.reader().into();
 
-        Ok(unsafe { page.as_ref().unwrap() }.read_tuple(slot))
+        Ok(page.read_tuple(slot))
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
@@ -187,25 +184,25 @@ impl Table {
         }
 
         let tuple = self.insert_strings(tuple)?;
-        let last = unsafe { self.last_page.as_mut().unwrap() };
+        let last = &mut self.last_page;
 
         if let Ok(id) = last.insert_tuple(&tuple) {
             return Ok(id);
         }
 
         // page is full, add another page and link to table
-        let page: *mut TablePage = self.bpm.lock().new_page()?.writer().into();
+        let page: TablePage = self.bpm.lock().new_page()?.writer().into();
 
-        let page_id = unsafe { page.as_ref().unwrap().get_page_id() };
+        let page_id = page.get_page_id();
 
         last.set_next_page_id(page_id);
 
-        let last_page_id = unsafe { self.last_page.as_ref().unwrap().get_page_id() };
+        let last_page_id = self.last_page.get_page_id();
         self.bpm.lock().unpin(&last_page_id);
 
         self.last_page = page;
 
-        unsafe { self.last_page.as_mut().unwrap().insert_tuple(&tuple) }
+        self.last_page.insert_tuple(&tuple)
     }
 
     pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>) -> Result<()> {
@@ -215,13 +212,11 @@ impl Table {
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
         let (page_id, slot_id) = id;
 
-        let page: *mut TablePage = self.bpm.lock().fetch_frame(page_id)?.writer().into();
+        let mut page: TablePage = self.bpm.lock().fetch_frame(page_id)?.writer().into();
 
-        unsafe {
-            page.as_mut().unwrap().delete_tuple(slot_id);
-        };
+        page.delete_tuple(slot_id);
 
-        let page_id = unsafe { page.as_ref().unwrap().get_page_id() };
+        let page_id = page.get_page_id();
 
         self.bpm.lock().unpin(&page_id);
 
@@ -251,9 +246,9 @@ impl Drop for Table {
     fn drop(&mut self) {
         let mut bpm = self.bpm.lock();
 
-        bpm.unpin(&unsafe { self.first_page.as_ref().unwrap() }.get_page_id());
-        bpm.unpin(&unsafe { self.last_page.as_ref().unwrap() }.get_page_id());
-        bpm.unpin(&unsafe { self.blob_page.as_ref().unwrap() }.get_page_id());
+        bpm.unpin(&self.first_page.get_page_id());
+        bpm.unpin(&self.last_page.get_page_id());
+        bpm.unpin(&self.blob_page.get_page_id());
     }
 }
 
@@ -271,20 +266,18 @@ mod tests {
 
         let mut guard = bpm.lock();
 
-        let page: *mut TablePage = guard.new_page()?.writer().into();
+        let page: TablePage = guard.new_page()?.writer().into();
 
-        let page_id = unsafe { (*page).get_page_id() };
+        // increment pin count as it's also the last page
+        let _ = guard.fetch_frame(page.get_page_id());
 
-        // increment pin count
-        let _ = guard.fetch_frame(page_id);
-
-        let blob_page: *mut TablePage = guard.new_page()?.writer().into();
+        let blob_page: TablePage = guard.new_page()?.writer().into();
 
         drop(guard);
 
         Ok(Table {
             name: "test".to_string(),
-            first_page: page,
+            first_page: page.clone(),
             last_page: page,
             blob_page,
             bpm,
@@ -303,7 +296,7 @@ mod tests {
         let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
 
-        let page_id = unsafe { table.first_page.as_ref().unwrap().get_page_id() };
+        let page_id = table.first_page.get_page_id();
 
         drop(table);
         assert_eq!(1, bpm.lock().get_pin_count(&page_id).unwrap());
@@ -331,12 +324,18 @@ mod tests {
             table.insert(tuple)?;
         }
 
-        assert_eq!(table.first_page, table.last_page);
+        assert_eq!(
+            table.first_page.get_page_id(),
+            table.last_page.get_page_id()
+        );
 
         table.insert(Tuple::new(vec![U128(9999).into()], &schema))?;
         let second_id = table.get_last_page_id();
 
-        assert_ne!(table.first_page, table.last_page);
+        assert_ne!(
+            table.first_page.get_page_id(),
+            table.last_page.get_page_id()
+        );
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {

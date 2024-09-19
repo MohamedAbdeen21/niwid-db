@@ -70,8 +70,9 @@ impl BufferPool {
     }
 
     pub fn increment_page_id(&mut self) -> Result<PageId> {
-        let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(0, 8).try_into().unwrap());
-        self.next_page_id.write_bytes(0, 8, &(id + 1).to_ne_bytes());
+        let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(2, 10).try_into().unwrap());
+        self.next_page_id
+            .write_bytes(2, 10, &(id + 1).to_ne_bytes());
         self.disk_manager.write_to_file(&self.next_page_id)?;
         Ok(id + 1)
     }
@@ -204,15 +205,15 @@ mod tests {
     fn test_dont_evict_pinned() -> Result<()> {
         let mut bpm = BufferPool::init(2);
 
-        let p1: *const TablePage = bpm.new_page()?.reader().into();
+        let p1: TablePage = bpm.new_page()?.reader().into();
 
-        let _: *const TablePage = bpm.new_page()?.reader().into();
+        let _: TablePage = bpm.new_page()?.reader().into();
 
         assert!(bpm.new_page().is_err());
 
-        bpm.unpin(&unsafe { p1.as_ref().unwrap() }.get_page_id());
+        bpm.unpin(&p1.get_page_id());
 
-        let _: *const TablePage = bpm.new_page()?.reader().into();
+        let _: TablePage = bpm.new_page()?.reader().into();
 
         assert!(bpm.new_page().is_err());
 

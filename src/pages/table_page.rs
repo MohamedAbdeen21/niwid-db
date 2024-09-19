@@ -24,24 +24,30 @@ struct TablePageData {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TablePage {
-    data: TablePageData,
-    is_dirty: bool,
+    data: *mut TablePageData,
     page_id: PageId,
     latch: Arc<Latch>,
+    read_only: bool,
 }
 
 impl TablePage {
     pub fn header(&self) -> &TablePageHeader {
-        &self.data.header
+        &unsafe { self.data.as_ref() }.unwrap().header
     }
 
     fn header_mut(&mut self) -> &mut TablePageHeader {
-        &mut self.data.header
+        if self.read_only {
+            panic!("Cannot modify read only page");
+        }
+        &mut unsafe { self.data.as_mut() }.unwrap().header
     }
 
     pub fn set_next_page_id(&mut self, page_id: PageId) {
+        if self.read_only {
+            panic!("Cannot modify read only page");
+        }
         self.latch.wlock();
         self.header_mut().set_next_page_id(page_id);
         self.latch.wunlock();
@@ -49,10 +55,6 @@ impl TablePage {
 
     pub fn get_page_id(&self) -> PageId {
         self.page_id
-    }
-
-    pub fn set_page_id(&mut self, page_id: PageId) {
-        self.page_id = page_id;
     }
 
     fn last_slot_offset(&self) -> Option<usize> {
@@ -72,7 +74,7 @@ impl TablePage {
 
         let offset = slot * SLOT_SIZE;
         Some(TablePageSlot::from_bytes(
-            &self.data.bytes[offset..offset + SLOT_SIZE],
+            &unsafe { self.data.as_ref() }.unwrap().bytes[offset..offset + SLOT_SIZE],
         ))
     }
 
@@ -103,6 +105,9 @@ impl TablePage {
     /// similar to insert tuple but avoids adding the tuple metadata
     /// used mainly in blob pages
     pub fn insert_raw(&mut self, tuple: &Tuple) -> Result<TupleId> {
+        if self.read_only {
+            panic!("Cannot modify read only page");
+        }
         self.latch.wlock();
 
         let tuple_size = tuple.len();
@@ -121,12 +126,13 @@ impl TablePage {
             None => 0,
         };
 
-        self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.to_bytes());
-        self.data.bytes[tuple_offset..(tuple_offset + tuple_size)]
-            .copy_from_slice(tuple.to_bytes());
+        let data = unsafe { self.data.as_mut().unwrap() };
+
+        data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.to_bytes());
+        data.bytes[tuple_offset..(tuple_offset + tuple_size)].copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
-        self.is_dirty |= true;
+        self.header_mut().is_dirty |= true;
 
         self.latch.wunlock();
 
@@ -134,6 +140,9 @@ impl TablePage {
     }
 
     pub fn insert_tuple(&mut self, tuple: &Tuple) -> Result<TupleId> {
+        if self.read_only {
+            panic!("Cannot modify read only page");
+        }
         self.latch.wlock();
 
         let entry_size = tuple.len() + META_SIZE;
@@ -154,13 +163,14 @@ impl TablePage {
             None => 0,
         };
 
-        self.data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.to_bytes());
-        self.data.bytes[entry_offset..(entry_offset + META_SIZE)].copy_from_slice(meta.to_bytes());
-        self.data.bytes[tuple_offset..(tuple_offset + tuple.len())]
-            .copy_from_slice(tuple.to_bytes());
+        let data = unsafe { self.data.as_mut().unwrap() };
+
+        data.bytes[slot_offset..(slot_offset + SLOT_SIZE)].copy_from_slice(slot.to_bytes());
+        data.bytes[entry_offset..(entry_offset + META_SIZE)].copy_from_slice(meta.to_bytes());
+        data.bytes[tuple_offset..(tuple_offset + tuple.len())].copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
-        self.is_dirty |= true;
+        self.header_mut().is_dirty |= true;
 
         self.latch.wunlock();
 
@@ -168,15 +178,21 @@ impl TablePage {
     }
 
     pub fn delete_tuple(&mut self, slot: usize) {
-        let _wguard = self.latch.wguard();
+        if self.read_only {
+            panic!("Cannot modify read only page");
+        }
+        self.latch.wlock();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
         let mut deleted_meta = TupleMetaData::default(); // TODO: Copy null bitmap
         deleted_meta.mark_deleted();
 
-        self.data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
+        let data = unsafe { self.data.as_mut().unwrap() };
+
+        data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
             .copy_from_slice(deleted_meta.to_bytes());
-        self.is_dirty |= true;
+        self.header_mut().is_dirty |= true;
+        self.latch.wunlock();
     }
 
     pub fn read_tuple(&self, slot: usize) -> Entry {
@@ -187,9 +203,10 @@ impl TablePage {
         let tuple_offset = slot.offset as usize + META_SIZE;
         let tuple_size = slot.size as usize - META_SIZE;
 
-        let meta =
-            TupleMetaData::from_bytes(&self.data.bytes[meta_offset..(meta_offset + META_SIZE)]);
-        let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
+        let data = unsafe { self.data.as_mut().unwrap() };
+
+        let meta = TupleMetaData::from_bytes(&data.bytes[meta_offset..(meta_offset + META_SIZE)]);
+        let tuple_data = &data.bytes[tuple_offset..(tuple_offset + tuple_size)];
 
         let mut tuple = Tuple::from_bytes(tuple_data);
         tuple._null_bitmap = meta.get_null_bitmap();
@@ -206,46 +223,53 @@ impl TablePage {
         let tuple_offset = slot.offset as usize;
         let tuple_size = slot.size as usize;
 
-        let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
+        let data = unsafe { self.data.as_ref().unwrap() };
+
+        let tuple_data = &data.bytes[tuple_offset..(tuple_offset + tuple_size)];
         Tuple::from_bytes(tuple_data)
     }
 }
 
-impl<'a> From<&'a mut Page> for *mut TablePage {
-    fn from(page: &'a mut Page) -> *mut TablePage {
-        let p = page as *mut Page as *mut TablePage;
-        unsafe {
-            (*p).latch = page.latch.clone();
-            (*p).set_page_id(page.get_page_id());
-            (*p).is_dirty = page.is_dirty();
-            if (*p).header().get_next_page() == 0 {
-                (*p).header_mut().set_next_page_id(INVALID_PAGE);
-            }
+impl<'a> From<&'a mut Page> for TablePage {
+    fn from(page: &'a mut Page) -> TablePage {
+        let data = page.data.as_mut_ptr() as *mut TablePageData;
+        let mut p = TablePage {
+            data,
+            page_id: page.get_page_id(),
+            latch: page.latch.clone(),
+            read_only: false,
+        };
+        if p.header().get_next_page() == 0 {
+            p.header_mut().set_next_page_id(INVALID_PAGE);
         }
         p
     }
 }
 
-impl<'a> From<&'a Page> for *const TablePage {
-    fn from(page: &'a Page) -> *const TablePage {
-        let table_page_pointer = page as *const Page as *mut TablePage;
-        let p = unsafe { table_page_pointer.as_mut() }.unwrap();
-        p.set_page_id(page.get_page_id());
-        p.latch = page.latch.clone();
-        p.is_dirty = page.is_dirty();
+impl<'a> From<&'a Page> for TablePage {
+    fn from(page: &'a Page) -> TablePage {
+        let data = page.data.as_ptr() as *mut TablePageData;
+        let mut p = TablePage {
+            data,
+            page_id: page.get_page_id(),
+            latch: page.latch.clone(),
+            read_only: false,
+        };
         if p.header().get_next_page() == 0 {
             p.header_mut().set_next_page_id(INVALID_PAGE);
         }
-        p as *const TablePage
+        p.read_only = true;
+        p
     }
 }
 
-#[repr(C)]
+#[repr(C, align(2))]
 #[derive(Debug, Clone, Copy)]
 pub struct TablePageHeader {
+    is_dirty: bool,
     /// INVALID_PAGE (-1) if there are no more pages
-    next_page: PageId,
     num_tuples: u16,
+    next_page: PageId,
 }
 
 impl TablePageHeader {
@@ -263,6 +287,11 @@ impl TablePageHeader {
 
     pub fn get_num_tuples(&self) -> usize {
         self.num_tuples as usize
+    }
+
+    #[cfg(test)]
+    pub fn is_dirty(&self) -> bool {
+        self.is_dirty
     }
 }
 
@@ -307,25 +336,22 @@ mod tests {
     fn test_lock_sharing() -> Result<()> {
         let page = &mut Page::new();
 
-        let t1: *mut TablePage = page.into();
-        let t2: *mut TablePage = page.into();
+        let t1: TablePage = page.into();
+        let t2: TablePage = page.into();
 
-        let t1_mut = unsafe { t1.as_mut().unwrap() };
-        let t2_mut = unsafe { t2.as_mut().unwrap() };
+        t1.latch.wlock();
 
-        t1_mut.latch.wlock();
-
-        assert!(t2_mut.latch.is_locked());
+        assert!(t2.latch.is_locked());
         assert!(page.latch.is_locked());
 
-        t1_mut.latch.wunlock();
+        t1.latch.wunlock();
 
-        assert!(!t2_mut.latch.is_locked());
+        assert!(!t2.latch.is_locked());
         assert!(!page.latch.is_locked());
 
-        t1_mut.latch.rlock();
+        t1.latch.rlock();
         let _ = page.latch.upgradable_rlock();
-        t2_mut.latch.rlock();
+        t2.latch.rlock();
 
         Ok(())
     }
@@ -335,8 +361,8 @@ mod tests {
         println!("test_underlying_page_share");
         let page = &mut Page::new();
         println!("test_underlying_page_share");
-        let table_page: *mut TablePage = page.into();
-        let table_page_2: *mut TablePage = page.into();
+        let mut table_page: TablePage = page.into();
+        let table_page_2: TablePage = page.into();
 
         println!("test_underlying_page_share");
         let tuple = Tuple::new(
@@ -344,20 +370,18 @@ mod tests {
             &Schema::new(vec!["a"], vec![Types::U16]),
         );
 
+        println!("{:?}", page.data);
         println!("inserted");
-        unsafe { table_page.as_mut().unwrap().insert_tuple(&tuple) }?;
-        println!("{:?}", page.read_bytes(0, PAGE_SIZE));
+        table_page.insert_tuple(&tuple)?;
+        table_page.insert_tuple(&tuple)?;
 
         assert_eq!(page.read_bytes(PAGE_SIZE - 2, PAGE_SIZE), tuple.to_bytes());
+        println!("{:?}, {:?}", page.data, page.is_dirty());
+        assert!(page.is_dirty());
+        assert!(table_page.header().is_dirty());
+        assert!(table_page_2.header().is_dirty());
 
-        assert_eq!(
-            unsafe { table_page_2.as_ref() }
-                .unwrap()
-                .read_tuple(0)
-                .1
-                .to_bytes(),
-            tuple.to_bytes()
-        );
+        assert_eq!(table_page_2.read_tuple(0).1.to_bytes(), tuple.to_bytes());
 
         Ok(())
     }

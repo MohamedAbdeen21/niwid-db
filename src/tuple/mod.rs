@@ -166,12 +166,9 @@ impl TupleMetaData {
         self.is_deleted = true;
     }
 
+    #[cfg(test)]
     pub fn is_null(&self, field_id: u8) -> bool {
         (self.null_bitmap >> field_id) & 1 == 1
-    }
-
-    pub fn set_null(&mut self, field_id: u8) {
-        self.null_bitmap |= 1 << field_id;
     }
 
     pub fn is_deleted(&self) -> bool {

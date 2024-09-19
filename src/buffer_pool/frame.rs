@@ -32,7 +32,7 @@ impl Frame {
     }
 
     pub fn writer(&mut self) -> &mut Page {
-        unsafe { &mut *(&mut self.page as *mut Page) }
+        &mut self.page
     }
 
     pub fn reader(&self) -> &Page {

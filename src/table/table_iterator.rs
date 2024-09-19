@@ -7,7 +7,7 @@ use super::Table;
 
 // TODO: try to iterate over pages not tuples
 pub(super) struct TableIterator {
-    page: *const TablePage,
+    page: TablePage,
     current_slot: usize,
     next_page: PageId,
     bpm: BufferPoolManager,
@@ -17,14 +17,14 @@ pub(super) struct TableIterator {
 impl TableIterator {
     pub fn new(table: &Table) -> Self {
         let bpm = table.bpm.clone();
-        let page: *const TablePage = bpm
+        let page: TablePage = bpm
             .lock()
-            .fetch_frame(unsafe { table.first_page.as_ref().unwrap() }.get_page_id())
+            .fetch_frame(table.first_page.get_page_id())
             .unwrap()
             .reader()
             .into();
 
-        let header = unsafe { page.as_ref().unwrap() }.header();
+        let header = page.header();
 
         TableIterator {
             current_slot: 0,
@@ -43,7 +43,7 @@ impl Iterator for TableIterator {
     fn next(&mut self) -> Option<Self::Item> {
         // current page is done, drop it
         if self.current_slot >= self.num_tuples {
-            let page_id = unsafe { self.page.as_ref().unwrap() }.get_page_id();
+            let page_id = self.page.get_page_id();
             self.bpm.lock().unpin(&page_id);
         }
 
@@ -61,20 +61,20 @@ impl Iterator for TableIterator {
                 .into();
 
             self.current_slot = 0;
-            let header = unsafe { self.page.as_ref().unwrap() }.header();
+            let header = self.page.header();
             self.next_page = header.get_next_page();
             self.num_tuples = header.get_num_tuples();
             return self.next();
         }
 
-        let entry = unsafe { self.page.as_ref().unwrap() }.read_tuple(self.current_slot);
+        let entry = self.page.read_tuple(self.current_slot);
         self.current_slot += 1;
 
         if entry.0.is_deleted() {
             return self.next();
         }
 
-        let page_id = unsafe { self.page.as_ref().unwrap() }.get_page_id();
+        let page_id = self.page.get_page_id();
 
         Some(((page_id, self.current_slot - 1), entry))
     }
@@ -134,12 +134,20 @@ mod tests {
             table.insert(tuple)?;
         }
 
-        assert_eq!(table.first_page, table.last_page);
+        assert_eq!(
+            table.first_page.get_page_id(),
+            table.last_page.get_page_id()
+        );
+
+        assert!(table.first_page.header().is_dirty());
 
         let tuple = Tuple::new(vec![Null().into(), Null().into()], &schema);
         table.insert(tuple)?;
 
-        assert_ne!(table.first_page, table.last_page);
+        assert_ne!(
+            table.first_page.get_page_id(),
+            table.last_page.get_page_id()
+        );
 
         let mut counter = 0;
         let scanner = |_: (TupleId, Entry)| -> Result<()> {

@@ -1,6 +1,4 @@
-use parking_lot::{
-    lock_api::RawRwLock, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard, RwLockWriteGuard,
-};
+use parking_lot::{lock_api::RawRwLock, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
 
 #[derive(Debug)]
 pub(super) struct Latch {
@@ -34,10 +32,6 @@ impl Latch {
 
     pub fn rguard(&self) -> RwLockReadGuard<()> {
         self.lock.read()
-    }
-
-    pub fn wguard(&self) -> RwLockWriteGuard<()> {
-        self.lock.write()
     }
 
     #[allow(unused)]

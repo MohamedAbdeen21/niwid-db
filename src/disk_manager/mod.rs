@@ -123,19 +123,18 @@ mod tests {
 
         let page = &mut Page::new();
         page.set_page_id(page_id);
-        let table_page: *mut TablePage = page.into();
+        let mut table_page: TablePage = page.into();
 
         let dummy_schema = Schema::new(vec!["str"], vec![Types::Str]);
         let tuple = Tuple::new(vec![Str("Hello!".to_string()).into()], &dummy_schema);
-        let (write_page_id, write_slot_id) =
-            unsafe { table_page.as_mut().unwrap() }.insert_raw(&tuple)?;
+        let (write_page_id, write_slot_id) = table_page.insert_raw(&tuple)?;
 
         assert_eq!(page_id, write_page_id);
 
         disk.write_to_file(page)?;
 
-        let page: *const TablePage = (&disk.read_from_file::<Page>(page_id)?).into();
-        let read_tuple = unsafe { page.as_ref().unwrap() }.read_raw(write_slot_id);
+        let page: TablePage = (&disk.read_from_file::<Page>(page_id)?).into();
+        let read_tuple = page.read_raw(write_slot_id);
 
         assert_eq!(read_tuple.get_data(), tuple.get_data());
 
