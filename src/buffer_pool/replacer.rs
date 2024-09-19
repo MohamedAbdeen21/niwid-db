@@ -1,10 +1,11 @@
+use core::fmt::Debug;
 use std::collections::HashMap;
 
 use priority_queue::PriorityQueue;
 
-use super::{FrameId, BUFFER_POOL_SIZE};
+use super::FrameId;
 
-pub(super) trait Replacer: Send + Sync {
+pub(super) trait Replacer: Send + Sync + Debug {
     fn record_access(&mut self, frame_id: FrameId);
     fn set_evictable(&mut self, frame_id: FrameId, evictable: bool);
     fn can_evict(&self) -> bool;
@@ -14,7 +15,7 @@ pub(super) trait Replacer: Send + Sync {
     fn peek(&self) -> Option<FrameId>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct LRU {
     timestamp: i64,
     heap: PriorityQueue<FrameId, i64>,
@@ -24,11 +25,11 @@ pub(super) struct LRU {
 }
 
 impl LRU {
-    pub fn new() -> Self {
+    pub fn new(size: usize) -> Self {
         Self {
             timestamp: 0,
-            heap: PriorityQueue::with_capacity(BUFFER_POOL_SIZE),
-            last_access: HashMap::with_capacity(BUFFER_POOL_SIZE),
+            heap: PriorityQueue::with_capacity(size),
+            last_access: HashMap::with_capacity(size),
         }
     }
 }
@@ -82,7 +83,7 @@ mod tests {
 
     #[test]
     fn test_replace_lru() -> Result<()> {
-        let mut replacer = LRU::new();
+        let mut replacer = LRU::new(3);
         replacer.record_access(1);
         replacer.record_access(2);
         replacer.record_access(3);

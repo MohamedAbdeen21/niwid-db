@@ -20,14 +20,14 @@ pub type TupleId = (PageId, usize);
 /// all other fields are helpers (pointers and flags)
 /// that are computed on the fly
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 struct TablePageData {
     header: TablePageHeader,
     bytes: [u8; PAGE_END],
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct TablePage {
     data: TablePageData,
     is_dirty: bool,
@@ -168,7 +168,7 @@ impl<'a> From<&'a mut Page> for *mut TablePage {
 
 impl<'a> From<&'a Page> for TablePage {
     fn from(page: &'a Page) -> TablePage {
-        let mut p = unsafe { *(page as *const Page as *const TablePage) };
+        let mut p = unsafe { (page as *const Page as *const TablePage).as_ref().unwrap() }.clone();
         p.set_page_id(page.get_page_id());
         p.is_dirty = page.is_dirty();
         if p.header().get_next_page() == 0 {

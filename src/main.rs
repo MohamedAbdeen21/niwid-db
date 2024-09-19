@@ -32,6 +32,19 @@ fn main() -> Result<()> {
 
     table.scan(|entry| println!("{:?}", entry));
 
+    drop(table);
+
+    let mut table2 = Table::new()?;
+    let schema = Schema::new(
+        vec!["id".to_string(), "age".to_string()],
+        vec![Types::U16, Types::U16],
+    );
+
+    let tuple_data = vec![U16(10000).to_bytes(), U16(50000).to_bytes()];
+    let tuple = Tuple::new(tuple_data, &schema);
+    table2.insert(tuple)?;
+    table2.scan(|entry| println!("{:?}", entry));
+
     Ok(())
 }
 

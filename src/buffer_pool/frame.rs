@@ -1,13 +1,12 @@
 use crate::pages::Page;
 
-use super::{BufferPoolManager, FrameId};
+use super::FrameId;
 
 #[allow(unused)]
 pub struct Frame {
     id: FrameId,
     page: Page,
     counter: u16,
-    pub bpm: Option<BufferPoolManager>,
 }
 
 #[allow(unused)]
@@ -16,22 +15,29 @@ impl Frame {
         Self {
             id,
             page: Page::new(),
-            // TODO: Fix this. Dropping the bpm drops the frames and therefore
-            // decreases counter below 0
             counter: 1,
-            bpm: None,
         }
+    }
+
+    pub fn get_frame_id(&self) -> FrameId {
+        self.id
     }
 
     pub(super) fn pin(&mut self) {
         self.counter += 1;
+        println!("Pinned frame {}: Count {:?}", self.id, self.get_pin_count());
     }
 
-    fn unpin(&mut self) {
+    pub(super) fn unpin(&mut self) {
         self.counter -= 1;
+        println!(
+            "Unpinned frame {}: Count {:?}",
+            self.id,
+            self.get_pin_count()
+        );
     }
 
-    pub fn get_pin_count(&self) -> u16 {
+    pub(super) fn get_pin_count(&self) -> u16 {
         self.counter
     }
 
@@ -45,14 +51,5 @@ impl Frame {
 
     pub fn get_page_read(&self) -> &Page {
         &self.page
-    }
-}
-
-impl Drop for Frame {
-    fn drop(&mut self) {
-        self.unpin();
-        if self.get_pin_count() == 1 {
-            self.bpm.unwrap().write().unwrap().set_evictable(self.id);
-        }
     }
 }

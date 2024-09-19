@@ -15,12 +15,22 @@ pub struct TableIterator {
 
 #[allow(unused)]
 impl TableIterator {
-    pub fn new(table: Table) -> Self {
-        let page: TablePage = unsafe { *(table.first_page) };
+    pub fn new(table: &Table) -> Self {
+        let bpm = BufferPool::new();
+        let page: TablePage = bpm
+            .write()
+            .unwrap()
+            .fetch_frame(unsafe { table.first_page.as_ref().unwrap() }.get_page_id())
+            .unwrap()
+            .read()
+            .unwrap()
+            .get_page_read()
+            .into();
+
         TableIterator {
             current: 0,
             next_page: page.header().get_next_page(),
-            buffer_pool: BufferPool::new(),
+            buffer_pool: bpm,
             page,
         }
     }
@@ -30,6 +40,14 @@ impl Iterator for TableIterator {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Entry> {
+        // current page is done, drop it
+        if self.current >= self.page.header().get_num_tuples() {
+            self.buffer_pool
+                .write()
+                .unwrap()
+                .unpin(&self.page.get_page_id());
+        }
+
         if self.current >= self.page.header().get_num_tuples() && self.next_page == INVALID_PAGE {
             return None;
         }
@@ -39,7 +57,7 @@ impl Iterator for TableIterator {
                 .buffer_pool
                 .write()
                 .unwrap()
-                .fetch_page(self.next_page)
+                .fetch_frame(self.next_page)
                 .ok()? // TODO: idk
                 .read()
                 .unwrap()

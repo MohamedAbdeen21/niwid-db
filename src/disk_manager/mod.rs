@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
+#[derive(Debug)]
 pub struct DiskManager {
     path: String,
 }
