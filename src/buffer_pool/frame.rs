@@ -31,11 +31,11 @@ impl Frame {
         self.page = page;
     }
 
-    pub fn get_page_write(&mut self) -> &mut Page {
+    pub fn writer(&mut self) -> &mut Page {
         unsafe { &mut *(&mut self.page as *mut Page) }
     }
 
-    pub fn get_page_read(&self) -> &Page {
+    pub fn reader(&self) -> &Page {
         &self.page
     }
 }

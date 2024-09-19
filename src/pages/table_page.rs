@@ -3,7 +3,7 @@ use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
 
 use super::{Page, PAGE_SIZE};
 use anyhow::{anyhow, Result};
-use std::{mem, slice};
+use std::{mem, slice, sync::Arc};
 
 const HEADER_SIZE: usize = mem::size_of::<TablePageHeader>();
 pub const SLOT_SIZE: usize = mem::size_of::<TablePageSlot>();
@@ -29,7 +29,7 @@ pub struct TablePage {
     data: TablePageData,
     is_dirty: bool,
     page_id: PageId,
-    latch: Latch,
+    latch: Arc<Latch>,
 }
 
 impl TablePage {
@@ -215,6 +215,7 @@ impl<'a> From<&'a mut Page> for *mut TablePage {
     fn from(page: &'a mut Page) -> *mut TablePage {
         let p = page as *mut Page as *mut TablePage;
         unsafe {
+            (*p).latch = page.latch.clone();
             (*p).set_page_id(page.get_page_id());
             (*p).is_dirty = page.is_dirty();
             if (*p).header().get_next_page() == 0 {
@@ -227,9 +228,10 @@ impl<'a> From<&'a mut Page> for *mut TablePage {
 
 impl<'a> From<&'a Page> for *const TablePage {
     fn from(page: &'a Page) -> *const TablePage {
-        let table_page_pointer: *mut TablePage = page as *const Page as *mut TablePage;
+        let table_page_pointer = page as *const Page as *mut TablePage;
         let p = unsafe { table_page_pointer.as_mut() }.unwrap();
         p.set_page_id(page.get_page_id());
+        p.latch = page.latch.clone();
         p.is_dirty = page.is_dirty();
         if p.header().get_next_page() == 0 {
             p.header_mut().set_next_page_id(INVALID_PAGE);
@@ -288,5 +290,38 @@ impl TablePageSlot {
             offset: offset as u16,
             size: size as u16,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Result;
+
+    #[test]
+    fn test_lock_sharing() -> Result<()> {
+        let page = &mut Page::new();
+
+        let t1: *mut TablePage = page.into();
+        let t2: *mut TablePage = page.into();
+
+        let t1_mut = unsafe { t1.as_mut().unwrap() };
+        let t2_mut = unsafe { t2.as_mut().unwrap() };
+
+        t1_mut.latch.wlock();
+
+        assert!(t2_mut.latch.is_locked());
+        assert!(page.latch.is_locked());
+
+        t1_mut.latch.wunlock();
+
+        assert!(!t2_mut.latch.is_locked());
+        assert!(!page.latch.is_locked());
+
+        t1_mut.latch.rlock();
+        let _ = page.latch.upgradable_rlock();
+        t2_mut.latch.rlock();
+
+        Ok(())
     }
 }

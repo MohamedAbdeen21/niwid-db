@@ -6,14 +6,14 @@ use crate::pages::{Page, PageId, INVALID_PAGE};
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
-use parking_lot::Mutex;
+use parking_lot::FairMutex;
 use std::collections::{HashMap, LinkedList};
 use std::sync::Arc;
 
 const BUFFER_POOL_SIZE: usize = 10_000;
 
 type FrameId = usize;
-pub type BufferPoolManager = Arc<Mutex<BufferPool>>;
+pub type BufferPoolManager = Arc<FairMutex<BufferPool>>;
 
 pub struct BufferPool {
     free_frames: LinkedList<FrameId>,
@@ -131,7 +131,7 @@ impl BufferPool {
         let frame_id = self.replacer.evict();
         let frame = &mut self.frames[frame_id];
         assert!(frame.get_pin_count() == 1);
-        let page = frame.get_page_write();
+        let page = frame.writer();
 
         self.page_table.remove(&page.get_page_id());
 
@@ -147,10 +147,8 @@ impl BufferPool {
             self.replacer.set_evictable(frame_id, true);
         }
 
-        if frame.get_page_read().is_dirty() {
-            self.disk_manager
-                .write_to_file(frame.get_page_write())
-                .unwrap();
+        if frame.reader().is_dirty() {
+            self.disk_manager.write_to_file(frame.writer()).unwrap();
         }
     }
 
@@ -159,12 +157,22 @@ impl BufferPool {
         let frame_id = *self.page_table.get(page_id)?;
         Some(self.frames[frame_id].get_pin_count())
     }
+
+    #[allow(dead_code)]
+    pub fn shadow_page(&mut self, _page_id: PageId, _page: Page) {
+        todo!()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_page(&self, _page_id: PageId) -> Option<&Page> {
+        todo!()
+    }
 }
 
 fn get_buffer_pool() -> BufferPoolManager {
     lazy_static! {
         static ref BUFFER_POOL: BufferPoolManager =
-            Arc::new(Mutex::new(BufferPool::init(BUFFER_POOL_SIZE)));
+            Arc::new(FairMutex::new(BufferPool::init(BUFFER_POOL_SIZE)));
     }
 
     BUFFER_POOL.clone()
@@ -175,8 +183,8 @@ impl Drop for BufferPool {
         let pages: Vec<&mut Page> = self
             .frames
             .iter_mut()
-            .filter(|f| f.get_page_read().get_page_id() != INVALID_PAGE)
-            .map(|f| f.get_page_write())
+            .filter(|f| f.reader().get_page_id() != INVALID_PAGE)
+            .map(|f| f.writer())
             .collect();
 
         for page in pages {
@@ -196,15 +204,15 @@ mod tests {
     fn test_dont_evict_pinned() -> Result<()> {
         let mut bpm = BufferPool::init(2);
 
-        let p1: *const TablePage = bpm.new_page()?.get_page_read().into();
+        let p1: *const TablePage = bpm.new_page()?.reader().into();
 
-        let _: *const TablePage = bpm.new_page()?.get_page_read().into();
+        let _: *const TablePage = bpm.new_page()?.reader().into();
 
         assert!(bpm.new_page().is_err());
 
         bpm.unpin(&unsafe { p1.as_ref().unwrap() }.get_page_id());
 
-        let _: *const TablePage = bpm.new_page()?.get_page_read().into();
+        let _: *const TablePage = bpm.new_page()?.reader().into();
 
         assert!(bpm.new_page().is_err());
 

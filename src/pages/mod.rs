@@ -1,6 +1,8 @@
-mod latch;
+pub mod latch;
 pub(crate) mod table_page;
 pub(crate) mod traits;
+
+use std::sync::Arc;
 
 use latch::Latch;
 use traits::Serialize;
@@ -14,14 +16,14 @@ pub type PageId = i64;
 
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement `From<Page>` and `Into<Page>` traits
-#[repr(C, align(4))]
+#[repr(C)]
 #[derive(Debug)]
 pub struct Page {
     /// Underlying block of memory of size [`PAGE_SIZE`]
     data: [u8; PAGE_SIZE],
     is_dirty: bool,
     page_id: PageId,
-    latch: Latch,
+    latch: Arc<Latch>,
 }
 
 impl Serialize for Page {
@@ -63,7 +65,7 @@ impl Page {
             data: [0u8; PAGE_SIZE],
             is_dirty: false,
             page_id: INVALID_PAGE,
-            latch: Latch::new(),
+            latch: Arc::new(Latch::new()),
         }
     }
 

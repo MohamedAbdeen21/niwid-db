@@ -1,3 +1,5 @@
+mod shadow_page;
+
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
 use anyhow::{anyhow, Result};
@@ -65,6 +67,16 @@ impl DiskManager {
         let mut page = T::from_bytes(&buffer);
         page.set_page_id(page_id);
         Ok(page)
+    }
+
+    #[allow(dead_code)]
+    pub fn shadow_page(&self, _page_id: PageId) -> Result<()> {
+        todo!()
+    }
+
+    #[allow(dead_code)]
+    pub fn commit_shadow(&self, _page_id: PageId) -> Result<()> {
+        todo!()
     }
 }
 

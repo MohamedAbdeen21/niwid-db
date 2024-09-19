@@ -24,14 +24,14 @@ impl Table {
     pub fn new(name: String, schema: &Schema) -> Result<Self> {
         let bpm = BufferPool::new();
 
-        let page: *mut TablePage = bpm.lock().new_page()?.get_page_write().into();
+        let page: *mut TablePage = bpm.lock().new_page()?.writer().into();
 
         let page_id = unsafe { (*page).get_page_id() };
 
         // increment pin count
         let _ = bpm.lock().fetch_frame(page_id);
 
-        let blob_page: *mut TablePage = bpm.lock().new_page()?.get_page_write().into();
+        let blob_page: *mut TablePage = bpm.lock().new_page()?.writer().into();
 
         Ok(Self {
             name,
@@ -51,24 +51,17 @@ impl Table {
     ) -> Result<Self> {
         let bpm = BufferPool::new();
 
-        let first_page: *mut TablePage = bpm
-            .lock()
-            .fetch_frame(first_page_id)?
-            .get_page_write()
-            .into();
+        let first_page: *mut TablePage = bpm.lock().fetch_frame(first_page_id)?.writer().into();
 
         let last_page: *mut TablePage = if last_page_id != first_page_id {
-            bpm.lock()
-                .fetch_frame(last_page_id)?
-                .get_page_write()
-                .into()
+            bpm.lock().fetch_frame(last_page_id)?.writer().into()
         } else {
             // increment page pin count
             let _ = bpm.lock().fetch_frame(first_page_id);
             first_page
         };
 
-        let blob_page: *mut TablePage = bpm.lock().new_page()?.get_page_write().into();
+        let blob_page: *mut TablePage = bpm.lock().new_page()?.writer().into();
 
         Ok(Self {
             name,
@@ -115,7 +108,7 @@ impl Table {
         }
 
         // page is full, add another page and link to table
-        let blob_page: *mut TablePage = self.bpm.lock().new_page()?.get_page_write().into();
+        let blob_page: *mut TablePage = self.bpm.lock().new_page()?.writer().into();
 
         let last_page_id = unsafe { self.blob_page.as_ref().unwrap() }.get_page_id();
 
@@ -173,13 +166,8 @@ impl Table {
     /// (page_id, slot_id)
     pub fn fetch_string(&self, tuple_id_data: &[u8]) -> Str {
         let (page, slot) = TupleId::from_bytes(tuple_id_data);
-        let blob_page: *const TablePage = self
-            .bpm
-            .lock()
-            .fetch_frame(page)
-            .unwrap()
-            .get_page_read()
-            .into();
+        let blob_page: *const TablePage =
+            self.bpm.lock().fetch_frame(page).unwrap().reader().into();
 
         let tuple = unsafe { blob_page.as_ref().unwrap() }.read_raw(slot);
         Str::from_raw_bytes(tuple.get_data())
@@ -188,7 +176,7 @@ impl Table {
     #[allow(unused)]
     pub fn fetch_tuple(&self, tuple_id: TupleId) -> Result<Entry> {
         let (page_id, slot) = tuple_id;
-        let page: *const TablePage = self.bpm.lock().fetch_frame(page_id)?.get_page_read().into();
+        let page: *const TablePage = self.bpm.lock().fetch_frame(page_id)?.reader().into();
 
         Ok(unsafe { page.as_ref().unwrap() }.read_tuple(slot))
     }
@@ -206,7 +194,7 @@ impl Table {
         }
 
         // page is full, add another page and link to table
-        let page: *mut TablePage = self.bpm.lock().new_page()?.get_page_write().into();
+        let page: *mut TablePage = self.bpm.lock().new_page()?.writer().into();
 
         let page_id = unsafe { page.as_ref().unwrap().get_page_id() };
 
@@ -227,12 +215,7 @@ impl Table {
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
         let (page_id, slot_id) = id;
 
-        let page: *mut TablePage = self
-            .bpm
-            .lock()
-            .fetch_frame(page_id)?
-            .get_page_write()
-            .into();
+        let page: *mut TablePage = self.bpm.lock().fetch_frame(page_id)?.writer().into();
 
         unsafe {
             page.as_mut().unwrap().delete_tuple(slot_id);
@@ -281,21 +264,21 @@ mod tests {
     use super::*;
     use crate::{tuple::schema::Schema, types::*};
     use anyhow::Result;
-    use parking_lot::lock_api::Mutex;
+    use parking_lot::FairMutex;
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
-        let bpm = Arc::new(Mutex::new(BufferPool::init(size)));
+        let bpm = Arc::new(FairMutex::new(BufferPool::init(size)));
 
         let mut guard = bpm.lock();
 
-        let page: *mut TablePage = guard.new_page()?.get_page_write().into();
+        let page: *mut TablePage = guard.new_page()?.writer().into();
 
         let page_id = unsafe { (*page).get_page_id() };
 
         // increment pin count
         let _ = guard.fetch_frame(page_id);
 
-        let blob_page: *mut TablePage = guard.new_page()?.get_page_write().into();
+        let blob_page: *mut TablePage = guard.new_page()?.writer().into();
 
         drop(guard);
 

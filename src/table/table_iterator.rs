@@ -21,7 +21,7 @@ impl TableIterator {
             .lock()
             .fetch_frame(unsafe { table.first_page.as_ref().unwrap() }.get_page_id())
             .unwrap()
-            .get_page_read()
+            .reader()
             .into();
 
         let header = unsafe { page.as_ref().unwrap() }.header();
@@ -57,7 +57,7 @@ impl Iterator for TableIterator {
                 .lock()
                 .fetch_frame(self.next_page)
                 .unwrap()
-                .get_page_read()
+                .reader()
                 .into();
 
             self.current_slot = 0;
