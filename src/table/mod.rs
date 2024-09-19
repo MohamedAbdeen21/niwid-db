@@ -52,13 +52,24 @@ impl Table {
         }
 
         // page is full, add another page and link to table
-        let mut bpm = self.bpm.write().unwrap();
-        let mut frame = bpm.new_page()?.write().unwrap();
-        let page = frame.get_page_write();
+        let page: *mut TablePage = self
+            .bpm
+            .write()
+            .unwrap()
+            .new_page()?
+            .write()
+            .unwrap()
+            .get_page_write()
+            .into();
 
-        last.header_mut().set_next_page_id(page.get_page_id());
+        let page_id = unsafe { page.as_ref().unwrap().get_page_id() };
 
-        self.last_page = page.into();
+        last.header_mut().set_next_page_id(page_id);
+
+        let page_id = unsafe { self.last_page.as_ref().unwrap().get_page_id() };
+        self.bpm.write().unwrap().unpin(&page_id);
+
+        self.last_page = page;
 
         unsafe {
             self.last_page.as_mut().unwrap().insert_tuple(&tuple)?;
@@ -109,7 +120,7 @@ impl Drop for Table {
 mod tests {
     use crate::{
         tuple::schema::Schema,
-        types::{Primitive, Types, U16, U8},
+        types::{Primitive, Types, U128, U16, U8},
     };
 
     use super::*;
@@ -117,7 +128,6 @@ mod tests {
 
     #[test]
     fn test_unpin_drop() -> Result<()> {
-        let bpm = BufferPool::new();
         let mut table = Table::new()?;
 
         let schema = Schema::new(
@@ -131,7 +141,35 @@ mod tests {
 
         let page_id = unsafe { table.first_page.as_ref().unwrap().get_page_id() };
         drop(table);
+        let bpm = BufferPool::new();
         assert_eq!(1, bpm.read().unwrap().get_pin_count(&page_id));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_pages() -> Result<()> {
+        let mut table = Table::new()?;
+
+        let schema = Schema::new(vec!["a".to_string()], vec![Types::U128]);
+
+        // entry size = 25 (9 header + 16 data)
+        // slot size = 4
+        // free page = 4080
+        // 140 * 29 = 4080
+        for i in 0..140 {
+            let tuple_data = vec![U128(i).to_bytes()];
+            let tuple = Tuple::new(tuple_data, &schema);
+            table.insert(tuple)?;
+        }
+
+        assert_eq!(table.first_page, table.last_page);
+
+        table.insert(Tuple::new(vec![U128(9999).to_bytes()], &schema))?;
+
+        assert_ne!(table.first_page, table.last_page);
+
+        // table.scan(|entry| println!("{:?}", entry));
 
         Ok(())
     }
