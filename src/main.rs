@@ -36,7 +36,9 @@ fn insert_write_read(disk: DiskManager, table_page: &mut TablePage, path: &str) 
 
     disk.write_to_file(table_page, path)?;
 
-    let mut loaded_data = disk.read_from_file::<TablePage>(path)?;
+    let mut loaded_data = disk.read_from_file::<TablePage>(path, 0)?;
+
+    // println!("Data after write: {:?}", loaded_data);
 
     let t1 = loaded_data.read_tuple(0);
     println!("Data after write: {:?}", t1);

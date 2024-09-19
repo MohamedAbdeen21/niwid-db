@@ -2,7 +2,6 @@ pub(crate) mod table_page;
 pub(crate) mod table_page_iterator;
 pub(crate) mod traits;
 
-use std::mem;
 use traits::Serialize;
 
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
@@ -16,6 +15,7 @@ pub struct Page {
     /// Underlying block of memory of size [`PAGE_SIZE`]
     data: [u8; PAGE_SIZE],
     is_dirty: bool,
+    page_id: i32,
 }
 
 impl Serialize for Page {
@@ -31,34 +31,43 @@ impl Serialize for Page {
     }
 }
 
-#[allow(dead_code)]
 impl Page {
     pub fn new() -> Self {
         Page {
             data: [0u8; PAGE_SIZE],
             is_dirty: false,
+            page_id: INVALID_PAGE,
         }
     }
 
+    #[allow(unused)]
     pub fn is_dirty(&self) -> bool {
         return self.is_dirty;
     }
 
-    pub fn read<T: Serialize + Sized>(&self, offset: usize) -> T {
-        self.read_sized(offset, mem::size_of::<T>())
+    pub fn page_id(&self) -> i32 {
+        return self.page_id;
     }
 
-    pub fn write<T: Serialize + Sized>(&mut self, offset: usize, value: T) {
-        self.write_sized(offset, mem::size_of::<T>(), value)
+    pub fn set_page_id(&mut self, page_id: i32) {
+        self.page_id = page_id;
     }
 
-    pub fn read_sized<T: Serialize>(&self, offset: usize, size: usize) -> T {
-        let slice: &[u8] = &self.data[offset..offset + size];
-        T::from_bytes(slice)
-    }
-
-    pub fn write_sized<T: Serialize>(&mut self, offset: usize, size: usize, value: T) {
-        let bytes = value.as_bytes();
-        self.data[offset..offset + size].copy_from_slice(bytes);
-    }
+    // pub fn read<T: Serialize + Sized>(&self, offset: usize) -> T {
+    //     self.read_sized(offset, mem::size_of::<T>())
+    // }
+    //
+    // pub fn write<T: Serialize + Sized>(&mut self, offset: usize, value: T) {
+    //     self.write_sized(offset, mem::size_of::<T>(), value)
+    // }
+    //
+    // pub fn read_sized<T: Serialize>(&self, offset: usize, size: usize) -> T {
+    //     let slice: &[u8] = &self.data[offset..offset + size];
+    //     T::from_bytes(slice)
+    // }
+    //
+    // pub fn write_sized<T: Serialize>(&mut self, offset: usize, size: usize, value: T) {
+    //     let bytes = value.as_bytes();
+    //     self.data[offset..offset + size].copy_from_slice(bytes);
+    // }
 }

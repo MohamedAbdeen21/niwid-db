@@ -163,6 +163,7 @@ impl Into<Page> for TablePage {
     fn into(self) -> Page {
         let mut page = Page::from_bytes(self.as_bytes());
         page.is_dirty = self.is_dirty;
+        page.page_id = self.page_id;
         page
     }
 }
@@ -172,6 +173,7 @@ impl From<Page> for TablePage {
         assert_eq!(page.data.len(), PAGE_SIZE);
         let mut table_page = Self::from_bytes(page.as_bytes());
         table_page.is_dirty = page.is_dirty;
+        table_page.page_id = page.page_id;
         table_page
     }
 }
