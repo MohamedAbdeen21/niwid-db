@@ -37,14 +37,26 @@ impl Catalog {
 
         let mut tables = vec![];
         let mut table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
-            let name_bytes = tuple.get_value::<I128>("table_name", &schema).unwrap();
+            let name_bytes = tuple
+                .get_value_of::<I128>("table_name", &schema)
+                .unwrap()
+                .unwrap();
             let name = table.fetch_string(&name_bytes.to_bytes());
-            let first_page_id = tuple.get_value::<I64>("first_page", &schema).unwrap().0 as PageId;
-            let last_page_id = tuple.get_value::<I64>("last_page", &schema).unwrap().0 as PageId;
-            let schema_bytes = &tuple.get_value::<I128>("schema", &schema).unwrap();
-            println!("schema_bytes: {:?}", schema_bytes.to_bytes());
+            let first_page_id = tuple
+                .get_value_of::<I64>("first_page", &schema)
+                .unwrap()
+                .unwrap()
+                .0 as PageId;
+            let last_page_id = tuple
+                .get_value_of::<I64>("last_page", &schema)
+                .unwrap()
+                .unwrap()
+                .0 as PageId;
+            let schema_bytes = &tuple
+                .get_value_of::<I128>("schema", &schema)
+                .unwrap()
+                .unwrap();
             let schema = table.fetch_string(&schema_bytes.to_bytes());
-            println!("schema: {:?}", schema);
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
             tables.push((
@@ -84,7 +96,7 @@ impl Catalog {
             I64(table.get_last_page_id()).into(),
             Str(serialized_schema).into(),
         ];
-        let tuple = Tuple::new(tuple_data, &schema);
+        let tuple = Tuple::new(tuple_data, schema);
         let tuple_id = self.table.insert(tuple)?;
 
         self.tables.push((tuple_id, table));
@@ -102,7 +114,10 @@ impl Catalog {
     pub fn drop_table(&mut self, table_name: &str) -> Option<()> {
         let mut tuple_id = None;
         self.table.scan(|(id, (_, tuple))| {
-            let name_bytes = tuple.get_value::<I128>("table_name", &self.schema).unwrap();
+            let name_bytes = tuple
+                .get_value_of::<I128>("table_name", &self.schema)
+                .unwrap()
+                .unwrap();
             let name = self.table.fetch_string(&name_bytes.to_bytes()).0;
             if name == table_name {
                 tuple_id = Some(*id);

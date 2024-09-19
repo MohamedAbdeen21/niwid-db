@@ -2,8 +2,8 @@ pub mod schema;
 
 use crate::pages::PageId;
 use crate::tuple::schema::Schema;
-use crate::types::{AsBytes, *};
-use crate::{pages::traits::Serialize, types::Types};
+use crate::types::AsBytes;
+use crate::{pages::traits::Serialize, types::TypeFactory};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
 
@@ -15,74 +15,76 @@ pub type TupleId = (PageId, usize);
 #[repr(C)]
 #[derive(Debug, Eq, PartialEq)]
 pub struct Tuple {
+    /// NOT WRITTEN TO DISK, transferred to metadata during insertion
+    /// which eventaully gets written to disk.
+    /// here just for convenience
+    pub(super) _null_bitmap: u64,
     data: Box<[u8]>,
 }
 
 impl Tuple {
-    pub fn new(values: Vec<Box<dyn AsBytes>>, schema: &Schema) -> Self {
-        let has_nulls = values.iter().any(|t| t.is_null());
-        let data = if has_nulls {
-            values
+    pub fn new(mut values: Vec<Box<dyn AsBytes>>, schema: &Schema) -> Self {
+        let mut nulls = 0;
+        if values.iter().any(|t| t.is_null()) {
+            values = values
                 .into_iter()
                 .zip(schema.types.iter())
-                .map(|(t, ty)| -> Box<dyn AsBytes> {
-                    if t.is_null() {
-                        match ty {
-                            Types::Str => Str("".to_string()).into(),
-                            Types::I64 => I64(0).into(),
-                            Types::I128 => I128(0).into(),
-                            Types::U64 => U64(0).into(),
-                            Types::U128 => U128(0).into(),
-                            Types::F64 => F64(0.0).into(),
-                            Types::F32 => F32(0.0).into(),
-                            Types::Bool => Bool(false).into(),
-                            Types::I8 => I8(0).into(),
-                            Types::I16 => I16(0).into(),
-                            Types::I32 => I32(0).into(),
-                            Types::U8 => U8(0).into(),
-                            Types::U16 => U16(0).into(),
-                            Types::U32 => U32(0).into(),
-                            Types::Char => Char('0').into(),
-                        }
+                .enumerate()
+                .map(|(i, (value, type_))| {
+                    if value.is_null() {
+                        nulls |= 1 << i;
+                        TypeFactory::default(type_)
                     } else {
-                        t
+                        value
                     }
                 })
-                .collect()
-        } else {
-            values
-        };
+                .collect::<Vec<_>>();
+        }
 
-        let x = data.iter().flat_map(|t| t.to_bytes()).collect::<Vec<u8>>();
+        let x = values
+            .iter()
+            .flat_map(|t| t.to_bytes())
+            .collect::<Vec<u8>>();
 
-        Self::from_bytes(&x)
+        let mut tuple = Self::from_bytes(&x);
+        tuple._null_bitmap = nulls;
+        tuple
     }
 
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    pub fn get_value<T: AsBytes>(&self, field: &str, schema: &Schema) -> Result<T> {
+    pub fn get_value_of<T: AsBytes>(&self, field: &str, schema: &Schema) -> Result<Option<T>> {
         let field_id = schema
             .fields
             .iter()
             .position(|f| f == field)
             .ok_or(anyhow!("field not found"))?;
 
-        if field_id >= schema.types.len() {
+        self.get_value_at::<T>(field_id as u8, schema)
+    }
+
+    pub fn get_value_at<T: AsBytes>(&self, id: u8, schema: &Schema) -> Result<Option<T>> {
+        if (self._null_bitmap >> id) & 1 == 1 {
+            return Ok(None);
+        }
+
+        if id as usize >= schema.types.len() {
             return Err(anyhow!("field id out of bounds"));
         }
 
-        let dtype = &schema.types[field_id];
+        let dtype = &schema.types[id as usize];
 
         let offset = schema
             .types
             .iter()
-            .take(field_id as usize)
+            .take(id as usize)
             .fold(0, |acc, t| acc + t.size());
 
         let slice = &self.data[offset..offset + dtype.size()];
-        Ok(T::from_bytes(slice))
+        let value = T::from_bytes(slice);
+        Ok(Some(value))
     }
 
     pub fn get_data(&self) -> &[u8] {
@@ -97,6 +99,7 @@ impl Serialize for Tuple {
 
     fn from_bytes(bytes: &[u8]) -> Self {
         Self {
+            _null_bitmap: 0,
             data: bytes.to_vec().into_boxed_slice(),
         }
     }
@@ -105,8 +108,9 @@ impl Serialize for Tuple {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct TupleMetaData {
+    timestamp: u64,
+    null_bitmap: u64,
     is_deleted: bool,
-    null_bitmap: u64, // yes, tables are limited to 64 fields
 }
 
 impl Serialize for TupleMetaData {
@@ -127,14 +131,15 @@ impl Serialize for TupleMetaData {
 
 impl Default for TupleMetaData {
     fn default() -> Self {
-        Self::new()
+        Self::new(0)
     }
 }
 
 impl TupleMetaData {
-    pub fn new() -> Self {
+    pub fn new(nulls: u64) -> Self {
         Self {
-            null_bitmap: 0,
+            timestamp: 0,
+            null_bitmap: nulls,
             is_deleted: false,
         }
     }
@@ -153,6 +158,10 @@ impl TupleMetaData {
 
     pub fn is_deleted(&self) -> bool {
         self.is_deleted
+    }
+
+    pub fn get_null_bitmap(&self) -> u64 {
+        self.null_bitmap
     }
 }
 

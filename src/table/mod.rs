@@ -165,7 +165,9 @@ impl Table {
             }
         }
 
-        Ok(Tuple::from_bytes(&processed_data))
+        let mut new_tuple = Tuple::from_bytes(&processed_data);
+        new_tuple._null_bitmap = tuple._null_bitmap;
+        Ok(new_tuple)
     }
 
     /// fetch the string from the tuple, takes TupleId bytes
@@ -186,7 +188,7 @@ impl Table {
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
-        if tuple.len() > PAGE_END - SLOT_SIZE - META_SIZE {
+        if tuple.len() > PAGE_END - (SLOT_SIZE + META_SIZE) {
             return Err(anyhow!("Tuple is too long"));
         }
 
@@ -330,11 +332,13 @@ mod tests {
         let first_id = table.get_first_page_id();
         let blob_id = table.get_blob_page_id();
 
-        // entry size = 25 (9 header + 16 data)
+        // entry size = 33 (17 meta + 16 data)
         // slot size = 4
         // free page = 4080
-        // 140 * 29 = 4080
-        for i in 0..140 {
+        // 110 * 37 ≈ 4080
+        let tuples_per_page = 110;
+
+        for i in 0..tuples_per_page {
             let tuple = Tuple::new(vec![U128(i).into()], &schema);
             table.insert(tuple)?;
         }
@@ -347,7 +351,7 @@ mod tests {
         assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
-        for i in 0..140 {
+        for i in 0..tuples_per_page {
             let tuple = Tuple::new(vec![U128(i).into()], &schema);
             table.insert(tuple)?;
         }
@@ -374,7 +378,7 @@ mod tests {
         // get count of tuples
         let mut count = 0;
         table.scan(|_| count += 1);
-        assert_eq!(281, count);
+        assert_eq!(tuples_per_page * 2 + 1, count);
 
         Ok(())
     }
@@ -406,7 +410,7 @@ mod tests {
 
         let mut assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple = &tuple;
-            let tuple_bytes = tuple.get_value::<U128>("str", &schema).unwrap();
+            let tuple_bytes = tuple.get_value_of::<U128>("str", &schema).unwrap().unwrap();
             let string = table.fetch_string(&tuple_bytes.to_bytes());
             assert_eq!(
                 string,
@@ -420,6 +424,31 @@ mod tests {
         };
 
         table.scan(|entry| assert_strings(entry));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_nulls() -> Result<()> {
+        let schema = Schema::new(
+            vec!["a", "b", "c"],
+            vec![Types::U128, Types::Str, Types::I8],
+        );
+
+        let mut table = test_table(4, &schema)?;
+        let tuple = Tuple::new(vec![Null().into(), Null().into(), Null().into()], &schema);
+        table.insert(tuple)?;
+
+        let validator = |(_, (meta, tuple)): &(TupleId, Entry)| {
+            assert!(meta.is_null(0));
+            assert!(meta.is_null(1));
+            assert!(meta.is_null(2));
+            assert!(tuple.get_value_at::<U128>(0, &schema).unwrap().is_none());
+            assert!(tuple.get_value_at::<Str>(1, &schema).unwrap().is_none());
+            assert!(tuple.get_value_at::<I8>(2, &schema).unwrap().is_none());
+        };
+
+        table.scan(validator);
 
         Ok(())
     }

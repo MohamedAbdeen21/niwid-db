@@ -107,7 +107,6 @@ impl TablePage {
         self.latch.wlock();
 
         let tuple_size = tuple.len();
-        println!("tuple size {}", tuple_size);
         if tuple_size + SLOT_SIZE > self.free_space() {
             self.latch.wunlock();
             return Err(anyhow!("Not enough space to insert tuple"));
@@ -149,7 +148,7 @@ impl TablePage {
         let entry_offset = tuple_offset - META_SIZE;
 
         let slot = TablePageSlot::new(entry_offset, entry_size);
-        let meta = TupleMetaData::new();
+        let meta = TupleMetaData::new(tuple._null_bitmap);
 
         let slot_offset = match self.last_slot_offset() {
             Some(offset) => offset + SLOT_SIZE,
@@ -173,7 +172,7 @@ impl TablePage {
         let _wguard = self.latch.wguard();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
-        let mut deleted_meta = TupleMetaData::new();
+        let mut deleted_meta = TupleMetaData::default(); // TODO: Copy null bitmap
         deleted_meta.mark_deleted();
 
         self.data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
@@ -193,7 +192,10 @@ impl TablePage {
             TupleMetaData::from_bytes(&self.data.bytes[meta_offset..(meta_offset + META_SIZE)]);
         let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
 
-        (meta, Tuple::from_bytes(tuple_data))
+        let mut tuple = Tuple::from_bytes(tuple_data);
+        tuple._null_bitmap = meta.get_null_bitmap();
+
+        (meta, tuple)
     }
 
     /// Read tuple data without the metadata
@@ -203,15 +205,8 @@ impl TablePage {
 
         let tuple_offset = slot.offset as usize;
         let tuple_size = slot.size as usize;
-        println!(
-            "page {} offset and size {} {}",
-            self.get_page_id(),
-            tuple_offset,
-            tuple_size
-        );
 
         let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
-
         Tuple::from_bytes(tuple_data)
     }
 }

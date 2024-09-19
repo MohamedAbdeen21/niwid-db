@@ -54,6 +54,7 @@ pub trait Primitive {
     fn subtract(self, other: Self) -> Self;
     fn multiply(self, other: Self) -> Self;
     fn divide(self, other: Self) -> Self;
+    fn default() -> Self;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -102,6 +103,9 @@ impl Primitive for U8 {
     fn divide(self, other: Self) -> Self {
         U8(self.0 / other.0) // Simple division without checking for division by zero
     }
+    fn default() -> Self {
+        U8(0)
+    }
 }
 
 impl AsBytes for U8 {
@@ -125,6 +129,9 @@ impl Primitive for U16 {
     }
     fn divide(self, other: Self) -> Self {
         U16(self.0 / other.0) // Simple division without checking for division by zero
+    }
+    fn default() -> Self {
+        U16(0)
     }
 }
 
@@ -150,6 +157,9 @@ impl Primitive for U32 {
     fn divide(self, other: Self) -> Self {
         U32(self.0 / other.0) // Simple division without checking for division by zero
     }
+    fn default() -> Self {
+        U32(0)
+    }
 }
 
 impl AsBytes for U32 {
@@ -173,6 +183,9 @@ impl Primitive for U64 {
     }
     fn divide(self, other: Self) -> Self {
         U64(self.0 / other.0) // Simple division without checking for division by zero
+    }
+    fn default() -> Self {
+        U64(0)
     }
 }
 
@@ -198,6 +211,9 @@ impl Primitive for U128 {
     fn divide(self, other: Self) -> Self {
         U128(self.0 / other.0) // Simple division without checking for division by zero
     }
+    fn default() -> Self {
+        U128(0)
+    }
 }
 
 impl AsBytes for U128 {
@@ -221,6 +237,9 @@ impl Primitive for I8 {
     }
     fn divide(self, other: Self) -> Self {
         I8(self.0 / other.0) // Simple division without checking for division by zero
+    }
+    fn default() -> Self {
+        I8(0)
     }
 }
 
@@ -246,6 +265,9 @@ impl Primitive for I16 {
     fn divide(self, other: Self) -> Self {
         I16(self.0 / other.0) // Simple division without checking for division by zero
     }
+    fn default() -> Self {
+        I16(0)
+    }
 }
 
 impl AsBytes for I16 {
@@ -269,6 +291,9 @@ impl Primitive for I32 {
     }
     fn divide(self, other: Self) -> Self {
         I32(self.0 / other.0) // Simple division without checking for division by zero
+    }
+    fn default() -> Self {
+        I32(0)
     }
 }
 
@@ -294,6 +319,9 @@ impl Primitive for I64 {
     fn divide(self, other: Self) -> Self {
         I64(self.0 / other.0) // Simple division without checking for division by zero
     }
+    fn default() -> Self {
+        I64(0)
+    }
 }
 
 impl AsBytes for I64 {
@@ -317,6 +345,9 @@ impl Primitive for I128 {
     }
     fn divide(self, other: Self) -> Self {
         I128(self.0 / other.0) // Simple division without checking for division by zero
+    }
+    fn default() -> Self {
+        I128(0)
     }
 }
 
@@ -342,6 +373,9 @@ impl Primitive for F32 {
     fn divide(self, other: Self) -> Self {
         F32(self.0 / other.0) // Simple division without checking for division by zero
     }
+    fn default() -> Self {
+        F32(0.0)
+    }
 }
 
 impl AsBytes for F32 {
@@ -365,6 +399,9 @@ impl Primitive for F64 {
     }
     fn divide(self, other: Self) -> Self {
         F64(self.0 / other.0) // Simple division without checking for division by zero
+    }
+    fn default() -> Self {
+        F64(0.0)
     }
 }
 
@@ -390,6 +427,9 @@ impl Primitive for Bool {
     fn divide(self, _other: Self) -> Self {
         unimplemented!()
     }
+    fn default() -> Self {
+        Bool(false)
+    }
 }
 impl AsBytes for Bool {
     fn to_bytes(&self) -> Box<[u8]> {
@@ -412,6 +452,9 @@ impl Primitive for Char {
     }
     fn divide(self, _other: Self) -> Self {
         unimplemented!()
+    }
+    fn default() -> Self {
+        Char('\0')
     }
 }
 
@@ -437,6 +480,9 @@ impl Primitive for Str {
     }
     fn divide(self, _other: Self) -> Self {
         unimplemented!()
+    }
+    fn default() -> Self {
+        Str(String::new())
     }
 }
 
@@ -478,9 +524,9 @@ impl AsBytes for Null {
 
 macro_rules! impl_into_box {
     ($type:ty) => {
-        impl Into<Box<dyn AsBytes>> for $type {
-            fn into(self) -> Box<dyn AsBytes> {
-                Box::new(self)
+        impl From<$type> for Box<dyn AsBytes> {
+            fn from(value: $type) -> Box<dyn AsBytes> {
+                Box::new(value)
             }
         }
     };
@@ -502,3 +548,27 @@ impl_into_box!(Bool);
 impl_into_box!(Str);
 impl_into_box!(Char);
 impl_into_box!(Null);
+
+pub struct TypeFactory {}
+
+impl TypeFactory {
+    pub fn default(t: &Types) -> Box<dyn AsBytes> {
+        match t {
+            Types::Str => Str::default().into(),
+            Types::I64 => I64::default().into(),
+            Types::I128 => I128::default().into(),
+            Types::U64 => U64::default().into(),
+            Types::U128 => U128::default().into(),
+            Types::F64 => F64::default().into(),
+            Types::F32 => F32::default().into(),
+            Types::Bool => Bool::default().into(),
+            Types::I8 => I8::default().into(),
+            Types::I16 => I16::default().into(),
+            Types::I32 => I32::default().into(),
+            Types::U8 => U8::default().into(),
+            Types::U16 => U16::default().into(),
+            Types::U32 => U32::default().into(),
+            Types::Char => Char::default().into(),
+        }
+    }
+}
