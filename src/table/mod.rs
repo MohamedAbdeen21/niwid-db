@@ -1,24 +1,20 @@
-use std::sync::RwLock;
-
-use crate::{
-    buffer_pool::{BufferPool, BufferPoolManager},
-    pages::{
-        table_page::{TablePage, TupleExt, TupleId, META_SIZE, PAGE_END, SLOT_SIZE},
-        traits::Serialize,
-        PageId,
-    },
-    tuple::{schema::Schema, Entry, Tuple},
-    types::{Str, Types, STR_DELIMITER},
+use crate::buffer_pool::{BufferPool, BufferPoolManager};
+use crate::pages::{
+    table_page::{TablePage, TupleExt, TupleId, META_SIZE, PAGE_END, SLOT_SIZE},
+    traits::Serialize,
+    PageId,
 };
+use crate::tuple::{schema::Schema, Entry, Tuple};
+use crate::types::{Str, Types, STR_DELIMITER};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
 
 pub struct Table {
     name: String,
-    first_page: RwLock<*mut TablePage>,
-    last_page: RwLock<*mut TablePage>,
-    blob_page: RwLock<*mut TablePage>,
+    first_page: *mut TablePage,
+    last_page: *mut TablePage,
+    blob_page: *mut TablePage,
     bpm: BufferPoolManager,
     schema: Schema,
 }
@@ -38,9 +34,9 @@ impl Table {
 
         Ok(Self {
             name,
-            first_page: RwLock::new(page),
-            last_page: RwLock::new(page),
-            blob_page: RwLock::new(blob_page),
+            first_page: page,
+            last_page: page,
+            blob_page,
             bpm,
             schema: schema.clone(),
         })
@@ -77,9 +73,9 @@ impl Table {
 
         Ok(Self {
             name,
-            first_page: RwLock::new(first_page),
-            last_page: RwLock::new(last_page),
-            blob_page: RwLock::new(blob_page),
+            first_page,
+            last_page,
+            blob_page,
             bpm,
             schema: schema.clone(),
         })
@@ -95,37 +91,16 @@ impl Table {
     }
 
     pub fn get_first_page_id(&self) -> PageId {
-        unsafe {
-            self.first_page
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get_page_id()
-        }
+        unsafe { self.first_page.as_ref().unwrap().get_page_id() }
     }
 
     pub fn get_last_page_id(&self) -> PageId {
-        unsafe {
-            self.last_page
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get_page_id()
-        }
+        unsafe { self.last_page.as_ref().unwrap().get_page_id() }
     }
 
     #[allow(unused)]
     pub fn get_blob_page_id(&self) -> PageId {
-        unsafe {
-            self.blob_page
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get_page_id()
-        }
+        unsafe { self.blob_page.as_ref().unwrap().get_page_id() }
     }
 
     fn to_iter(&self) -> table_iterator::TableIterator {
@@ -140,7 +115,7 @@ impl Table {
         let schema = Schema::new(vec!["a"], vec![Types::Str]);
         let tuple = Tuple::new(vec![data.into()], &schema);
 
-        let blob = unsafe { self.blob_page.write().unwrap().as_mut().unwrap() };
+        let blob = unsafe { self.blob_page.as_mut().unwrap() };
 
         if let Ok(id) = blob.insert_raw(&tuple) {
             return Ok(id);
@@ -155,27 +130,13 @@ impl Table {
             .get_page_write()
             .into();
 
-        let last_page_id = unsafe {
-            self.blob_page
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get_page_id()
-        };
+        let last_page_id = unsafe { self.blob_page.as_ref().unwrap().get_page_id() };
 
         self.bpm.write().unwrap().unpin(&last_page_id);
 
-        self.blob_page = RwLock::new(blob_page);
+        self.blob_page = blob_page;
 
-        unsafe {
-            self.blob_page
-                .write()
-                .unwrap()
-                .as_mut()
-                .unwrap()
-                .insert_raw(&tuple)
-        }
+        unsafe { self.blob_page.as_mut().unwrap().insert_raw(&tuple) }
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
@@ -224,16 +185,16 @@ impl Table {
         Str(string)
     }
 
-    pub fn insert(&mut self, tuple: Tuple) -> Result<()> {
+    pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
         if tuple.len() > PAGE_END - SLOT_SIZE - META_SIZE {
             return Err(anyhow!("Tuple is too long"));
         }
 
         let tuple = self.insert_strings(tuple)?;
-        let last = unsafe { self.last_page.write().unwrap().as_mut().unwrap() };
+        let last = unsafe { self.last_page.as_mut().unwrap() };
 
-        if last.insert_tuple(&tuple).is_ok() {
-            return Ok(());
+        if let Ok(id) = last.insert_tuple(&tuple) {
+            return Ok(id);
         }
 
         // page is full, add another page and link to table
@@ -249,28 +210,12 @@ impl Table {
 
         last.set_next_page_id(page_id);
 
-        let last_page_id = unsafe {
-            self.last_page
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get_page_id()
-        };
+        let last_page_id = unsafe { self.last_page.as_ref().unwrap().get_page_id() };
         self.bpm.write().unwrap().unpin(&last_page_id);
 
-        self.last_page = RwLock::new(page);
+        self.last_page = page;
 
-        unsafe {
-            self.last_page
-                .write()
-                .unwrap()
-                .as_mut()
-                .unwrap()
-                .insert_tuple(&tuple)?;
-        }
-
-        Ok(())
+        unsafe { self.last_page.as_mut().unwrap().insert_tuple(&tuple) }
     }
 
     pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry))) {
@@ -299,8 +244,8 @@ impl Table {
         Ok(())
     }
 
-    #[allow(unused)]
-    pub fn update(&mut self, old_tuple: Tuple, new_tuple: Tuple) -> Result<()> {
+    #[allow(dead_code)]
+    pub fn update(&mut self, old_tuple: Tuple, new_tuple: Tuple) -> Result<TupleId> {
         let mut tuple_id = None;
         self.scan(|(id, (_, tuple))| {
             if *tuple == old_tuple {
@@ -321,9 +266,9 @@ impl Drop for Table {
     fn drop(&mut self) {
         let mut bpm = self.bpm.write().unwrap();
 
-        bpm.unpin(&unsafe { self.first_page.read().unwrap().as_ref().unwrap() }.get_page_id());
-        bpm.unpin(&unsafe { self.last_page.read().unwrap().as_ref().unwrap() }.get_page_id());
-        bpm.unpin(&unsafe { self.blob_page.read().unwrap().as_ref().unwrap() }.get_page_id());
+        bpm.unpin(&unsafe { self.first_page.as_ref().unwrap() }.get_page_id());
+        bpm.unpin(&unsafe { self.last_page.as_ref().unwrap() }.get_page_id());
+        bpm.unpin(&unsafe { self.blob_page.as_ref().unwrap() }.get_page_id());
     }
 }
 
@@ -349,9 +294,9 @@ mod tests {
 
         Ok(Table {
             name: "test".to_string(),
-            first_page: RwLock::new(page),
-            last_page: RwLock::new(page),
-            blob_page: RwLock::new(blob_page),
+            first_page: page,
+            last_page: page,
+            blob_page,
             bpm,
             schema: schema.clone(),
         })
@@ -368,15 +313,7 @@ mod tests {
         let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
 
-        let page_id = unsafe {
-            table
-                .first_page
-                .read()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .get_page_id()
-        };
+        let page_id = unsafe { table.first_page.as_ref().unwrap().get_page_id() };
 
         drop(table);
         assert_eq!(1, bpm.read().unwrap().get_pin_count(&page_id).unwrap());
@@ -403,18 +340,12 @@ mod tests {
             table.insert(tuple)?;
         }
 
-        assert_eq!(
-            *table.first_page.read().unwrap(),
-            *table.last_page.read().unwrap()
-        );
+        assert_eq!(table.first_page, table.last_page);
 
         table.insert(Tuple::new(vec![U128(9999).to_bytes()], &schema))?;
         let second_id = table.get_last_page_id();
 
-        assert_ne!(
-            *table.first_page.read().unwrap(),
-            *table.last_page.read().unwrap()
-        );
+        assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..140 {

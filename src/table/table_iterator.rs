@@ -24,9 +24,7 @@ impl TableIterator {
         let page: *const TablePage = bpm
             .write()
             .unwrap()
-            .fetch_frame(
-                unsafe { table.first_page.read().unwrap().as_ref().unwrap() }.get_page_id(),
-            )
+            .fetch_frame(unsafe { table.first_page.as_ref().unwrap() }.get_page_id())
             .unwrap()
             .get_page_read()
             .into();
