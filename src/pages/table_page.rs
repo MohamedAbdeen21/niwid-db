@@ -295,6 +295,11 @@ impl TablePageSlot {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        tuple::schema::Schema,
+        types::{Types, U16},
+    };
+
     use super::*;
     use anyhow::Result;
 
@@ -321,6 +326,38 @@ mod tests {
         t1_mut.latch.rlock();
         let _ = page.latch.upgradable_rlock();
         t2_mut.latch.rlock();
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_underlying_page_share() -> Result<()> {
+        println!("test_underlying_page_share");
+        let page = &mut Page::new();
+        println!("test_underlying_page_share");
+        let table_page: *mut TablePage = page.into();
+        let table_page_2: *mut TablePage = page.into();
+
+        println!("test_underlying_page_share");
+        let tuple = Tuple::new(
+            vec![U16(300).into()],
+            &Schema::new(vec!["a"], vec![Types::U16]),
+        );
+
+        println!("inserted");
+        unsafe { table_page.as_mut().unwrap().insert_tuple(&tuple) }?;
+        println!("{:?}", page.read_bytes(0, PAGE_SIZE));
+
+        assert_eq!(page.read_bytes(PAGE_SIZE - 2, PAGE_SIZE), tuple.to_bytes());
+
+        assert_eq!(
+            unsafe { table_page_2.as_ref() }
+                .unwrap()
+                .read_tuple(0)
+                .1
+                .to_bytes(),
+            tuple.to_bytes()
+        );
 
         Ok(())
     }
