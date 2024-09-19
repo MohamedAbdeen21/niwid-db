@@ -1,4 +1,7 @@
+use crate::pages::table_page::TupleId;
+
 #[allow(unused)]
+#[derive(PartialEq, Eq, Clone)]
 pub enum Types {
     U8,
     U16,
@@ -14,6 +17,7 @@ pub enum Types {
     F64,
     Bool,
     Char,
+    Str, // string is stored as a [`TupleId`] to a blob page
 }
 
 impl Types {
@@ -24,6 +28,7 @@ impl Types {
             Types::U32 | Types::I32 | Types::F32 => 4,
             Types::U64 | Types::I64 | Types::F64 => 8,
             Types::U128 | Types::I128 => 16,
+            Types::Str => std::mem::size_of::<TupleId>(),
         }
     }
 }
@@ -64,6 +69,8 @@ pub struct F32(pub f32);
 pub struct F64(pub f64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Bool(pub bool);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Str(pub String);
 
 impl Primitive for U8 {
     fn add(self, other: Self) -> Self {
@@ -335,5 +342,30 @@ impl Primitive for Bool {
     }
     fn from_bytes(bytes: &[u8]) -> Self {
         Bool(bytes[0] != 0)
+    }
+}
+
+impl Primitive for Str {
+    fn add(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+    fn subtract(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+    fn multiply(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+    fn divide(self, _other: Self) -> Self {
+        unimplemented!()
+    }
+    fn to_bytes(&self) -> Box<[u8]> {
+        let mut str = self.0.clone();
+        str.push('\0');
+        str.as_bytes().to_vec().into_boxed_slice()
+    }
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut v = bytes.to_vec();
+        v.remove(v.len() - 1); // the '\0' is the last byte
+        Str(String::from_utf8(v).unwrap())
     }
 }

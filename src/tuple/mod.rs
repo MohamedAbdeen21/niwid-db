@@ -15,17 +15,25 @@ pub struct Tuple {
 }
 
 impl Tuple {
-    pub fn new(data: Vec<Box<[u8]>>, schema: &Schema) -> Self {
-        let size = schema.types.iter().fold(0, |acc, t| acc + t.size());
+    pub fn new(data: Vec<Box<[u8]>>, _schema: &Schema) -> Self {
+        // let strings = schema
+        //     .types
+        //     .iter()
+        //     .enumerate()
+        //     .filter(|(_, t)| t == &&Types::Str);
+        //
+        // let _size = schema.types.iter().fold(0, |acc, t| acc + t.size());
+
         let data = data
             .iter()
             .flat_map(|b| b.iter())
             .cloned()
             .collect::<Vec<u8>>();
 
-        if data.len() != size {
-            panic!("data length mismatch");
-        }
+        // TODO: validate input and careful with strings
+        // if data.len() != size {
+        //     panic!("data length mismatch");
+        // }
 
         Self::from_bytes(data.as_slice())
     }

@@ -3,7 +3,8 @@ use std::sync::RwLock;
 use crate::{
     buffer_pool::{BufferPool, BufferPoolManager},
     pages::table_page::{TablePage, TupleId},
-    tuple::{Entry, Tuple},
+    tuple::{schema::Schema, Entry, Tuple},
+    types::Types,
 };
 use anyhow::Result;
 
@@ -13,11 +14,13 @@ pub mod table_iterator;
 pub struct Table {
     first_page: RwLock<*mut TablePage>,
     last_page: RwLock<*mut TablePage>,
+    blob_page: RwLock<*mut TablePage>,
     bpm: BufferPoolManager,
+    schema: Schema,
 }
 
 impl Table {
-    pub fn new() -> Result<Self> {
+    pub fn new(schema: &Schema) -> Result<Self> {
         let bpm = BufferPool::new();
 
         let page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
@@ -27,10 +30,14 @@ impl Table {
         // increment pin count
         let _ = bpm.write().unwrap().fetch_frame(page_id);
 
+        let blob_page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
+
         Ok(Self {
             first_page: RwLock::new(page),
             last_page: RwLock::new(page),
+            blob_page: RwLock::new(blob_page),
             bpm,
+            schema: schema.clone(),
         })
     }
 
@@ -38,7 +45,50 @@ impl Table {
         table_iterator::TableIterator::new(self)
     }
 
+    fn insert_string(&mut self, data: Box<[u8]>) -> Result<TupleId> {
+        let schema = Schema::new(vec!["a".to_string()], vec![Types::Str]);
+        let tuple = Tuple::new(vec![data], &schema);
+
+        let blob = unsafe { self.blob_page.write().unwrap().as_mut().unwrap() };
+
+        if let Ok(id) = blob.insert_tuple(&tuple) {
+            return Ok(id);
+        }
+
+        // page is full, add another page and link to table
+        let blob_page: *mut TablePage = self
+            .bpm
+            .write()
+            .unwrap()
+            .new_page()?
+            .get_page_write()
+            .into();
+
+        let last_page_id = unsafe {
+            self.blob_page
+                .read()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .get_page_id()
+        };
+
+        self.bpm.write().unwrap().unpin(&last_page_id);
+
+        self.blob_page = RwLock::new(blob_page);
+
+        unsafe {
+            self.blob_page
+                .write()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .insert_tuple(&tuple)
+        }
+    }
+
     pub fn insert(&mut self, tuple: Tuple) -> Result<()> {
+        // TODO: find strings and replace them with their ids
         let last = unsafe { self.last_page.write().unwrap().as_mut().unwrap() };
 
         if last.insert_tuple(&tuple).is_ok() {
@@ -129,7 +179,7 @@ mod tests {
     };
     use anyhow::Result;
 
-    fn test_table(size: usize) -> Result<Table> {
+    fn test_table(size: usize, schema: &Schema) -> Result<Table> {
         let bpm = Arc::new(RwLock::new(BufferPool::init(size)));
 
         let page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
@@ -139,22 +189,26 @@ mod tests {
         // increment pin count
         let _ = bpm.write().unwrap().fetch_frame(page_id);
 
+        let blob_page: *mut TablePage = bpm.write().unwrap().new_page()?.get_page_write().into();
+
         Ok(Table {
             first_page: RwLock::new(page),
             last_page: RwLock::new(page),
+            blob_page: RwLock::new(blob_page),
             bpm,
+            schema: schema.clone(),
         })
     }
 
     #[test]
     fn test_unpin_drop() -> Result<()> {
-        let mut table = test_table(2)?;
-        let bpm = table.bpm.clone();
-
         let schema = Schema::new(
             vec!["id".to_string(), "age".to_string()],
             vec![Types::U8, Types::U16],
         );
+
+        let mut table = test_table(2, &schema)?;
+        let bpm = table.bpm.clone();
 
         let tuple_data = vec![U8(2).to_bytes(), U16(50000).to_bytes()];
         let tuple = Tuple::new(tuple_data, &schema);
@@ -178,9 +232,9 @@ mod tests {
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let mut table = test_table(3)?;
-
         let schema = Schema::new(vec!["a".to_string()], vec![Types::U128]);
+
+        let mut table = test_table(3, &schema)?;
 
         // entry size = 25 (9 header + 16 data)
         // slot size = 4

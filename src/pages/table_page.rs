@@ -97,7 +97,7 @@ impl TablePage {
         offset - slots
     }
 
-    pub fn insert_tuple(&mut self, tuple: &Tuple) -> Result<()> {
+    pub fn insert_tuple(&mut self, tuple: &Tuple) -> Result<TupleId> {
         let entry_size = tuple.len() + META_SIZE;
         if entry_size + SLOT_SIZE > self.free_space() {
             return Err(anyhow!("Not enough space to insert tuple"));
@@ -123,7 +123,7 @@ impl TablePage {
         self.header_mut().add_tuple();
         self.is_dirty |= true;
 
-        Ok(())
+        Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
 
     pub fn delete_tuple(&mut self, slot: usize) {

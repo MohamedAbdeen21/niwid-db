@@ -12,12 +12,12 @@ use tuple::{schema::Schema, Tuple};
 use types::{Primitive, Types, U16, U8};
 
 fn main() -> Result<()> {
-    let mut table = Table::new()?;
-
     let schema = Schema::new(
         vec!["id".to_string(), "age".to_string()],
         vec![Types::U8, Types::U16],
     );
+
+    let mut table = Table::new(&schema)?;
 
     let tuple_data = vec![U8(2).to_bytes(), U16(50000).to_bytes()];
     let tuple = Tuple::new(tuple_data, &schema);
@@ -35,11 +35,12 @@ fn main() -> Result<()> {
 
     drop(table);
 
-    let mut table2 = Table::new()?;
     let schema = Schema::new(
         vec!["id".to_string(), "age".to_string()],
         vec![Types::U16, Types::U16],
     );
+
+    let mut table2 = Table::new(&schema)?;
 
     let tuple_data = vec![U16(10000).to_bytes(), U16(50000).to_bytes()];
     let tuple = Tuple::new(tuple_data, &schema);
