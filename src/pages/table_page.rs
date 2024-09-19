@@ -130,16 +130,15 @@ impl TablePage {
     /// similar to insert tuple but avoids adding the tuple metadata
     /// used mainly in blob pages
     pub fn insert_raw(&mut self, tuple: &Tuple) -> Result<TupleId> {
-        let entry_size = tuple.len();
-        if entry_size + SLOT_SIZE > self.free_space() {
+        let tuple_size = tuple.len();
+        if tuple_size + SLOT_SIZE > self.free_space() {
             return Err(anyhow!("Not enough space to insert tuple"));
         }
 
         let last_offset = self.last_tuple_offset();
-        let tuple_offset = last_offset - tuple.len();
-        let entry_offset = tuple_offset;
+        let tuple_offset = last_offset - tuple_size;
 
-        let slot = TablePageSlot::new(entry_offset, entry_size);
+        let slot = TablePageSlot::new(tuple_offset, tuple_size);
 
         let slot_offset = match self.last_slot_offset() {
             Some(offset) => offset + SLOT_SIZE,
@@ -208,6 +207,18 @@ impl TablePage {
         let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
 
         (meta, Tuple::from_bytes(tuple_data))
+    }
+
+    /// Read tuple data without the metadata
+    pub fn read_raw(&self, slot: usize) -> Tuple {
+        let slot = self.get_slot(slot).expect("Asked for invalid slot");
+
+        let tuple_offset = slot.offset as usize;
+        let tuple_size = slot.size as usize;
+
+        let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
+
+        Tuple::from_bytes(tuple_data)
     }
 }
 

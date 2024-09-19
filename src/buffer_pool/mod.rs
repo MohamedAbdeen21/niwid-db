@@ -2,7 +2,7 @@ mod frame;
 mod replacer;
 
 use crate::disk_manager::DiskManager;
-use crate::pages::{Page, PageId};
+use crate::pages::{Page, PageId, INVALID_PAGE};
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
@@ -142,6 +142,21 @@ fn get_buffer_pool() -> BufferPoolManager {
     }
 
     BUFFER_POOL.clone()
+}
+
+impl Drop for BufferPool {
+    fn drop(&mut self) {
+        let pages: Vec<&mut Page> = self
+            .frames
+            .iter_mut()
+            .filter(|f| f.get_page_read().get_page_id() != INVALID_PAGE)
+            .map(|f| f.get_page_write())
+            .collect();
+
+        for page in pages {
+            self.disk_manager.write_to_file(page).unwrap();
+        }
+    }
 }
 
 #[cfg(test)]

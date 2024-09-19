@@ -54,7 +54,7 @@ impl Table {
 
         let blob = unsafe { self.blob_page.write().unwrap().as_mut().unwrap() };
 
-        if let Ok(id) = blob.insert_tuple(&tuple) {
+        if let Ok(id) = blob.insert_raw(&tuple) {
             return Ok(id);
         }
 
@@ -128,7 +128,7 @@ impl Table {
             .get_page_read()
             .into();
 
-        let (_, tuple) = blob_page.read_tuple(slot);
+        let tuple = blob_page.read_raw(slot);
         let string = String::from_utf8(tuple.get_data().to_vec()).unwrap();
         Str(string)
     }
@@ -352,8 +352,8 @@ mod tests {
 
         let mut counter = 0;
 
-        let mut assert_strings = |entry: &Entry| {
-            let tuple = &entry.1;
+        let mut assert_strings = |(_, tuple): &Entry| {
+            let tuple = &tuple;
             let tuple_bytes = tuple.get_value::<U128>("str", &schema).unwrap();
             let str_id = TupleId::from_bytes(&tuple_bytes.to_bytes());
             let string = table.fetch_string(str_id);
