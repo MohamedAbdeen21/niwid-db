@@ -92,16 +92,16 @@ impl Table {
     }
 
     pub fn get_first_page_id(&self) -> PageId {
-        unsafe { self.first_page.as_ref().unwrap().get_page_id() }
+        unsafe { self.first_page.as_ref().unwrap() }.get_page_id()
     }
 
     pub fn get_last_page_id(&self) -> PageId {
-        unsafe { self.last_page.as_ref().unwrap().get_page_id() }
+        unsafe { self.last_page.as_ref().unwrap() }.get_page_id()
     }
 
     #[allow(unused)]
     pub fn get_blob_page_id(&self) -> PageId {
-        unsafe { self.blob_page.as_ref().unwrap().get_page_id() }
+        unsafe { self.blob_page.as_ref().unwrap() }.get_page_id()
     }
 
     fn to_iter(&self) -> table_iterator::TableIterator {
@@ -113,8 +113,7 @@ impl Table {
             return Err(anyhow!("Tuple is too long"));
         }
 
-        let dummy_schema = Schema::new(vec![], vec![]);
-        let tuple = Tuple::new(vec![Str::from_bytes(bytes).into()], &dummy_schema);
+        let tuple = Tuple::new(vec![Str::from_raw_bytes(bytes).into()], &Schema::default());
 
         let blob = unsafe { self.blob_page.as_mut().unwrap() };
 
@@ -131,17 +130,16 @@ impl Table {
             .get_page_write()
             .into();
 
-        let last_page_id = unsafe { self.blob_page.as_ref().unwrap().get_page_id() };
+        let last_page_id = unsafe { self.blob_page.as_ref().unwrap() }.get_page_id();
 
         self.bpm.write().unwrap().unpin(&last_page_id);
 
         self.blob_page = blob_page;
 
-        unsafe { self.blob_page.as_mut().unwrap().insert_raw(&tuple) }
+        unsafe { self.blob_page.as_mut().unwrap() }.insert_raw(&tuple)
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
-        println!("inserting: {:?}", tuple);
         if !self.schema.types.contains(&Types::Str) {
             return Ok(tuple);
         }
@@ -153,30 +151,27 @@ impl Table {
             .scan(0, |acc, ty| {
                 let size = if ty == &Types::Str {
                     let slice = &tuple.get_data()[*acc..*acc + 2];
-                    println!("slice: {:?}", slice);
                     U16::from_bytes(slice).0 as usize + 2
                 } else {
                     ty.size()
                 };
                 *acc = *acc + size;
-                println!("size: {size}, type: {ty:?}");
                 Some(*acc)
             })
             .collect();
 
         offsets.insert(0, 0);
-        println!("offsets: {:?}", offsets);
 
         let mut data = vec![];
 
         for (ty, sizes) in self.schema.types.clone().iter().zip(offsets.windows(2)) {
             let (offset, size) = (sizes[0], sizes[1]);
-            println!("offset: {offset}, size: {size}");
-            data.extend(if ty == &Types::Str {
-                let bytes = &tuple.get_data()[offset..size];
-                self.insert_string(bytes)?.to_bytes()
-            } else {
-                tuple.get_data()[offset..size].to_vec()
+            data.extend(match ty {
+                Types::Str => {
+                    let bytes = &tuple.get_data()[offset..size];
+                    self.insert_string(bytes)?.to_bytes()
+                }
+                _ => tuple.get_data()[offset..size].to_vec(),
             });
         }
 
@@ -199,7 +194,7 @@ impl Table {
             .into();
 
         let tuple = unsafe { blob_page.as_ref().unwrap() }.read_raw(slot);
-        Str::from_bytes(tuple.get_data())
+        Str::from_raw_bytes(tuple.get_data())
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {

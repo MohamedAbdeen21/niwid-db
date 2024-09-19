@@ -2,7 +2,7 @@ use crate::types::Types;
 use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Schema {
     pub fields: Vec<String>,
     pub types: Vec<Types>,

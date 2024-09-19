@@ -485,6 +485,7 @@ impl Primitive for Str {
 }
 
 impl AsBytes for Str {
+    /// prepend size (2 bytes) + string bytes
     fn to_bytes(&self) -> Box<[u8]> {
         let str = self.0.clone();
         let size = U16(str.len() as u16);
@@ -496,6 +497,7 @@ impl AsBytes for Str {
             .into_boxed_slice()
     }
 
+    /// interpret bytes as size (2 bytes) + string
     fn from_bytes(bytes: &[u8]) -> Self {
         let (_, str) = (
             U16::from_bytes(&bytes[0..2]),
@@ -503,6 +505,13 @@ impl AsBytes for Str {
         );
 
         return Str(str);
+    }
+}
+
+impl Str {
+    /// Interpret bytes as string
+    pub fn from_raw_bytes(bytes: &[u8]) -> Self {
+        Str(String::from_utf8(bytes[2..].to_vec()).unwrap())
     }
 }
 

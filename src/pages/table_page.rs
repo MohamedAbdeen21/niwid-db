@@ -199,6 +199,7 @@ impl TablePage {
     }
 
     /// Read tuple data without the metadata
+    /// or setting the bitmap
     pub fn read_raw(&self, slot: usize) -> Tuple {
         let _rguard = self.latch.rguard();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
