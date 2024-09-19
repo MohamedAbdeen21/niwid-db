@@ -25,8 +25,11 @@ fn main() -> Result<()> {
 
     let mut catalog = Catalog::new()?;
     let table = catalog.get_table("users").unwrap();
-
     table.scan(|entry| println!("{:?}", entry));
+
+    catalog.drop_table("users");
+
+    assert!(catalog.get_table("users").is_none());
 
     Ok(())
     //

@@ -76,13 +76,14 @@ impl Iterator for TableIterator {
         }
 
         let entry = unsafe { self.page.as_ref().unwrap() }.read_tuple(self.current_slot);
+        self.current_slot += 1;
+
         if entry.0.is_deleted() {
             return self.next();
         }
 
         let page_id = unsafe { self.page.as_ref().unwrap() }.get_page_id();
 
-        self.current_slot += 1;
-        Some(((page_id, self.current_slot), entry))
+        Some(((page_id, self.current_slot - 1), entry))
     }
 }

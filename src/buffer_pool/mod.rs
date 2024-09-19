@@ -52,11 +52,11 @@ impl BufferPool {
             }
         }
 
-        let next_page_id = match disk_manager.read_from_file(PageId::max_value()) {
+        let next_page_id = match disk_manager.read_from_file(PageId::MAX) {
             Ok(page) => page,
             Err(_) => {
                 let mut page = Page::new();
-                page.set_page_id(PageId::max_value());
+                page.set_page_id(PageId::MAX);
                 page
             }
         };

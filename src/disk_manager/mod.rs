@@ -32,6 +32,7 @@ impl DiskManager {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false) // don't overwrite existing file
             .open(path)
             .expect("file opened successfully");
 

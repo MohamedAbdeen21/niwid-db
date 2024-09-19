@@ -71,11 +71,11 @@ impl Catalog {
             return Err(anyhow!("Table {} already exists", table_name));
         }
 
-        let mut table = Table::new(table_name.to_string(), &schema)?;
+        let mut table = Table::new(table_name.to_string(), schema)?;
         let tuple_data = vec![
             Str(table_name.to_string()).to_bytes(),
-            I64(table.get_first_page_id() as i64).to_bytes(),
-            I64(table.get_last_page_id() as i64).to_bytes(),
+            I64(table.get_first_page_id()).to_bytes(),
+            I64(table.get_last_page_id()).to_bytes(),
             // Str(schema.to_string()).to_bytes(), // TODO: Handle schema serialization
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);
@@ -90,6 +90,35 @@ impl Catalog {
         self.tables
             .iter_mut()
             .find(|table| table.get_name() == table_name)
+    }
+
+    pub fn drop_table(&mut self, table_name: &str) -> Option<()> {
+        let mut tuple_id = None;
+        self.table.scan(|(id, (_, tuple))| {
+            let name_bytes = tuple.get_value::<I128>("table_name", &self.schema).unwrap();
+            let name = self.table.fetch_string(&name_bytes.to_bytes()).0;
+            if name == table_name {
+                tuple_id = Some(*id);
+            }
+        });
+
+        self.table.delete(tuple_id?).ok()?;
+
+        let index = self
+            .tables
+            .iter()
+            .enumerate()
+            .inspect(|(i, table)| println!("{i}: {:?}", table.get_name()))
+            .position(|(_, table)| table.get_name() == table_name)?;
+
+        println!("index: {index}");
+        self.tables.remove(index);
+
+        self.tables
+            .iter()
+            .for_each(|table| println!("{:?}", table.get_name()));
+
+        Some(())
     }
 }
 
