@@ -28,8 +28,8 @@ fn main() -> Result<()> {
     let mut catalog = Catalog::new()?;
     let table = catalog.get_table("users").unwrap();
 
-    table.scan(|entry| {
-        println!("{:?}", entry);
+    table.scan(|(_, (_, tuple))| {
+        println!("{:?}", tuple.get_values(&schema));
         Ok(())
     })?;
 

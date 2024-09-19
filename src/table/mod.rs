@@ -476,24 +476,24 @@ mod tests {
         );
 
         let mut table = test_table(4, &schema)?;
+
         let tuple = Tuple::new(
             vec![U128(10).into(), F64(10.0).into(), I8(10).into()],
             &schema,
         );
         let t1_id = table.insert(tuple)?;
 
-        let tuple = Tuple::new(
-            vec![U128(20).into(), F64(20.0).into(), I8(20).into()],
-            &schema,
-        );
+        let tuple_data = vec![U128(20).into(), F64(20.0).into(), I8(20).into()];
+        let tuple = Tuple::new(tuple_data, &schema);
         let t2_id = table.insert(tuple)?;
 
         table.delete(t1_id)?;
 
         let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
-            assert_eq!(tuple.get_value_at::<U128>(0, &schema)?.unwrap().0, 20);
-            assert_eq!(tuple.get_value_at::<F64>(1, &schema)?.unwrap().0, 20.0);
-            assert_eq!(tuple.get_value_at::<I8>(2, &schema)?.unwrap().0, 20);
+            let values = tuple.get_values(&schema)?;
+            assert_eq!(values[0].to_bytes(), U128(20).to_bytes());
+            assert_eq!(values[1].to_bytes(), F64(20.0).to_bytes());
+            assert_eq!(values[2].to_bytes(), I8(20).to_bytes());
 
             Ok(())
         };
@@ -524,9 +524,11 @@ mod tests {
             assert!(meta.is_null(0));
             assert!(meta.is_null(1));
             assert!(meta.is_null(2));
-            assert!(tuple.get_value_at::<U128>(0, &schema)?.is_none());
-            assert!(tuple.get_value_at::<Str>(1, &schema)?.is_none());
-            assert!(tuple.get_value_at::<I8>(2, &schema)?.is_none());
+
+            tuple
+                .get_values(&schema)?
+                .iter()
+                .for_each(|v| assert!(v.is_null()));
 
             Ok(())
         };

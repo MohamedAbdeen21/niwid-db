@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use serde::{Deserialize, Serialize};
 
 use crate::tuple::TupleId;
@@ -36,7 +38,7 @@ impl Types {
     }
 }
 
-pub trait AsBytes {
+pub trait AsBytes: Debug + 'static {
     fn is_null(&self) -> bool {
         false
     }
@@ -573,6 +575,26 @@ impl TypeFactory {
             Types::U16 => U16::default().into(),
             Types::U32 => U32::default().into(),
             Types::Char => Char::default().into(),
+        }
+    }
+
+    pub fn from_bytes(t: &Types, bytes: &[u8]) -> Box<dyn AsBytes> {
+        match t {
+            Types::Str => Str::from_bytes(bytes).into(),
+            Types::I64 => I64::from_bytes(bytes).into(),
+            Types::I128 => I128::from_bytes(bytes).into(),
+            Types::U64 => U64::from_bytes(bytes).into(),
+            Types::U128 => U128::from_bytes(bytes).into(),
+            Types::F64 => F64::from_bytes(bytes).into(),
+            Types::F32 => F32::from_bytes(bytes).into(),
+            Types::Bool => Bool::from_bytes(bytes).into(),
+            Types::I8 => I8::from_bytes(bytes).into(),
+            Types::I16 => I16::from_bytes(bytes).into(),
+            Types::I32 => I32::from_bytes(bytes).into(),
+            Types::U8 => U8::from_bytes(bytes).into(),
+            Types::U16 => U16::from_bytes(bytes).into(),
+            Types::U32 => U32::from_bytes(bytes).into(),
+            Types::Char => Char::from_bytes(bytes).into(),
         }
     }
 }

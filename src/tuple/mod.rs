@@ -2,7 +2,7 @@ pub mod schema;
 
 use crate::pages::PageId;
 use crate::tuple::schema::Schema;
-use crate::types::AsBytes;
+use crate::types::{AsBytes, Null};
 use crate::{pages::traits::Serialize, types::TypeFactory};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
@@ -63,6 +63,24 @@ impl Tuple {
             .ok_or(anyhow!("field not found"))?;
 
         self.get_value_at::<T>(field_id as u8, schema)
+    }
+
+    pub fn get_values(&self, schema: &Schema) -> Result<Vec<Box<dyn AsBytes>>> {
+        let mut values = vec![];
+
+        let mut offset = 0;
+        for (i, type_) in schema.types.iter().enumerate() {
+            let size = type_.size();
+            let value = TypeFactory::from_bytes(type_, &self.get_data()[offset..offset + size]);
+            offset += size;
+            if (self._null_bitmap >> i) & 1 == 1 {
+                values.push(Null().into());
+            } else {
+                values.push(value);
+            }
+        }
+
+        Ok(values)
     }
 
     pub fn get_value_at<T: AsBytes>(&self, id: u8, schema: &Schema) -> Result<Option<T>> {
