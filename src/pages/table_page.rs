@@ -31,13 +31,13 @@ pub struct TablePage {
 }
 
 impl TablePage {
-    pub fn new(page_id: i32) -> Self {
-        let mut p: Self = Page::new().into();
-        p.header_mut().set_next_page(INVALID_PAGE);
-        p.set_page_id(page_id);
-        p
-    }
-
+    // pub fn new(page_id: i32) -> Self {
+    //     let mut p: Self = Page::new().into();
+    //     p.header_mut().set_next_page(INVALID_PAGE);
+    //     p.set_page_id(page_id);
+    //     p
+    // }
+    //
     pub fn header(&self) -> &TablePageHeader {
         &self.data.header
     }

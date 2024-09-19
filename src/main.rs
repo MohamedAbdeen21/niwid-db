@@ -6,7 +6,7 @@ mod tuple;
 mod types;
 
 use anyhow::Result;
-use buffer_pool::BufferPool;
+use buffer_pool::{BufferPool, BufferPoolManager};
 use pages::table_page::TablePage;
 use table::Table;
 use tuple::{schema::Schema, Tuple};
@@ -14,9 +14,16 @@ use types::{Primitive, Types, U16, U8};
 
 fn main() -> Result<()> {
     let path = "my_struct.bin";
-    let mut bpm = buffer_pool::BufferPool::new();
+    let bpm = BufferPool::new();
 
-    let mut table_page: TablePage = bpm.new_page()?.write().unwrap().get_page().into();
+    let mut table_page: TablePage = bpm
+        .write()
+        .unwrap()
+        .new_page()?
+        .write()
+        .unwrap()
+        .get_page()
+        .into();
 
     insert_write_read(&bpm, &mut table_page, path)?;
     let table = Table::new(table_page, table_page);
@@ -30,7 +37,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn insert_write_read(_bp: &BufferPool, table_page: &mut TablePage, _path: &str) -> Result<()> {
+fn insert_write_read(
+    _bp: BufferPoolManager,
+    table_page: &mut TablePage,
+    _path: &str,
+) -> Result<()> {
     let schema = Schema::new(
         vec!["id".to_string(), "age".to_string()],
         vec![Types::U8, Types::U16],

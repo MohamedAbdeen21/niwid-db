@@ -34,6 +34,8 @@ impl Tuple {
         self.data.len()
     }
 
+    // not used yet
+    #[allow(dead_code)]
     pub fn get_value<T: Primitive>(&self, field: &str, schema: &Schema) -> Result<T> {
         let field_id = schema
             .fields

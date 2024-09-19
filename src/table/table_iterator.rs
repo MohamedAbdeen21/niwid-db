@@ -1,6 +1,4 @@
-use std::sync::RwLock;
-
-use crate::buffer_pool::{get_buffer_pool, BufferPool};
+use crate::buffer_pool::{BufferPool, BufferPoolManager};
 use crate::pages::table_page::TablePage;
 use crate::pages::INVALID_PAGE;
 use crate::tuple::Entry;
@@ -12,7 +10,7 @@ pub struct TableIterator {
     page: TablePage,
     current: usize,
     next_page: i32,
-    buffer_pool: &'static RwLock<BufferPool>,
+    buffer_pool: BufferPoolManager,
 }
 
 #[allow(unused)]
@@ -23,7 +21,7 @@ impl TableIterator {
             page,
             current: 0,
             next_page: page.header().get_next_page(),
-            buffer_pool: get_buffer_pool(),
+            buffer_pool: BufferPool::new(),
         }
     }
 }
@@ -39,15 +37,15 @@ impl Iterator for TableIterator {
         if self.current >= self.page.header().get_num_tuples() {
             self.page = self
                 .buffer_pool
-                .read()
+                .write()
                 .unwrap()
-                .get_frame(self.next_page)
+                .fetch_page(self.next_page)
+                .ok()? // TODO: idk
                 .read()
                 .unwrap()
                 .get_page()
                 .into();
 
-            println!("{}", "we out");
             self.current = 0;
             self.next_page = self.page.header().get_next_page();
             return self.next();

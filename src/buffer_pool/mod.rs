@@ -12,9 +12,9 @@ use std::sync::RwLock;
 const BUFFER_POOL_SIZE: usize = 10_000;
 
 type FrameId = usize;
+pub type BufferPoolManager = &'static RwLock<BufferPool>;
 
 pub struct BufferPool {
-    timestamp: u64,
     free_frames: LinkedList<FrameId>,
     frames: Box<[RwLock<Frame>]>,
     page_table: HashMap<i32, FrameId>,
@@ -23,42 +23,58 @@ pub struct BufferPool {
 }
 
 impl BufferPool {
-    pub fn new() -> Self {
+    pub fn new() -> BufferPoolManager {
+        let bpm = get_buffer_pool();
+
+        bpm.write().unwrap().frames.iter_mut().for_each(|frame| {
+            frame.write().unwrap().bpm = Some(bpm);
+        });
+
+        bpm
+    }
+
+    fn init() -> Self {
         let mut frames = Vec::with_capacity(BUFFER_POOL_SIZE);
         for i in 0..BUFFER_POOL_SIZE {
             frames.push(RwLock::new(Frame::new(i)));
         }
 
         Self {
-            timestamp: 0,
             free_frames: LinkedList::from_iter(0..BUFFER_POOL_SIZE),
             frames: frames.into_boxed_slice(),
             page_table: HashMap::new(),
-            replacer: Box::new(replacer::LRU {}),
-            disk_manager: DiskManager::new("data/"),
+            replacer: Box::new(replacer::LRU::new()),
+            disk_manager: DiskManager::new("data/test.db"),
         }
     }
 
-    pub fn get_frame(&self, page_id: i32) -> &RwLock<Frame> {
-        let timestamp = chrono::Utc::now().timestamp_millis();
-
-        if self.page_table.contains_key(&page_id) {
-            let frame_id = self.page_table.get(&page_id).unwrap();
-
-            let frame = &self.frames[*frame_id];
-            let mut wframe = frame.write().unwrap();
-            wframe.pin();
-            wframe.record_access(timestamp);
-
-            frame
+    pub fn fetch_page(&mut self, page_id: i32) -> Result<&RwLock<Frame>> {
+        let frame_id = if self.page_table.contains_key(&page_id) {
+            *self.page_table.get(&page_id).unwrap()
         } else {
-            todo!();
-        }
+            let page = self.disk_manager.read_from_file(page_id).unwrap();
+            let frame_id = if self.free_frames.is_empty() {
+                self.free_frames.pop_back().unwrap()
+            } else if self.replacer.can_evict() {
+                self.evict_frame()
+            } else {
+                return Err(anyhow!("no free frames to evict"));
+            };
+
+            self.frames[frame_id].write().unwrap().set_page(page);
+            self.page_table.insert(page_id, frame_id);
+
+            frame_id
+        };
+
+        let frame = &self.frames[frame_id];
+        frame.write().unwrap().pin();
+        self.replacer.record_access(frame_id);
+
+        Ok(frame)
     }
 
     pub fn new_page(&mut self) -> Result<&RwLock<Frame>> {
-        let timestamp = chrono::Utc::now().timestamp_millis();
-
         if self.free_frames.is_empty() && !self.replacer.can_evict() {
             return Err(anyhow!("no free frames to evict"));
         }
@@ -70,29 +86,43 @@ impl BufferPool {
         };
 
         let frame = &self.frames[frame_id];
-        let mut wframe = frame.write().unwrap();
-        wframe.pin();
-        wframe.record_access(timestamp);
+        frame.write().unwrap().pin();
+        self.replacer.record_access(frame_id);
 
         let page_id = 1;
         let mut page = Page::new();
         page.set_page_id(page_id);
-        wframe.set_page(page);
-
+        frame.write().unwrap().set_page(page);
         self.page_table.insert(page_id, frame_id);
 
         Ok(frame)
     }
 
     pub fn evict_frame(&mut self) -> FrameId {
-        todo!()
+        let frame_id = self.replacer.evict();
+        let frame = &self.frames[frame_id].write().unwrap();
+        assert!(frame.get_pin_count() == 1);
+        let page = frame.get_page();
+
+        if page.is_dirty() {
+            self.disk_manager.write_to_file(&page).unwrap();
+        }
+
+        self.free_frames.push_back(frame_id);
+
+        frame_id
+    }
+
+    pub fn set_evictable(&mut self, frame_id: FrameId) {
+        assert!(self.frames[frame_id].read().unwrap().get_pin_count() == 1);
+        self.replacer.set_evictable(frame_id, true);
     }
 }
 
 lazy_static! {
-    static ref BUFFER_POOL: RwLock<BufferPool> = RwLock::new(BufferPool::new());
+    static ref BUFFER_POOL: RwLock<BufferPool> = RwLock::new(BufferPool::init());
 }
 
-pub fn get_buffer_pool() -> &'static RwLock<BufferPool> {
+fn get_buffer_pool() -> BufferPoolManager {
     &BUFFER_POOL
 }

@@ -21,12 +21,11 @@ impl DiskManager {
         }
     }
 
-    pub fn write_to_file<T: Into<Page> + Copy>(&self, page: &T, file: &str) -> Result<()> {
-        let page: Page = (*page).into();
-
-        let file = file.to_string() + "_" + page.page_id().to_string().as_str();
-
-        let path = Path::join(Path::new(&self.path), Path::new(&file));
+    pub fn write_to_file(&self, page: &Page) -> Result<()> {
+        let path = Path::join(
+            Path::new(&self.path),
+            Path::new(&page.page_id().to_string()),
+        );
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -38,10 +37,8 @@ impl DiskManager {
         Ok(())
     }
 
-    pub fn read_from_file<T: From<Page>>(&self, file: &str, page_id: i32) -> Result<T> {
-        let file = file.to_string() + "_" + page_id.to_string().as_str();
-
-        let path = Path::join(Path::new(&self.path), Path::new(&file));
+    pub fn read_from_file<T: From<Page>>(&self, page_id: i32) -> Result<T> {
+        let path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
 
         let mut file = OpenOptions::new()
             .read(true)

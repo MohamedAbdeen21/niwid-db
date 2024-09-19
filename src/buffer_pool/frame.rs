@@ -1,13 +1,13 @@
 use crate::pages::Page;
 
-use super::FrameId;
+use super::{BufferPoolManager, FrameId};
 
 #[allow(unused)]
 pub struct Frame {
     id: FrameId,
     page: Page,
     counter: u16,
-    history: i64, // TODO: LRU history, will need a vec for other replacers
+    pub bpm: Option<BufferPoolManager>,
 }
 
 #[allow(unused)]
@@ -19,7 +19,7 @@ impl Frame {
             // TODO: Fix this. Dropping the bpm drops the frames and therefore
             // decreases counter below 0
             counter: 1,
-            history: 0,
+            bpm: None,
         }
     }
 
@@ -42,14 +42,13 @@ impl Frame {
     pub fn get_page(&self) -> &Page {
         &self.page
     }
-
-    pub fn record_access(&mut self, timestamp: i64) {
-        self.history = timestamp;
-    }
 }
 
 impl Drop for Frame {
     fn drop(&mut self) {
         self.unpin();
+        if self.get_pin_count() == 1 {
+            self.bpm.unwrap().write().unwrap().set_evictable(self.id);
+        }
     }
 }
