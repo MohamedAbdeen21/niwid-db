@@ -104,6 +104,12 @@ impl Serialize for TupleMetaData {
     }
 }
 
+impl Default for TupleMetaData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[allow(unused)]
 impl TupleMetaData {
     pub fn new() -> Self {

@@ -32,6 +32,12 @@ impl Serialize for Page {
     }
 }
 
+impl Default for Page {
+    fn default() -> Self {
+        Page::new()
+    }
+}
+
 impl Page {
     pub fn new() -> Self {
         Page {
@@ -42,11 +48,11 @@ impl Page {
     }
 
     pub fn is_dirty(&self) -> bool {
-        return self.is_dirty;
+        self.is_dirty
     }
 
     pub fn get_page_id(&self) -> PageId {
-        return self.page_id;
+        self.page_id
     }
 
     pub fn set_page_id(&mut self, page_id: PageId) {

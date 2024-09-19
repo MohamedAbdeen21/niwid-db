@@ -205,9 +205,9 @@ impl TablePage {
 
         let meta =
             TupleMetaData::from_bytes(&self.data.bytes[meta_offset..(meta_offset + META_SIZE)]);
-        let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size) as usize];
+        let tuple_data = &self.data.bytes[tuple_offset..(tuple_offset + tuple_size)];
 
-        return (meta, Tuple::from_bytes(tuple_data));
+        (meta, Tuple::from_bytes(tuple_data))
     }
 }
 

@@ -29,7 +29,7 @@ impl BufferPool {
     }
 
     #[allow(unused)]
-    pub fn inspect(&self) -> () {
+    pub fn inspect(&self) {
         println!("Free Frames: {:?}", self.free_frames);
         println!("Page Table: {:?}", self.page_table);
     }
@@ -112,7 +112,7 @@ impl BufferPool {
         self.page_table.remove(&page.get_page_id());
 
         if page.is_dirty() {
-            self.disk_manager.write_to_file(&page).unwrap();
+            self.disk_manager.write_to_file(page).unwrap();
         }
 
         frame_id

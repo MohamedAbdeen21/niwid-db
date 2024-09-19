@@ -15,6 +15,7 @@ pub(super) trait Replacer: Send + Sync + Debug {
     fn peek(&self) -> Option<FrameId>;
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug)]
 pub(super) struct LRU {
     timestamp: i64,
