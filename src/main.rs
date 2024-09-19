@@ -1,4 +1,5 @@
 mod buffer_pool;
+mod catalog;
 mod disk_manager;
 mod pages;
 mod table;

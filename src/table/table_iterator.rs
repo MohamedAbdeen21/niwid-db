@@ -20,9 +20,9 @@ impl TableIterator {
         let page: TablePage = bpm
             .write()
             .unwrap()
-            .fetch_frame(unsafe { table.first_page.as_ref().unwrap() }.get_page_id())
-            .unwrap()
-            .read()
+            .fetch_frame(
+                unsafe { table.first_page.read().unwrap().as_ref().unwrap() }.get_page_id(),
+            )
             .unwrap()
             .get_page_read()
             .into();
@@ -56,8 +56,6 @@ impl Iterator for TableIterator {
                 .unwrap()
                 .fetch_frame(self.next_page)
                 .ok()? // TODO: idk
-                .read()
-                .unwrap()
                 .get_page_read()
                 .into();
 

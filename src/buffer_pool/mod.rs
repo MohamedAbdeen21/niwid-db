@@ -16,7 +16,7 @@ pub type BufferPoolManager = Arc<RwLock<BufferPool>>;
 
 pub struct BufferPool {
     free_frames: LinkedList<FrameId>,
-    frames: Box<[RwLock<Frame>]>,
+    frames: Box<[Frame]>,
     page_table: HashMap<PageId, FrameId>,
     replacer: Box<dyn replacer::Replacer>,
     disk_manager: DiskManager,
@@ -37,7 +37,7 @@ impl BufferPool {
     pub fn init(size: usize) -> Self {
         let mut frames = Vec::with_capacity(size);
         for i in 0..size {
-            frames.push(RwLock::new(Frame::new(i)));
+            frames.push(Frame::new(i));
         }
 
         Self {
@@ -46,11 +46,12 @@ impl BufferPool {
             page_table: HashMap::new(),
             replacer: Box::new(replacer::LRU::new(size)),
             disk_manager: DiskManager::new("data/test.db"),
-            next_page_id: 0,
+            // page_id 0 is preserved for catalog
+            next_page_id: 1,
         }
     }
 
-    pub fn fetch_frame(&mut self, page_id: PageId) -> Result<&mut RwLock<Frame>> {
+    pub fn fetch_frame(&mut self, page_id: PageId) -> Result<&mut Frame> {
         println!("fetching frame {}", page_id);
         let frame_id = if let Some(frame_id) = self.page_table.get(&page_id) {
             *frame_id
@@ -65,20 +66,20 @@ impl BufferPool {
                 return Err(anyhow!("no free frames to evict"));
             };
 
-            self.frames[frame_id].write().unwrap().set_page(page);
+            self.frames[frame_id].set_page(page);
             self.page_table.insert(page_id, frame_id);
 
             frame_id
         };
 
         let frame = &mut self.frames[frame_id];
-        frame.write().unwrap().pin();
+        frame.pin();
         self.replacer.record_access(frame_id);
 
         Ok(frame)
     }
 
-    pub fn new_page(&mut self) -> Result<&RwLock<Frame>> {
+    pub fn new_page(&mut self) -> Result<&mut Frame> {
         let frame_id = if !self.free_frames.is_empty() {
             self.free_frames.pop_front().unwrap()
         } else if self.replacer.can_evict() {
@@ -87,16 +88,16 @@ impl BufferPool {
             return Err(anyhow!("no free frames to evict"));
         };
 
-        let frame = &self.frames[frame_id];
-        frame.write().unwrap().pin();
+        let frame = &mut self.frames[frame_id];
+        frame.pin();
         self.replacer.record_access(frame_id);
 
-        self.next_page_id += 1;
         let page_id = self.next_page_id;
+        self.next_page_id += 1;
 
         let mut page = Page::new();
         page.set_page_id(page_id);
-        frame.write().unwrap().set_page(page);
+        frame.set_page(page);
         self.page_table.insert(page_id, frame_id);
 
         Ok(frame)
@@ -104,7 +105,7 @@ impl BufferPool {
 
     pub fn evict_frame(&mut self) -> FrameId {
         let frame_id = self.replacer.evict();
-        let frame = &mut self.frames[frame_id].write().unwrap();
+        let frame = &mut self.frames[frame_id];
         assert!(frame.get_pin_count() == 1);
         let page = frame.get_page_write();
 
@@ -119,7 +120,7 @@ impl BufferPool {
 
     pub fn unpin(&mut self, page_id: &PageId) {
         let frame_id = *self.page_table.get(page_id).unwrap();
-        let frame = &mut self.frames[frame_id].write().unwrap();
+        let frame = &mut self.frames[frame_id];
         frame.unpin();
 
         if frame.get_pin_count() == 1 {
@@ -130,7 +131,7 @@ impl BufferPool {
     #[allow(unused)]
     pub fn get_pin_count(&self, page_id: &PageId) -> Option<u16> {
         let frame_id = *self.page_table.get(page_id)?;
-        Some(self.frames[frame_id].read().unwrap().get_pin_count())
+        Some(self.frames[frame_id].get_pin_count())
     }
 }
 
@@ -153,36 +154,15 @@ mod tests {
     #[test]
     fn test_dont_evict_pinned() -> Result<()> {
         let bpm = RwLock::new(BufferPool::init(2));
-        let p1: TablePage = bpm
-            .write()
-            .unwrap()
-            .new_page()?
-            .write()
-            .unwrap()
-            .get_page_read()
-            .into();
+        let p1: TablePage = bpm.write().unwrap().new_page()?.get_page_read().into();
 
-        let _: TablePage = bpm
-            .write()
-            .unwrap()
-            .new_page()?
-            .write()
-            .unwrap()
-            .get_page_read()
-            .into();
+        let _: TablePage = bpm.write().unwrap().new_page()?.get_page_read().into();
 
         assert_eq!(true, bpm.write().unwrap().new_page().is_err());
 
         bpm.write().unwrap().unpin(&p1.get_page_id());
 
-        let _: TablePage = bpm
-            .write()
-            .unwrap()
-            .new_page()?
-            .write()
-            .unwrap()
-            .get_page_read()
-            .into();
+        let _: TablePage = bpm.write().unwrap().new_page()?.get_page_read().into();
 
         assert_eq!(true, bpm.write().unwrap().new_page().is_err());
 
