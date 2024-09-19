@@ -1,11 +1,13 @@
 mod disk_manager;
 mod pages;
 mod tuple;
+mod types;
 
 use anyhow::Result;
 use disk_manager::DiskManager;
 use pages::table_page::TablePage;
-use tuple::{schema::Schema, types::Types, Tuple};
+use tuple::{schema::Schema, Tuple};
+use types::{Primitive, Types, U16, U8};
 
 fn main() -> Result<()> {
     let path = "my_struct.bin";
@@ -30,10 +32,12 @@ fn insert_write_read(disk: DiskManager, table_page: &mut TablePage, path: &str) 
         vec![Types::U8, Types::U16],
     );
 
-    let tuple = Tuple::new(&[2, 0, 3], &schema);
+    let tuple_data = vec![U8(2).to_bytes(), U16(3).to_bytes()];
+    let tuple = Tuple::new(tuple_data, &schema);
     table_page.insert_tuple(tuple)?;
 
-    let tuple = Tuple::new(&[4, 0, 5], &schema);
+    let tuple_data = vec![U8(4).to_bytes(), U16(5).to_bytes()];
+    let tuple = Tuple::new(tuple_data, &schema);
     table_page.insert_tuple(tuple)?;
 
     // let tuple = Tuple::new(&[b'a', b'b', b'c', b'd']);
@@ -59,7 +63,7 @@ fn insert_write_read(disk: DiskManager, table_page: &mut TablePage, path: &str) 
     let t1 = loaded_data.read_tuple(0);
     println!("Data after write: {:?}", t1);
 
-    println!("{:?}", t1.1.get_value("age", &schema)?);
+    println!("{}", t1.1.get_value::<U16>("age", &schema)?.0);
 
     table_page.delete_tuple(1);
 

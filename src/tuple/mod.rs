@@ -1,10 +1,9 @@
 pub mod schema;
-pub mod types;
 
 use std::{mem, slice};
 
-use crate::pages::traits::Serialize;
 use crate::tuple::schema::Schema;
+use crate::{pages::traits::Serialize, types::Primitive};
 use anyhow::{anyhow, Result};
 
 pub type Entry = (TupleMetaData, Tuple);
@@ -16,19 +15,26 @@ pub struct Tuple {
 }
 
 impl Tuple {
-    pub fn new(data: &[u8], schema: &Schema) -> Self {
+    pub fn new(data: Vec<Box<[u8]>>, schema: &Schema) -> Self {
         let size = schema.types.iter().fold(0, |acc, t| acc + t.size());
+        let data = data
+            .iter()
+            .flat_map(|b| b.iter())
+            .cloned()
+            .collect::<Vec<u8>>();
+
         if data.len() != size {
             panic!("data length mismatch");
         }
-        Self::from_bytes(data)
+
+        Self::from_bytes(data.as_slice())
     }
 
     pub fn len(&self) -> usize {
         self.data.len()
     }
 
-    pub fn get_value(&self, field: &str, schema: &Schema) -> Result<&[u8]> {
+    pub fn get_value<T: Primitive>(&self, field: &str, schema: &Schema) -> Result<T> {
         let field_id = schema
             .fields
             .iter()
@@ -39,15 +45,15 @@ impl Tuple {
             return Err(anyhow!("field id out of bounds"));
         }
 
+        let dtype = &schema.types[field_id];
+
         let offset = schema
             .types
             .iter()
             .take(field_id as usize)
             .fold(0, |acc, t| acc + t.size());
 
-        let size = schema.types[field_id].size();
-
-        Ok(&self.data[offset..offset + size])
+        Ok(T::from_bytes(&self.data[offset..offset + dtype.size()]))
     }
 }
 

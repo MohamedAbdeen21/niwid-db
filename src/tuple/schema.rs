@@ -1,4 +1,4 @@
-use super::types::Types;
+use crate::types::Types;
 
 pub struct Schema {
     pub fields: Vec<String>,
