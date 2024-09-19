@@ -1,4 +1,4 @@
-use super::{table_page_iterator::TablePageIterator, traits::Serialize};
+use super::traits::Serialize;
 use crate::tuple::{Entry, Tuple, TupleMetaData};
 
 use super::{Page, INVALID_PAGE, PAGE_SIZE};
@@ -153,9 +153,14 @@ impl TablePage {
 
         return (meta, Tuple::from_bytes(tuple_data));
     }
+}
 
-    pub fn to_iter(self) -> TablePageIterator {
-        TablePageIterator::new(self)
+impl From<&Page> for TablePage {
+    fn from(page: &Page) -> Self {
+        let mut p = Self::from_bytes(page.as_bytes());
+        p.set_page_id(page.page_id());
+        p.is_dirty = page.is_dirty();
+        p
     }
 }
 
@@ -191,11 +196,13 @@ impl Serialize for TablePage {
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), mem::size_of::<TablePageData>());
         let page_data = unsafe { *(bytes.as_ptr() as *const TablePageData) };
-        TablePage {
+        let mut p = TablePage {
             data: page_data,
             is_dirty: false,
             page_id: INVALID_PAGE,
-        }
+        };
+        p.header_mut().set_next_page(INVALID_PAGE);
+        p
     }
 }
 
