@@ -201,8 +201,10 @@ impl Table {
         Ok(Tuple::from_bytes(&processed_data))
     }
 
-    pub fn fetch_string(&self, str_id: TupleId) -> Str {
-        let (page, slot) = str_id;
+    /// fetch the string from the tuple, takes TupleId bytes
+    /// (page_id, slot_id)
+    pub fn fetch_string(&self, tuple_id_data: &[u8]) -> Str {
+        let (page, slot) = TupleId::from_bytes(tuple_id_data);
         let blob_page: TablePage = self
             .bpm
             .write()
@@ -463,8 +465,7 @@ mod tests {
         let mut assert_strings = |(_, tuple): &Entry| {
             let tuple = &tuple;
             let tuple_bytes = tuple.get_value::<U128>("str", &schema).unwrap();
-            let str_id = TupleId::from_bytes(&tuple_bytes.to_bytes());
-            let string = table.fetch_string(str_id);
+            let string = table.fetch_string(&tuple_bytes.to_bytes());
             assert_eq!(
                 string,
                 if counter == 0 {

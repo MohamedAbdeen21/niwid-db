@@ -1,13 +1,12 @@
 use std::sync::RwLock;
 
 use crate::buffer_pool::{BufferPool, BufferPoolManager};
-use crate::pages::table_page::{TupleExt, TupleId};
 use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::{Entry, Tuple};
 use crate::types::{Primitive, Str, Types, I128, I64};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 // preserve page_id 0 for catalog, bpm starts assigning at 1
 #[allow(unused)]
@@ -41,8 +40,7 @@ impl Catalog {
         let mut tables: Vec<RwLock<Table>> = vec![];
         let mut table_builder = |(_, tuple): &Entry| {
             let name_bytes = tuple.get_value::<I128>("table_name", &schema).unwrap();
-            let str_id = TupleId::from_bytes(&name_bytes.to_bytes());
-            let name = table.fetch_string(str_id);
+            let name = table.fetch_string(&name_bytes.to_bytes());
             let first_page_id = tuple.get_value::<I64>("first_page", &schema).unwrap().0 as PageId;
             let last_page_id = tuple.get_value::<I64>("last_page", &schema).unwrap().0 as PageId;
 
@@ -61,7 +59,19 @@ impl Catalog {
         })
     }
 
-    pub fn add_table(&mut self, table_name: &str, schema: &Schema) -> Result<&RwLock<Table>> {
+    pub fn add_table(
+        &mut self,
+        table_name: &str,
+        schema: &Schema,
+        ignore_if_exists: bool,
+    ) -> Result<&RwLock<Table>> {
+        if self.get_table(table_name).is_some() {
+            if ignore_if_exists {
+                return Ok(self.get_table(table_name).unwrap());
+            }
+            return Err(anyhow!("Table {} already exists", table_name));
+        }
+
         let mut table = Table::new(table_name.to_string(), &schema)?;
         let tuple_data = vec![
             Str(table_name.to_string()).to_bytes(),

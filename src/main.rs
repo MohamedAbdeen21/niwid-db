@@ -15,7 +15,7 @@ fn main() -> Result<()> {
     let mut catalog = Catalog::new()?;
 
     let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
-    let table = catalog.add_table("users", &schema)?;
+    let table = catalog.add_table("users", &schema, true)?;
 
     let tuple_data = vec![U8(2).to_bytes(), U16(3).to_bytes()];
     let tuple = Tuple::new(tuple_data, &schema);

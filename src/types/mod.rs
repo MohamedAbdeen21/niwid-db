@@ -362,10 +362,14 @@ impl Primitive for Str {
     }
     fn to_bytes(&self) -> Box<[u8]> {
         let mut str = self.0.clone();
+        if str.contains(STR_DELIMITER) {
+            panic!("String can't have the delimiter char {}", STR_DELIMITER)
+        }
         str.insert(0, STR_DELIMITER);
         str.push(STR_DELIMITER);
         str.as_bytes().to_vec().into_boxed_slice()
     }
+
     fn from_bytes(bytes: &[u8]) -> Self {
         let delimiter_byte = STR_DELIMITER as u8;
         let mut v = bytes.to_vec();

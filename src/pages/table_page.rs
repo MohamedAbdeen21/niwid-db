@@ -26,7 +26,7 @@ impl TupleExt for TupleId {
     fn from_bytes(bytes: &[u8]) -> Self {
         let page_offset = std::mem::size_of::<PageId>();
         let slot_size = std::mem::size_of::<usize>();
-        let page_id = isize::from_ne_bytes(bytes[0..page_offset].try_into().unwrap());
+        let page_id = PageId::from_ne_bytes(bytes[0..page_offset].try_into().unwrap());
         let slot_id = usize::from_le_bytes(
             bytes[page_offset..page_offset + slot_size]
                 .try_into()
