@@ -33,6 +33,11 @@ pub struct TablePage {
 }
 
 impl TablePage {
+    #[cfg(test)]
+    pub fn is_locked(&self) -> bool {
+        self.latch.is_locked()
+    }
+
     pub fn header(&self) -> &TablePageHeader {
         &unsafe { self.data.as_ref() }.unwrap().header
     }

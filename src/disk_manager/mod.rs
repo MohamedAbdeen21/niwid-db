@@ -1,11 +1,12 @@
 mod shadow_page;
 
+use crate::buffer_pool::TxnId;
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
 use anyhow::{anyhow, Context, Result};
-use std::fs::OpenOptions;
+use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const DISK_STORAGE: &str = "data/data/";
 
@@ -39,22 +40,28 @@ impl DiskManager {
     pub fn new(path: &str) -> Self {
         let path = Path::new(path);
 
-        std::fs::create_dir_all(path).unwrap();
+        create_dir_all(path).unwrap();
 
-        Self {
+        let disk = Self {
             path: path.to_str().unwrap().to_string(),
-        }
+        };
+
+        create_dir_all(&disk.txn_dir()).unwrap();
+
+        disk
     }
 
-    pub fn write_to_file<T: DiskWritable>(&self, page: &T) -> Result<()> {
+    pub fn write_to_file<T: DiskWritable>(&self, page: &T, txn_id: Option<TxnId>) -> Result<()> {
         if page.get_page_id() == INVALID_PAGE {
             return Err(anyhow!("Asked to write a page with invalid ID"));
         }
 
-        let path = Path::join(
-            Path::new(&self.path),
-            Path::new(&page.get_page_id().to_string()),
-        );
+        let root = match txn_id {
+            None => Path::new(&self.path),
+            Some(txn_id) => &Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string())),
+        };
+
+        let path = Path::join(root, Path::new(&page.get_page_id().to_string()));
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -90,23 +97,17 @@ impl DiskManager {
     }
 
     #[allow(dead_code)]
-    pub fn start_transaction(&self, transaction_id: u64) -> Result<()> {
-        let trans_cache = Path::join(
-            Path::new(&self.path),
-            Path::new(&transaction_id.to_string()),
-        );
+    pub fn start_txn(&self, txn_id: TxnId) -> Result<()> {
+        let txn_cache = Path::join(&self.txn_dir(), Path::new(&txn_id.to_string()));
 
-        std::fs::create_dir_all(&trans_cache)?;
+        std::fs::create_dir(&txn_cache)?;
 
         Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn shadow_page<T: DiskWritable>(&self, transaction_id: u64, page_id: PageId) -> Result<T> {
-        let trans_cache = Path::join(
-            Path::new(&self.path),
-            Path::new(&transaction_id.to_string()),
-        );
+    pub fn shadow_page<T: DiskWritable>(&self, txn_id: TxnId, page_id: PageId) -> Result<T> {
+        let trans_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
 
         let to_path = Path::join(Path::new(&trans_cache), Path::new(&page_id.to_string()));
         let from_path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
@@ -127,22 +128,46 @@ impl DiskManager {
         Ok(page)
     }
 
-    #[allow(dead_code)]
-    pub fn commit_transaction(&self, transaction_id: u64) -> Result<()> {
-        let trans_cache = Path::join(
+    fn txn_dir(&self) -> PathBuf {
+        Path::join(Path::new(&self.path), Path::new("txn"))
+    }
+
+    pub fn commit_txn(&self, txn_id: TxnId) -> Result<()> {
+        let txn_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
+
+        let txn_committed = Path::join(
             Path::new(&self.path),
-            Path::new(&transaction_id.to_string()),
+            Path::new(&format!("{}.committed", txn_id)),
         );
 
-        let trans_cache_committed = Path::join(
-            Path::new(&self.path),
-            Path::new(&format!("{}.committed", transaction_id)),
-        );
+        // should be atomic.
+        // if we don't return from the query, data might stil be committed
+        // but shouldn't be much of a problem
+        rename(&txn_cache, &txn_committed)?;
 
-        // should be atomic
-        std::fs::rename(&trans_cache, &trans_cache_committed)?;
+        let pages = read_dir(&txn_committed)?;
 
-        std::fs::remove_dir_all(trans_cache_committed)?;
+        pages
+            .into_iter()
+            .try_for_each(|page| -> Result<()> {
+                let page = page?;
+                let original = Path::join(
+                    Path::new(&self.path),
+                    Path::new(page.file_name().to_str().unwrap()),
+                );
+
+                println!(
+                    "moving from {} to {}",
+                    page.path().display(),
+                    original.display()
+                );
+                rename(page.path(), &original)?;
+
+                Ok(())
+            })
+            .context("Committing pages")?;
+
+        remove_dir_all(txn_committed)?;
 
         Ok(())
     }
@@ -167,7 +192,7 @@ mod tests {
         let path = test_path();
 
         let disk = DiskManager::new(&path);
-        disk.write_to_file(&page)?;
+        disk.write_to_file(&page, None)?;
 
         let read_page = disk.read_from_file::<Page>(page_id)?;
 
@@ -197,7 +222,7 @@ mod tests {
 
         assert_eq!(page_id, write_page_id);
 
-        disk.write_to_file(page)?;
+        disk.write_to_file(page, None)?;
 
         let page: TablePage = (&disk.read_from_file::<Page>(page_id)?).into();
         let read_tuple = page.read_raw(write_slot_id);
@@ -205,6 +230,68 @@ mod tests {
         assert_eq!(read_tuple.get_data(), tuple.get_data());
 
         remove_dir_all(path)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_start_commit_transactions() -> Result<()> {
+        let path = test_path();
+
+        // TODO: More tests with shadows
+        let disk = DiskManager::new(&path);
+
+        disk.start_txn(1)?;
+        disk.start_txn(2)?;
+
+        assert!(std::fs::read_dir(&disk.txn_dir())?.next().is_some());
+
+        let mut iter = std::fs::read_dir(&disk.txn_dir())?;
+        assert!(iter.next().is_some());
+        assert!(iter.next().is_some());
+
+        disk.commit_txn(1)?;
+        disk.commit_txn(2)?;
+
+        assert!(std::fs::read_dir(&disk.txn_dir())?.next().is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_shadow_page() -> Result<()> {
+        let path = test_path();
+        let page_id = 1;
+        let txn_id = 2;
+
+        let disk = DiskManager::new(&path);
+
+        let mut page = Page::new();
+        page.set_page_id(page_id);
+
+        let data = "Hello, World!".as_bytes();
+        let start = 1;
+        let end = data.len() + start;
+        page.write_bytes(start, end, data);
+
+        disk.write_to_file::<Page>(&page, None)?;
+
+        disk.start_txn(txn_id)?;
+
+        let mut shadowed_page = disk.shadow_page::<Page>(txn_id, page_id)?;
+        shadowed_page.write_bytes(end, end + 2, &[100, 50]);
+        disk.write_to_file(&shadowed_page, Some(txn_id))?;
+
+        let read = shadowed_page.read_bytes(start, end);
+
+        assert_eq!(read, data);
+
+        disk.commit_txn(txn_id)?;
+
+        let committed_page = disk.read_from_file::<Page>(page_id)?;
+
+        assert_eq!(committed_page.read_bytes(start, end), data);
+        assert_eq!(committed_page.read_bytes(end, end + 2), [100, 50]);
 
         Ok(())
     }

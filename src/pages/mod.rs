@@ -17,7 +17,7 @@ pub type PageId = i64;
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement `From<Page>` and `Into<Page>` traits
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Page {
     /// Underlying block of memory of size [`PAGE_SIZE`]
     /// first two bytes are the is_dirty flag as it's shared with

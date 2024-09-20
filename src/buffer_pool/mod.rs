@@ -8,22 +8,30 @@ use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
 use parking_lot::FairMutex;
-use std::collections::{HashMap, LinkedList};
+use std::collections::{HashMap, HashSet, LinkedList};
 use std::sync::Arc;
 
 const BUFFER_POOL_SIZE: usize = 10_000;
 const BUFFER_POOL_PAGE: PageId = 0;
 
+pub type TxnId = u64;
+
 type FrameId = usize;
 pub type BufferPoolManager = Arc<FairMutex<BufferPool>>;
 
 pub struct BufferPool {
-    free_frames: LinkedList<FrameId>,
-    frames: Box<[Frame]>,
-    page_table: HashMap<PageId, FrameId>,
-    replacer: Box<dyn replacer::Replacer>,
     disk_manager: DiskManager,
+
+    free_frames: LinkedList<FrameId>,
+    page_table: HashMap<PageId, FrameId>,
+    frames: Vec<Frame>,
+
+    txn_table: HashMap<TxnId, HashSet<FrameId>>,
+
+    replacer: Box<dyn replacer::Replacer>,
+
     next_page_id: Page,
+    next_trx_id: u64,
 }
 
 impl BufferPool {
@@ -47,7 +55,7 @@ impl BufferPool {
         if disk_manager.read_from_file::<Page>(CATALOG_PAGE).is_err() {
             let mut catalog_page = Page::new();
             catalog_page.set_page_id(CATALOG_PAGE);
-            disk_manager.write_to_file(&catalog_page).unwrap();
+            disk_manager.write_to_file(&catalog_page, None).unwrap();
         }
 
         // buffer pool data that must persist on disk e.g. next page id
@@ -63,12 +71,14 @@ impl BufferPool {
 
         Self {
             free_frames: LinkedList::from_iter(0..size),
-            frames: frames.into_boxed_slice(),
+            frames,
             page_table: HashMap::new(),
             replacer: Box::new(replacer::LRU::new(size)),
             disk_manager,
             // page_id 0 is preserved for bp [`BUFFER_POOL_PAGE`], and 1 for catalog [`CATALOG_PAGE`]
             next_page_id,
+            next_trx_id: 1,
+            txn_table: HashMap::new(),
         }
     }
 
@@ -76,8 +86,18 @@ impl BufferPool {
         let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(2, 10).try_into().unwrap());
         self.next_page_id
             .write_bytes(2, 10, &(id + 1).to_ne_bytes());
-        self.disk_manager.write_to_file(&self.next_page_id)?;
+        self.disk_manager.write_to_file(&self.next_page_id, None)?;
         Ok(id + 1)
+    }
+
+    fn find_free_frame(&mut self) -> Result<FrameId> {
+        if let Some(frame) = self.free_frames.pop_front() {
+            Ok(frame)
+        } else if self.replacer.can_evict() {
+            Ok(self.evict_frame())
+        } else {
+            return Err(anyhow!("no free frames to evict"));
+        }
     }
 
     pub fn fetch_frame(&mut self, page_id: PageId) -> Result<&mut Frame> {
@@ -85,13 +105,7 @@ impl BufferPool {
             *frame_id
         } else {
             let page = self.disk_manager.read_from_file(page_id)?;
-            let frame_id = if !self.free_frames.is_empty() {
-                self.free_frames.pop_front().unwrap()
-            } else if self.replacer.can_evict() {
-                self.evict_frame()
-            } else {
-                return Err(anyhow!("no free frames to evict"));
-            };
+            let frame_id = self.find_free_frame()?;
 
             self.frames[frame_id].set_page(page);
             self.page_table.insert(page_id, frame_id);
@@ -107,13 +121,7 @@ impl BufferPool {
     }
 
     pub fn new_page(&mut self) -> Result<&mut Frame> {
-        let frame_id = if !self.free_frames.is_empty() {
-            self.free_frames.pop_front().unwrap()
-        } else if self.replacer.can_evict() {
-            self.evict_frame()
-        } else {
-            return Err(anyhow!("no free frames to evict"));
-        };
+        let frame_id = self.find_free_frame()?;
 
         let page_id = self.increment_page_id()?;
 
@@ -123,7 +131,7 @@ impl BufferPool {
 
         let mut page = Page::new();
         page.set_page_id(page_id);
-        self.disk_manager.write_to_file(&page)?;
+        self.disk_manager.write_to_file(&page, None)?;
 
         frame.set_page(page);
         self.page_table.insert(page_id, frame_id);
@@ -139,6 +147,10 @@ impl BufferPool {
 
         self.page_table.remove(&page.get_page_id());
 
+        if page.is_dirty() {
+            self.disk_manager.write_to_file(page, None).unwrap();
+        }
+
         frame_id
     }
 
@@ -150,10 +162,6 @@ impl BufferPool {
         if frame.get_pin_count() == 0 {
             self.replacer.set_evictable(frame_id, true);
         }
-
-        if frame.reader().is_dirty() {
-            self.disk_manager.write_to_file(frame.writer()).unwrap();
-        }
     }
 
     #[cfg(test)]
@@ -163,13 +171,50 @@ impl BufferPool {
     }
 
     #[allow(dead_code)]
-    pub fn shadow_page(&mut self, _page_id: PageId, _page: Page) -> Result<&mut Frame> {
-        todo!()
+    pub fn start_txn(&mut self) -> Result<TxnId> {
+        // don't worry about atomicity, bpm is shared behind a mutex
+        let id = self.next_trx_id;
+        self.next_trx_id += 1;
+
+        self.txn_table.insert(id, HashSet::new());
+
+        Ok(id)
     }
 
     #[allow(dead_code)]
-    pub fn get_page(&self, _page_id: PageId) -> Option<&Page> {
-        todo!()
+    pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<&mut Frame> {
+        let frame_id = self.page_table[&page_id];
+        let shadowed_page = self.frames.get(frame_id).unwrap().reader().clone();
+
+        let shadow_frame_id = self.find_free_frame()?;
+        let shadow_frame = &mut self.frames[shadow_frame_id];
+
+        shadow_frame.set_page(shadowed_page);
+
+        self.txn_table
+            .get_mut(&txn_id)
+            .unwrap()
+            .insert(shadow_frame_id);
+
+        Ok(shadow_frame)
+    }
+
+    #[allow(dead_code)]
+    pub fn commit_txn(&mut self, txn_id: TxnId) -> Result<()> {
+        self.disk_manager.commit_txn(txn_id)?;
+
+        for frame_id in self.txn_table.remove(&txn_id).unwrap() {
+            let shadow_frame = self.frames.remove(frame_id);
+            let shadow_page_id = shadow_frame.reader().get_page_id();
+
+            let old_frame_id = self.page_table.remove(&shadow_page_id).unwrap();
+            let old_frame = &mut self.frames[old_frame_id];
+            old_frame.move_page(shadow_frame);
+
+            self.free_frames.push_back(frame_id);
+        }
+
+        Ok(())
     }
 }
 
@@ -186,23 +231,19 @@ fn get_buffer_pool() -> BufferPoolManager {
 
 impl Drop for BufferPool {
     fn drop(&mut self) {
-        let pages: Vec<&mut Page> = self
-            .frames
+        // TODO: do we need to check txns?
+        self.frames
             .iter_mut()
             .filter(|f| f.reader().get_page_id() != INVALID_PAGE)
             .map(|f| f.writer())
-            .collect();
-
-        for page in pages {
-            self.disk_manager.write_to_file(page).unwrap();
-        }
+            .for_each(|p| self.disk_manager.write_to_file(p, None).unwrap())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::disk_manager::test_path;
+    use crate::{disk_manager::test_path, pages::table_page::TablePage};
     use anyhow::Result;
 
     fn cleanup(bpm: BufferPool, path: &str) -> Result<()> {
@@ -247,13 +288,22 @@ mod tests {
 
         let frame = bpm.new_page()?;
         let page = frame.writer();
+        let table_page: TablePage = page.into();
 
         page.wlock();
         assert!(frame.latch.is_locked());
+        assert!(table_page.is_locked());
         frame.latch.wunlock();
+        assert!(!frame.latch.is_locked());
+        assert!(!table_page.is_locked());
 
         cleanup(bpm, &path)?;
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_shadow_pages() -> Result<()> {
         Ok(())
     }
 }

@@ -37,6 +37,10 @@ impl Frame {
         self.page.set_latch(self.latch.clone());
     }
 
+    pub(super) fn move_page(&mut self, frame: Self) {
+        self.set_page(frame.page);
+    }
+
     pub fn writer(&mut self) -> &mut Page {
         &mut self.page
     }
