@@ -21,4 +21,5 @@ write on second page and once completed upgrade first lock and swap the new page
 - [ ] Query Engine, no binder, no optimizer, just raw sql, plans, and execution
 - [ ] Transactions and isolation MVCC
 
-does the DM even need to know about transactions???
+does the DM even need to know about transactions??? Yes
+We need someone to hold the upgradable_locks, maybe a txn manager???

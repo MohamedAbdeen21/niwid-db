@@ -34,8 +34,8 @@ pub struct TablePage {
 
 impl TablePage {
     #[cfg(test)]
-    pub fn is_locked(&self) -> bool {
-        self.latch.is_locked()
+    pub fn get_latch(&self) -> &Arc<Latch> {
+        &self.latch
     }
 
     pub fn header(&self) -> &TablePageHeader {

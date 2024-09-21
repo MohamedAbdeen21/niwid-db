@@ -8,7 +8,13 @@ use crate::pages::{latch::Latch, Page};
 pub struct Frame {
     page: Page,
     counter: AtomicU16,
-    pub latch: Arc<Latch>,
+    latch: Arc<Latch>,
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Frame {
@@ -39,6 +45,10 @@ impl Frame {
 
     pub(super) fn move_page(&mut self, frame: Self) {
         self.set_page(frame.page);
+    }
+
+    pub fn get_latch(&self) -> &Arc<Latch> {
+        &self.latch
     }
 
     pub fn writer(&mut self) -> &mut Page {

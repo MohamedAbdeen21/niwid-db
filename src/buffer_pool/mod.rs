@@ -9,6 +9,7 @@ use frame::Frame;
 use lazy_static::lazy_static;
 use parking_lot::FairMutex;
 use std::collections::{HashMap, HashSet, LinkedList};
+use std::mem::take;
 use std::sync::Arc;
 
 const BUFFER_POOL_SIZE: usize = 10_000;
@@ -178,13 +179,20 @@ impl BufferPool {
 
         self.txn_table.insert(id, HashSet::new());
 
+        self.disk_manager.start_txn(id)?;
+
         Ok(id)
     }
 
     #[allow(dead_code)]
     pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<&mut Frame> {
-        let frame_id = self.page_table[&page_id];
-        let shadowed_page = self.frames.get(frame_id).unwrap().reader().clone();
+        let frame = self.fetch_frame(page_id)?;
+
+        if !frame.get_latch().is_locked() {
+            return Err(anyhow!("page/frame should have an upgradable lock"));
+        }
+
+        let shadowed_page = frame.reader().clone();
 
         let shadow_frame_id = self.find_free_frame()?;
         let shadow_frame = &mut self.frames[shadow_frame_id];
@@ -204,12 +212,15 @@ impl BufferPool {
         self.disk_manager.commit_txn(txn_id)?;
 
         for frame_id in self.txn_table.remove(&txn_id).unwrap() {
-            let shadow_frame = self.frames.remove(frame_id);
+            let shadow_frame = take(&mut self.frames[frame_id]);
+
             let shadow_page_id = shadow_frame.reader().get_page_id();
 
-            let old_frame_id = self.page_table.remove(&shadow_page_id).unwrap();
+            let old_frame_id = self.page_table[&shadow_page_id];
             let old_frame = &mut self.frames[old_frame_id];
             old_frame.move_page(shadow_frame);
+
+            self.unpin(&shadow_page_id);
 
             self.free_frames.push_back(frame_id);
         }
@@ -243,7 +254,10 @@ impl Drop for BufferPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{disk_manager::test_path, pages::table_page::TablePage};
+    use crate::{
+        disk_manager::test_path,
+        pages::table_page::{TablePage, PAGE_END},
+    };
     use anyhow::Result;
 
     fn cleanup(bpm: BufferPool, path: &str) -> Result<()> {
@@ -290,12 +304,15 @@ mod tests {
         let page = frame.writer();
         let table_page: TablePage = page.into();
 
-        page.wlock();
-        assert!(frame.latch.is_locked());
-        assert!(table_page.is_locked());
-        frame.latch.wunlock();
-        assert!(!frame.latch.is_locked());
-        assert!(!table_page.is_locked());
+        page.get_latch().wlock();
+
+        assert!(frame.get_latch().is_locked());
+        assert!(table_page.get_latch().is_locked());
+
+        frame.get_latch().wunlock();
+
+        assert!(!frame.get_latch().is_locked());
+        assert!(!table_page.get_latch().is_locked());
 
         cleanup(bpm, &path)?;
 
@@ -304,6 +321,44 @@ mod tests {
 
     #[test]
     fn test_shadow_pages() -> Result<()> {
+        let path = test_path();
+
+        let mut bpm = BufferPool::init(2, &path);
+
+        let txn_id = bpm.start_txn()?;
+
+        let page = bpm.new_page()?.writer();
+        let lock = page.get_latch().clone();
+        lock.wlock();
+
+        let page_id = page.get_page_id();
+        let shadow_frame = bpm.shadow_page(txn_id, page_id)?;
+        let shadow_page = shadow_frame.writer();
+
+        shadow_page.get_latch().wlock();
+
+        let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        shadow_page.write_bytes(PAGE_END - data.len(), PAGE_END, &data);
+
+        // shadow allocates a new frame
+        // pins first page and doesn't record access to shadow page
+        // effectively temporarily "pining" it.
+        assert!(bpm.new_page().is_err());
+
+        bpm.commit_txn(txn_id)?;
+
+        // frame and page are sharing lock
+        let new_page = bpm.fetch_frame(page_id)?.writer();
+        assert!(new_page.get_latch().is_locked());
+
+        assert_eq!(new_page.read_bytes(PAGE_END - data.len(), PAGE_END), data);
+
+        lock.wunlock();
+
+        assert!(bpm.new_page().is_ok());
+
+        cleanup(bpm, &path)?;
+
         Ok(())
     }
 }

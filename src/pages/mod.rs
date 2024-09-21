@@ -94,28 +94,8 @@ impl Page {
         self.latch = latch;
     }
 
-    #[allow(unused)]
-    pub fn is_locked(&self) -> bool {
-        self.latch.is_locked()
-    }
-
     #[cfg(test)]
-    pub fn wlock(&self) {
-        self.latch.wlock();
-    }
-
-    #[allow(unused)]
-    pub fn wunlock(&self) {
-        self.latch.wunlock();
-    }
-
-    #[allow(unused)]
-    pub fn rlock(&self) {
-        self.latch.rlock();
-    }
-
-    #[allow(unused)]
-    pub fn runlock(&self) {
-        self.latch.runlock();
+    pub fn get_latch(&self) -> &Arc<Latch> {
+        &self.latch
     }
 }
