@@ -39,6 +39,7 @@ impl Latch {
         self.lock.upgradable_read()
     }
 
+    #[allow(unused)]
     pub fn is_locked(&self) -> bool {
         self.lock.is_locked()
     }

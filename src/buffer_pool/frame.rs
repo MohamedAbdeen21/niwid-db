@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
 };
 
-use crate::pages::{latch::Latch, Page};
+use crate::pages::{latch::Latch, Page, PageId};
 
 pub struct Frame {
     page: Page,
@@ -43,10 +43,15 @@ impl Frame {
         self.page.set_latch(self.latch.clone());
     }
 
+    pub(super) fn get_page_id(&self) -> PageId {
+        self.page.get_page_id()
+    }
+
     pub(super) fn move_page(&mut self, frame: Self) {
         self.set_page(frame.page);
     }
 
+    #[allow(unused)]
     pub fn get_latch(&self) -> &Arc<Latch> {
         &self.latch
     }

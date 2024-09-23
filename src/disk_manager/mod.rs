@@ -1,8 +1,8 @@
 mod shadow_page;
 
-use crate::buffer_pool::TxnId;
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
+use crate::txn_manager::TxnId;
 use anyhow::{anyhow, Context, Result};
 use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
 use std::io::{Read, Write};
@@ -46,9 +46,48 @@ impl DiskManager {
             path: path.to_str().unwrap().to_string(),
         };
 
-        create_dir_all(&disk.txn_dir()).unwrap();
+        disk.recover_txns().unwrap();
+
+        create_dir_all(disk.txn_dir()).unwrap();
 
         disk
+    }
+
+    fn recover_txns(&self) -> Result<()> {
+        let txn_dir = read_dir(self.txn_dir());
+
+        if txn_dir.is_err() {
+            return Ok(());
+        }
+
+        for txn in txn_dir.unwrap() {
+            if txn.is_err() {
+                return Ok(());
+            }
+
+            let txn = txn.unwrap();
+            if txn.file_name().to_str().unwrap().ends_with("committed") {
+                read_dir(txn.path())?
+                    .into_iter()
+                    .try_for_each(|page| -> Result<()> {
+                        let page = page?;
+                        let original = Path::join(
+                            Path::new(&self.path),
+                            Path::new(page.file_name().to_str().unwrap()),
+                        );
+
+                        rename(page.path(), &original)?;
+
+                        Ok(())
+                    })
+                    .context("Recovery: Committing pages")?;
+            }
+        }
+
+        // anything not committed can be safely removed
+        remove_dir_all(self.txn_dir())?;
+
+        Ok(())
     }
 
     pub fn write_to_file<T: DiskWritable>(&self, page: &T, txn_id: Option<TxnId>) -> Result<()> {
@@ -100,7 +139,7 @@ impl DiskManager {
     pub fn start_txn(&self, txn_id: TxnId) -> Result<()> {
         let txn_cache = Path::join(&self.txn_dir(), Path::new(&txn_id.to_string()));
 
-        std::fs::create_dir(&txn_cache)?;
+        std::fs::create_dir_all(&txn_cache)?;
 
         Ok(())
     }
@@ -136,7 +175,7 @@ impl DiskManager {
         let txn_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
 
         let txn_committed = Path::join(
-            Path::new(&self.path),
+            Path::new(&self.txn_dir()),
             Path::new(&format!("{}.committed", txn_id)),
         );
 
@@ -156,11 +195,6 @@ impl DiskManager {
                     Path::new(page.file_name().to_str().unwrap()),
                 );
 
-                println!(
-                    "moving from {} to {}",
-                    page.path().display(),
-                    original.display()
-                );
                 rename(page.path(), &original)?;
 
                 Ok(())
@@ -244,16 +278,16 @@ mod tests {
         disk.start_txn(1)?;
         disk.start_txn(2)?;
 
-        assert!(std::fs::read_dir(&disk.txn_dir())?.next().is_some());
+        assert!(std::fs::read_dir(disk.txn_dir())?.next().is_some());
 
-        let mut iter = std::fs::read_dir(&disk.txn_dir())?;
+        let mut iter = std::fs::read_dir(disk.txn_dir())?;
         assert!(iter.next().is_some());
         assert!(iter.next().is_some());
 
         disk.commit_txn(1)?;
         disk.commit_txn(2)?;
 
-        assert!(std::fs::read_dir(&disk.txn_dir())?.next().is_none());
+        assert!(std::fs::read_dir(disk.txn_dir())?.next().is_none());
 
         Ok(())
     }

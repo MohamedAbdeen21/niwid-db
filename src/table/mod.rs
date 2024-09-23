@@ -1,4 +1,4 @@
-use crate::buffer_pool::{BufferPool, BufferPoolManager};
+use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
 use crate::pages::{
     table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE},
     traits::Serialize,
@@ -6,6 +6,7 @@ use crate::pages::{
 };
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
+use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use crate::types::{AsBytes, Str, Types, U16};
 use anyhow::{anyhow, Result};
 
@@ -16,13 +17,16 @@ pub struct Table {
     first_page: PageId,
     last_page: PageId,
     blob_page: PageId,
-    bpm: BufferPoolManager,
+    bpm: ArcBufferPool,
+    txn_manager: ArcTransactionManager,
     schema: Schema,
+    active_txn: Option<TxnId>,
 }
 
 impl Table {
     pub fn new(name: String, schema: &Schema) -> Result<Self> {
-        let bpm = BufferPool::new();
+        let bpm = BufferPoolManager::get();
+        let txn_manager = TransactionManager::get();
 
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
@@ -34,6 +38,8 @@ impl Table {
             last_page: page_id,
             blob_page,
             bpm,
+            txn_manager,
+            active_txn: None,
             schema: schema.clone(),
         })
     }
@@ -44,7 +50,8 @@ impl Table {
         first_page: PageId,
         last_page: PageId,
     ) -> Result<Self> {
-        let bpm = BufferPool::new();
+        let bpm = BufferPoolManager::get();
+        let txn_manager = TransactionManager::get();
 
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
 
@@ -54,6 +61,8 @@ impl Table {
             last_page,
             blob_page,
             bpm,
+            txn_manager,
+            active_txn: None,
             schema: schema.clone(),
         })
     }
@@ -86,7 +95,16 @@ impl Table {
 
         let tuple = Tuple::new(vec![Str::from_raw_bytes(bytes).into()], &Schema::default());
 
-        let mut blob_page: TablePage = self.bpm.lock().fetch_frame(self.blob_page)?.writer().into();
+        let mut blob_page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(self.blob_page, None)?
+            .writer()
+            .into();
+
+        if let Some(id) = self.active_txn {
+            self.txn_manager.lock().touch_page(id, self.blob_page)?;
+        }
 
         if let Ok(id) = blob_page.insert_raw(&tuple) {
             return Ok(id);
@@ -98,6 +116,10 @@ impl Table {
         self.bpm.lock().unpin(&self.blob_page);
 
         self.blob_page = new_blob_page.get_page_id();
+
+        if let Some(id) = self.active_txn {
+            self.txn_manager.lock().touch_page(id, self.blob_page)?;
+        }
 
         new_blob_page.insert_raw(&tuple)
     }
@@ -145,11 +167,37 @@ impl Table {
         Ok(new_tuple)
     }
 
+    pub fn start_txn(&mut self) -> Result<TxnId> {
+        let id = self.txn_manager.lock().start()?;
+        self.active_txn = Some(id);
+        Ok(id)
+    }
+
+    pub fn commit_txn(&mut self) -> Result<()> {
+        if let Some(id) = self.active_txn {
+            self.active_txn = None;
+            self.txn_manager.lock().commit(id)
+        } else {
+            Err(anyhow!("No active transaction"))
+        }
+    }
+
+    #[allow(unused)]
+    pub fn abort_txn(&self, txn_id: TxnId) -> Result<()> {
+        self.txn_manager.lock().abort(txn_id)
+    }
+
     /// fetch the string from the tuple, takes TupleId bytes
     /// (page_id, slot_id)
     pub fn fetch_string(&self, tuple_id_data: &[u8]) -> Str {
         let (page, slot) = TupleId::from_bytes(tuple_id_data);
-        let blob_page: TablePage = self.bpm.lock().fetch_frame(page).unwrap().reader().into();
+        let blob_page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(page, None)
+            .unwrap()
+            .reader()
+            .into();
 
         let tuple = blob_page.read_raw(slot);
         self.bpm.lock().unpin(&page);
@@ -159,7 +207,7 @@ impl Table {
     #[allow(unused)]
     pub fn fetch_tuple(&self, tuple_id: TupleId) -> Result<Entry> {
         let (page_id, slot) = tuple_id;
-        let page: TablePage = self.bpm.lock().fetch_frame(page_id)?.reader().into();
+        let page: TablePage = self.bpm.lock().fetch_frame(page_id, None)?.reader().into();
 
         let entry = page.read_tuple(slot);
 
@@ -174,7 +222,17 @@ impl Table {
         }
 
         let tuple = self.insert_strings(tuple)?;
-        let mut last_page: TablePage = self.bpm.lock().fetch_frame(self.last_page)?.writer().into();
+
+        if let Some(id) = self.active_txn {
+            self.txn_manager.lock().touch_page(id, self.last_page)?;
+        }
+
+        let mut last_page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(self.last_page, self.active_txn)?
+            .writer()
+            .into();
 
         if let Ok(id) = last_page.insert_tuple(&tuple) {
             self.bpm.lock().unpin(&self.last_page);
@@ -202,7 +260,12 @@ impl Table {
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
         let (page_id, slot_id) = id;
 
-        let mut page: TablePage = self.bpm.lock().fetch_frame(page_id)?.writer().into();
+        let mut page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(page_id, self.active_txn)?
+            .writer()
+            .into();
 
         page.delete_tuple(slot_id);
 
@@ -215,6 +278,10 @@ impl Table {
 
     #[allow(dead_code)]
     pub fn update(&mut self, old_tuple: Tuple, new_tuple: Tuple) -> Result<TupleId> {
+        if self.active_txn.is_none() {
+            self.start_txn()?;
+        }
+
         let mut tuple_id = None;
         self.scan(|(id, (_, tuple))| {
             if *tuple == old_tuple {
@@ -228,7 +295,13 @@ impl Table {
         }
 
         self.delete(tuple_id.unwrap())?;
-        self.insert(new_tuple)
+        let tuple_id = self.insert(new_tuple)?;
+
+        if self.active_txn.is_some() {
+            self.commit_txn()?
+        }
+
+        Ok(tuple_id)
     }
 }
 
@@ -245,13 +318,15 @@ mod tests {
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
         let path = test_path();
-        let bpm = Arc::new(FairMutex::new(BufferPool::init(size, &path)));
+        let bpm = Arc::new(FairMutex::new(BufferPoolManager::new(size, &path)));
 
         let mut guard = bpm.lock();
 
         let page = guard.new_page()?.reader().get_page_id();
 
         let blob_page = guard.new_page()?.reader().get_page_id();
+
+        let txn_manager = Arc::new(FairMutex::new(TransactionManager::new()));
 
         drop(guard);
 
@@ -261,6 +336,8 @@ mod tests {
             last_page: page,
             blob_page,
             bpm,
+            txn_manager,
+            active_txn: None,
             schema: schema.clone(),
         })
     }

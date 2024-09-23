@@ -1,4 +1,4 @@
-use crate::buffer_pool::BufferPoolManager;
+use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::TablePage;
 use crate::pages::{PageId, INVALID_PAGE};
 use crate::tuple::{Entry, TupleId};
@@ -10,7 +10,7 @@ pub(super) struct TableIterator {
     page: TablePage,
     current_slot: usize,
     next_page: PageId,
-    bpm: BufferPoolManager,
+    bpm: ArcBufferPool,
     num_tuples: usize,
 }
 
@@ -19,7 +19,7 @@ impl TableIterator {
         let bpm = table.bpm.clone();
         let page: TablePage = bpm
             .lock()
-            .fetch_frame(table.first_page)
+            .fetch_frame(table.first_page, None)
             .unwrap()
             .reader()
             .into();
@@ -55,7 +55,7 @@ impl Iterator for TableIterator {
             self.page = self
                 .bpm
                 .lock()
-                .fetch_frame(self.next_page)
+                .fetch_frame(self.next_page, None)
                 .unwrap()
                 .reader()
                 .into();
@@ -138,7 +138,7 @@ mod tests {
         let first_page: TablePage = table
             .bpm
             .lock()
-            .fetch_frame(table.first_page)?
+            .fetch_frame(table.first_page, None)?
             .writer()
             .into();
 

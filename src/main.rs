@@ -4,6 +4,7 @@ mod disk_manager;
 mod pages;
 mod table;
 mod tuple;
+mod txn_manager;
 mod types;
 
 use anyhow::Result;
@@ -18,10 +19,14 @@ fn main() -> Result<()> {
     let table = catalog.add_table("users", &schema, true)?;
 
     let tuple = Tuple::new(vec![U8(2).into(), U16(3).into()], &schema);
+    table.start_txn()?;
+
     table.insert(tuple)?;
 
     let tuple = Tuple::new(vec![Null().into(), U16(4).into()], &schema);
     table.insert(tuple)?;
+
+    table.commit_txn()?;
 
     drop(catalog);
 

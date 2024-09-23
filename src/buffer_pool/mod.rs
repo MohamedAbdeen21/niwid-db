@@ -4,6 +4,7 @@ mod replacer;
 use crate::catalog::CATALOG_PAGE;
 use crate::disk_manager::{DiskManager, DISK_STORAGE};
 use crate::pages::{Page, PageId, INVALID_PAGE};
+use crate::txn_manager::TxnId;
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
@@ -15,12 +16,10 @@ use std::sync::Arc;
 const BUFFER_POOL_SIZE: usize = 10_000;
 const BUFFER_POOL_PAGE: PageId = 0;
 
-pub type TxnId = u64;
-
 type FrameId = usize;
-pub type BufferPoolManager = Arc<FairMutex<BufferPool>>;
+pub type ArcBufferPool = Arc<FairMutex<BufferPoolManager>>;
 
-pub struct BufferPool {
+pub struct BufferPoolManager {
     disk_manager: DiskManager,
 
     free_frames: LinkedList<FrameId>,
@@ -32,12 +31,11 @@ pub struct BufferPool {
     replacer: Box<dyn replacer::Replacer>,
 
     next_page_id: Page,
-    next_trx_id: u64,
 }
 
-impl BufferPool {
-    pub fn new() -> BufferPoolManager {
-        get_buffer_pool()
+impl BufferPoolManager {
+    pub fn get() -> ArcBufferPool {
+        BUFFER_POOL.clone()
     }
 
     #[allow(unused)]
@@ -46,7 +44,7 @@ impl BufferPool {
         println!("Page Table: {:?}", self.page_table);
     }
 
-    pub fn init(size: usize, path: &str) -> Self {
+    pub fn new(size: usize, path: &str) -> Self {
         // takes a few seconds if bp size is too large, can be parallelized.
         let frames = (0..size).map(|_| Frame::new()).collect::<Vec<_>>();
 
@@ -78,7 +76,6 @@ impl BufferPool {
             disk_manager,
             // page_id 0 is preserved for bp [`BUFFER_POOL_PAGE`], and 1 for catalog [`CATALOG_PAGE`]
             next_page_id,
-            next_trx_id: 1,
             txn_table: HashMap::new(),
         }
     }
@@ -101,8 +98,17 @@ impl BufferPool {
         }
     }
 
-    pub fn fetch_frame(&mut self, page_id: PageId) -> Result<&mut Frame> {
-        let frame_id = if let Some(frame_id) = self.page_table.get(&page_id) {
+    pub fn fetch_frame(&mut self, page_id: PageId, txn_id: Option<TxnId>) -> Result<&mut Frame> {
+        let frame_id = if let Some(id) = txn_id {
+            // I don't like this
+            self.txn_table
+                .get(&id)
+                .unwrap()
+                .iter()
+                .find(|f| self.frames[**f].get_page_id() == page_id)
+                .copied()
+                .ok_or_else(|| anyhow!("page not found"))?
+        } else if let Some(frame_id) = self.page_table.get(&page_id) {
             *frame_id
         } else {
             let page = self.disk_manager.read_from_file(page_id)?;
@@ -121,6 +127,7 @@ impl BufferPool {
         Ok(frame)
     }
 
+    // TODO: txn id
     pub fn new_page(&mut self) -> Result<&mut Frame> {
         let frame_id = self.find_free_frame()?;
 
@@ -171,26 +178,17 @@ impl BufferPool {
         Some(self.frames[frame_id].get_pin_count())
     }
 
-    #[allow(dead_code)]
-    pub fn start_txn(&mut self) -> Result<TxnId> {
+    pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
         // don't worry about atomicity, bpm is shared behind a mutex
-        let id = self.next_trx_id;
-        self.next_trx_id += 1;
+        self.txn_table.insert(txn_id, HashSet::new());
 
-        self.txn_table.insert(id, HashSet::new());
+        self.disk_manager.start_txn(txn_id)?;
 
-        self.disk_manager.start_txn(id)?;
-
-        Ok(id)
+        Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<&mut Frame> {
-        let frame = self.fetch_frame(page_id)?;
-
-        if !frame.get_latch().is_locked() {
-            return Err(anyhow!("page/frame should have an upgradable lock"));
-        }
+    pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<()> {
+        let frame = self.fetch_frame(page_id, None)?;
 
         let shadowed_page = frame.reader().clone();
 
@@ -204,12 +202,22 @@ impl BufferPool {
             .unwrap()
             .insert(shadow_frame_id);
 
-        Ok(shadow_frame)
+        Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn commit_txn(&mut self, txn_id: TxnId) -> Result<()> {
+        // commit shadowed pages to txn cache, this is for durability and atomicity
+        for frame_id in self.txn_table.get(&txn_id).unwrap() {
+            let page = self.frames[*frame_id].reader();
+            self.disk_manager.write_to_file(page, Some(txn_id))?;
+        }
+
         self.disk_manager.commit_txn(txn_id)?;
+
+        // empty txns are generally okay, this is just for debugging
+        if self.txn_table.get(&txn_id).unwrap().is_empty() {
+            Err(anyhow!("Committing empty txn"))?;
+        }
 
         for frame_id in self.txn_table.remove(&txn_id).unwrap() {
             let shadow_frame = take(&mut self.frames[frame_id]);
@@ -218,6 +226,14 @@ impl BufferPool {
 
             let old_frame_id = self.page_table[&shadow_page_id];
             let old_frame = &mut self.frames[old_frame_id];
+
+            if !old_frame.get_latch().is_locked() {
+                panic!(
+                    "txn {} frame {} page {} is not write-locked before commit",
+                    txn_id, old_frame_id, shadow_page_id
+                );
+            }
+
             old_frame.move_page(shadow_frame);
 
             self.unpin(&shadow_page_id);
@@ -227,20 +243,20 @@ impl BufferPool {
 
         Ok(())
     }
-}
 
-fn get_buffer_pool() -> BufferPoolManager {
-    lazy_static! {
-        static ref BUFFER_POOL: BufferPoolManager = Arc::new(FairMutex::new(BufferPool::init(
-            BUFFER_POOL_SIZE,
-            DISK_STORAGE
-        )));
+    pub fn abort_txn(&mut self, _txn_id: TxnId) -> Result<()> {
+        todo!()
     }
-
-    BUFFER_POOL.clone()
 }
 
-impl Drop for BufferPool {
+lazy_static! {
+    static ref BUFFER_POOL: ArcBufferPool = Arc::new(FairMutex::new(BufferPoolManager::new(
+        BUFFER_POOL_SIZE,
+        DISK_STORAGE
+    )));
+}
+
+impl Drop for BufferPoolManager {
     fn drop(&mut self) {
         // TODO: do we need to check txns?
         self.frames
@@ -260,9 +276,9 @@ mod tests {
     };
     use anyhow::Result;
 
-    fn cleanup(bpm: BufferPool, path: &str) -> Result<()> {
+    fn cleanup(bpm: BufferPoolManager, path: &str) -> Result<()> {
         drop(bpm);
-        std::fs::remove_dir_all(&path)?;
+        std::fs::remove_dir_all(path)?;
         Ok(())
     }
 
@@ -270,14 +286,14 @@ mod tests {
     fn test_dont_evict_pinned() -> Result<()> {
         let path = test_path();
 
-        let mut bpm = BufferPool::init(2, &path);
+        let mut bpm = BufferPoolManager::new(2, &path);
 
         let p1 = bpm.new_page()?.reader().get_page_id();
         let p2 = bpm.new_page()?.reader().get_page_id();
 
         // pin the page
-        let _ = bpm.fetch_frame(p1);
-        let _ = bpm.fetch_frame(p2);
+        let _ = bpm.fetch_frame(p1, None);
+        let _ = bpm.fetch_frame(p2, None);
 
         assert!(bpm.new_page().is_err());
 
@@ -285,7 +301,7 @@ mod tests {
 
         assert!(bpm.new_page().is_ok());
 
-        let _ = bpm.fetch_frame(p1);
+        let _ = bpm.fetch_frame(p1, None);
 
         assert!(bpm.new_page().is_err());
 
@@ -298,7 +314,7 @@ mod tests {
     fn test_shared_latch() -> Result<()> {
         let path = test_path();
 
-        let mut bpm = BufferPool::init(2, &path);
+        let mut bpm = BufferPoolManager::new(2, &path);
 
         let frame = bpm.new_page()?;
         let page = frame.writer();
@@ -323,17 +339,19 @@ mod tests {
     fn test_shadow_pages() -> Result<()> {
         let path = test_path();
 
-        let mut bpm = BufferPool::init(2, &path);
+        let mut bpm = BufferPoolManager::new(2, &path);
 
-        let txn_id = bpm.start_txn()?;
+        let txn_id = 1;
+
+        bpm.start_txn(1)?;
 
         let page = bpm.new_page()?.writer();
         let lock = page.get_latch().clone();
         lock.wlock();
 
         let page_id = page.get_page_id();
-        let shadow_frame = bpm.shadow_page(txn_id, page_id)?;
-        let shadow_page = shadow_frame.writer();
+        bpm.shadow_page(txn_id, page_id)?;
+        let shadow_page = bpm.fetch_frame(page_id, Some(txn_id))?.writer();
 
         shadow_page.get_latch().wlock();
 
@@ -348,7 +366,7 @@ mod tests {
         bpm.commit_txn(txn_id)?;
 
         // frame and page are sharing lock
-        let new_page = bpm.fetch_frame(page_id)?.writer();
+        let new_page = bpm.fetch_frame(page_id, None)?.writer();
         assert!(new_page.get_latch().is_locked());
 
         assert_eq!(new_page.read_bytes(PAGE_END - data.len(), PAGE_END), data);
