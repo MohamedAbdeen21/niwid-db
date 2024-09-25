@@ -10,7 +10,6 @@ pub(super) trait Replacer: Send + Sync + Debug {
     fn set_evictable(&mut self, frame_id: FrameId, evictable: bool);
     fn can_evict(&self) -> bool;
     fn evict(&mut self) -> FrameId;
-    /// mainly for testing
     #[cfg(test)]
     fn peek(&self) -> Option<FrameId>;
 }
@@ -21,7 +20,7 @@ pub(super) struct LRU {
     timestamp: i64,
     heap: PriorityQueue<FrameId, i64>,
     /// Store the last access when the frame is set no unevictable.
-    /// Restores the ts when the frame is marked to evictable again.
+    /// Restores the ts when the frame is marked as evictable again.
     last_access: HashMap<FrameId, i64>,
 }
 
@@ -75,8 +74,6 @@ impl Replacer for LRU {
         }
     }
 }
-
-// tests
 
 #[cfg(test)]
 mod tests {

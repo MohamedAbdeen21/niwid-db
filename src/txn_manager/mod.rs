@@ -54,7 +54,12 @@ impl TransactionManager {
     }
 
     pub fn touch_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<()> {
-        if self.locked_pages.get(&txn_id).unwrap().contains(&page_id) {
+        let txn_pages = match self.locked_pages.get(&txn_id) {
+            Some(pages) => pages,
+            None => return Err(anyhow!("Invalid txn id")),
+        };
+
+        if txn_pages.contains(&page_id) {
             return Ok(());
         } else if self.is_locked(page_id) {
             return Err(anyhow!("page is already locked by a different transaction"));

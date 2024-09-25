@@ -1,6 +1,7 @@
 mod buffer_pool;
 mod catalog;
 mod disk_manager;
+mod executor;
 mod pages;
 mod table;
 mod tuple;
