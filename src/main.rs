@@ -18,12 +18,14 @@ fn main() -> Result<()> {
 
     ctx.start_txn()?;
 
-    let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
+    // TODO: Use fields for handling nullability
+    let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::Str]);
     let _ = ctx.add_table("users", &schema, true)?;
 
-    ctx.execute_sql("INSERT INTO users VALUES (2, 3)")?;
-    ctx.execute_sql("INSERT INTO users VALUES (null, 6)")?;
+    ctx.execute_sql("INSERT INTO users VALUES (2, 'Hello')")?;
+    ctx.execute_sql("INSERT INTO users VALUES (null, 'World!')")?;
     ctx.execute_sql("SELECT id, age FROM users")?;
+
     ctx.commit_txn()?;
 
     Ok(())

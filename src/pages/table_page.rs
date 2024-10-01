@@ -223,16 +223,15 @@ impl TablePage {
     /// or setting the bitmap
     pub fn read_raw(&self, slot: usize) -> Tuple {
         let _rguard = self.latch.rguard();
-        let slot = self.get_slot(slot).expect(
-            format!(
+        let slot = self.get_slot(slot).unwrap_or_else(|| {
+            panic!(
                 "Page: {} Asked for invalid slot {} size {}\n{:?}",
                 self.page_id,
                 slot,
                 self.header().get_num_tuples(),
                 unsafe { self.data.as_ref() }.unwrap().bytes
             )
-            .as_str(),
-        );
+        });
 
         let tuple_offset = slot.offset as usize;
         let tuple_size = slot.size as usize;

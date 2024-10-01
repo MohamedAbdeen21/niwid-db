@@ -3,7 +3,7 @@ use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{self, TypeFactory};
+use crate::types::{self, Null, TypeFactory, Types};
 use anyhow::{anyhow, Result};
 use sqlparser::ast::*;
 use sqlparser::dialect::GenericDialect;
@@ -35,7 +35,7 @@ impl Executor {
         schema: &Schema,
         ignore_if_exists: bool,
     ) -> Result<&mut Table> {
-        if self.active_txn.is_some() && self.catalog_changed == false {
+        if self.active_txn.is_some() && !self.catalog_changed {
             self.catalog.table.start_txn(self.active_txn.unwrap())?;
             self.catalog_changed = true;
         }
@@ -115,6 +115,7 @@ impl Executor {
                         .flatten()
                         .map(|e| match e {
                             Expr::Value(Value::Number(v, _)) => Some(v.clone()),
+                            Expr::Value(Value::SingleQuotedString(v)) => Some(v.clone()),
                             Expr::Value(Value::Null) => None,
                             _ => todo!(),
                         })
@@ -150,16 +151,30 @@ impl Executor {
 
         let table = self.catalog.get_table(&table_name).unwrap();
         let schema = table.get_schema();
+
+        // handle duplicate columns
         table.scan(|(_, (_, tuple))| {
-            let values = tuple.get_values(&schema)?;
+            let mut values = tuple.get_values(&schema)?;
+            let mut result = Vec::with_capacity(columns.len());
             columns
                 .iter()
                 .map(|field| schema.fields.iter().position(|f| f == field).unwrap())
                 .try_for_each(|field| -> Result<()> {
-                    print!("{:?},", values[field]);
+                    let v = match schema.types[field] {
+                        Types::Str if !values[field].is_null() => {
+                            Box::new(table.fetch_string(&values[field].to_bytes()))
+                        }
+                        _ => std::mem::replace(&mut values[field], Null().into()),
+                    };
+
+                    result.push(v);
+
                     Ok(())
                 })?;
+
+            result.iter().for_each(|v| print!("{:?}, ", v));
             println!();
+
             Ok(())
         })?;
 
@@ -179,6 +194,7 @@ impl Executor {
                 let Query { body, limit, .. } = *query;
                 self.handle_select(*body, limit)
             }
+            Statement::CreateTable(_t) => todo!(),
             _ => unimplemented!(),
         }
     }
@@ -186,6 +202,7 @@ impl Executor {
 
 pub struct ResultSet {}
 
+// TODO:
 impl ResultSet {
     pub fn new() -> Self {
         Self {}

@@ -208,6 +208,11 @@ impl Table {
     /// (page_id, slot_id)
     pub fn fetch_string(&self, tuple_id_data: &[u8]) -> Str {
         let (page, slot) = TupleId::from_bytes(tuple_id_data);
+
+        if let Some(id) = self.active_txn {
+            self.txn_manager.lock().touch_page(id, page).unwrap();
+        }
+
         let blob_page: TablePage = self
             .bpm
             .lock()
@@ -272,6 +277,10 @@ impl Table {
 
         self.last_page = page_id;
 
+        if let Some(id) = self.active_txn {
+            self.txn_manager.lock().touch_page(id, self.last_page)?;
+        }
+
         new_page.insert_tuple(&tuple)
     }
 
@@ -300,7 +309,11 @@ impl Table {
 
     #[allow(dead_code)]
     pub fn update(&mut self, old_tuple: Tuple, new_tuple: Tuple) -> Result<TupleId> {
-        if self.active_txn.is_none() {
+        // updates should run inside txns, if a txn is
+        // already live use it else create a scoped txn here
+        let self_txn = self.active_txn.is_none();
+
+        if self_txn {
             self.new_txn()?;
         }
 
@@ -312,14 +325,14 @@ impl Table {
             Ok(())
         })?;
 
-        if tuple_id.is_none() {
-            return Err(anyhow!("Tuple not found"));
+        match tuple_id {
+            None => return Err(anyhow!("Tuple not found")),
+            Some(id) => self.delete(id)?,
         }
 
-        self.delete(tuple_id.unwrap())?;
         let tuple_id = self.insert(new_tuple)?;
 
-        if self.active_txn.is_some() {
+        if self_txn {
             self.commit_txn()?
         }
 

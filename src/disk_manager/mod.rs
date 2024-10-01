@@ -134,7 +134,6 @@ impl DiskManager {
         Ok(page)
     }
 
-    #[allow(dead_code)]
     pub fn start_txn(&self, txn_id: TxnId) -> Result<()> {
         let txn_cache = Path::join(&self.txn_dir(), Path::new(&txn_id.to_string()));
 
@@ -143,7 +142,6 @@ impl DiskManager {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn shadow_page<T: DiskWritable>(&self, txn_id: TxnId, page_id: PageId) -> Result<T> {
         let trans_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
 

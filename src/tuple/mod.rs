@@ -2,7 +2,7 @@ pub mod schema;
 
 use crate::pages::PageId;
 use crate::tuple::schema::Schema;
-use crate::types::{AsBytes, Null};
+use crate::types::{AsBytes, Null, Types};
 use crate::{pages::traits::Serialize, types::TypeFactory};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
@@ -69,7 +69,10 @@ impl Tuple {
         let mut values = vec![];
 
         let mut offset = 0;
-        for (i, type_) in schema.types.iter().enumerate() {
+        for (i, mut type_) in schema.types.iter().enumerate() {
+            if matches!(type_, Types::Str) {
+                type_ = &Types::I128; // size of tuple_id
+            }
             let size = type_.size();
             let value = TypeFactory::from_bytes(type_, &self.get_data()[offset..offset + size]);
             offset += size;

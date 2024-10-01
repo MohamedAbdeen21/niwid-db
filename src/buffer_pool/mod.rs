@@ -101,13 +101,18 @@ impl BufferPoolManager {
     pub fn fetch_frame(&mut self, page_id: PageId, txn_id: Option<TxnId>) -> Result<&mut Frame> {
         let frame_id = if let Some(id) = txn_id {
             // I don't like this
-            self.txn_table
+            *match self
+                .txn_table
                 .get(&id)
                 .unwrap()
                 .iter()
                 .find(|f| self.frames[**f].get_page_id() == page_id)
-                .copied()
-                .ok_or_else(|| anyhow!("page not found"))?
+            {
+                // default to the original page if the page was not touched/shadowed
+                // None => return self.fetch_frame(page_id, None),
+                None => unreachable!(),
+                Some(frame) => frame,
+            }
         } else if let Some(frame_id) = self.page_table.get(&page_id) {
             *frame_id
         } else {
@@ -188,9 +193,9 @@ impl BufferPoolManager {
     }
 
     pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<()> {
-        let frame = self.fetch_frame(page_id, None)?;
-
-        let shadowed_page = frame.reader().clone();
+        // pin original page
+        let _ = self.fetch_frame(page_id, None)?;
+        let shadowed_page = self.disk_manager.shadow_page(txn_id, page_id)?;
 
         let shadow_frame_id = self.find_free_frame()?;
         let shadow_frame = &mut self.frames[shadow_frame_id];
