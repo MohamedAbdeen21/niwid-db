@@ -68,7 +68,6 @@ impl DiskManager {
             let txn = txn.unwrap();
             if txn.file_name().to_str().unwrap().ends_with("committed") {
                 read_dir(txn.path())?
-                    .into_iter()
                     .try_for_each(|page| -> Result<()> {
                         let page = page?;
                         let original = Path::join(

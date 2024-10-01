@@ -1,9 +1,7 @@
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
-use crate::pages::{
-    table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE},
-    traits::Serialize,
-    PageId,
-};
+use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
+use crate::pages::traits::Serialize;
+use crate::pages::PageId;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
@@ -21,6 +19,12 @@ pub struct Table {
     txn_manager: ArcTransactionManager,
     schema: Schema,
     active_txn: Option<TxnId>,
+}
+
+impl PartialEq for Table {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
 }
 
 impl Table {
@@ -75,6 +79,10 @@ impl Table {
         self.first_page
     }
 
+    pub fn get_schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
     pub fn get_last_page_id(&self) -> PageId {
         self.last_page
     }
@@ -95,16 +103,16 @@ impl Table {
 
         let tuple = Tuple::new(vec![Str::from_raw_bytes(bytes).into()], &Schema::default());
 
-        let mut blob_page: TablePage = self
-            .bpm
-            .lock()
-            .fetch_frame(self.blob_page, None)?
-            .writer()
-            .into();
-
         if let Some(id) = self.active_txn {
             self.txn_manager.lock().touch_page(id, self.blob_page)?;
         }
+
+        let mut blob_page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(self.blob_page, self.active_txn)?
+            .writer()
+            .into();
 
         if let Ok(id) = blob_page.insert_raw(&tuple) {
             return Ok(id);
@@ -167,16 +175,25 @@ impl Table {
         Ok(new_tuple)
     }
 
-    pub fn start_txn(&mut self) -> Result<TxnId> {
+    pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
+        if self.active_txn.is_some() {
+            Err(anyhow!("Another transaction is active"))
+        } else {
+            self.active_txn = Some(txn_id);
+            Ok(())
+        }
+    }
+
+    fn new_txn(&mut self) -> Result<TxnId> {
         let id = self.txn_manager.lock().start()?;
         self.active_txn = Some(id);
         Ok(id)
     }
 
     pub fn commit_txn(&mut self) -> Result<()> {
-        if let Some(id) = self.active_txn {
+        if self.active_txn.is_some() {
             self.active_txn = None;
-            self.txn_manager.lock().commit(id)
+            Ok(())
         } else {
             Err(anyhow!("No active transaction"))
         }
@@ -194,7 +211,7 @@ impl Table {
         let blob_page: TablePage = self
             .bpm
             .lock()
-            .fetch_frame(page, None)
+            .fetch_frame(page, self.active_txn)
             .unwrap()
             .reader()
             .into();
@@ -207,7 +224,12 @@ impl Table {
     #[allow(unused)]
     pub fn fetch_tuple(&self, tuple_id: TupleId) -> Result<Entry> {
         let (page_id, slot) = tuple_id;
-        let page: TablePage = self.bpm.lock().fetch_frame(page_id, None)?.reader().into();
+        let page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(page_id, self.active_txn)?
+            .reader()
+            .into();
 
         let entry = page.read_tuple(slot);
 
@@ -279,7 +301,7 @@ impl Table {
     #[allow(dead_code)]
     pub fn update(&mut self, old_tuple: Tuple, new_tuple: Tuple) -> Result<TupleId> {
         if self.active_txn.is_none() {
-            self.start_txn()?;
+            self.new_txn()?;
         }
 
         let mut tuple_id = None;

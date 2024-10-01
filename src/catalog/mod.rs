@@ -7,12 +7,13 @@ use anyhow::{anyhow, Result};
 
 // preserve page_id 0 for catalog, bpm starts assigning at 1
 pub const CATALOG_PAGE: PageId = 1;
-const CATALOG_NAME: &str = "__CATALOG__";
+pub const CATALOG_NAME: &str = "__CATALOG__";
 
 pub struct Catalog {
-    table: Table,                  // first page of the catalog
+    pub table: Table,
     tables: Vec<(TupleId, Table)>, // TODO: handle ownership
-    schema: Schema,                // A catalog is itself a table
+    #[allow(unused)]
+    schema: Schema, // A catalog is itself a table
 }
 
 impl Catalog {
@@ -94,6 +95,7 @@ impl Catalog {
             .map(|(_, table)| table)
     }
 
+    #[allow(unused)]
     pub fn drop_table(&mut self, table_name: &str) -> Option<()> {
         let mut tuple_id = None;
         self.table

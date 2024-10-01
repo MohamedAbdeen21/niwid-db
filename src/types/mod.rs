@@ -55,6 +55,7 @@ pub trait Primitive {
     fn multiply(self, other: Self) -> Self;
     fn divide(self, other: Self) -> Self;
     fn default() -> Self;
+    fn from_string(s: &str) -> Self;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -106,6 +107,9 @@ impl Primitive for U8 {
     fn default() -> Self {
         U8(0)
     }
+    fn from_string(s: &str) -> Self {
+        U8(s.parse().unwrap())
+    }
 }
 
 impl AsBytes for U8 {
@@ -132,6 +136,9 @@ impl Primitive for U16 {
     }
     fn default() -> Self {
         U16(0)
+    }
+    fn from_string(s: &str) -> Self {
+        U16(s.parse().unwrap())
     }
 }
 
@@ -160,6 +167,10 @@ impl Primitive for U32 {
     fn default() -> Self {
         U32(0)
     }
+
+    fn from_string(s: &str) -> Self {
+        U32(s.parse().unwrap())
+    }
 }
 
 impl AsBytes for U32 {
@@ -186,6 +197,10 @@ impl Primitive for U64 {
     }
     fn default() -> Self {
         U64(0)
+    }
+
+    fn from_string(s: &str) -> Self {
+        U64(s.parse().unwrap())
     }
 }
 
@@ -214,6 +229,10 @@ impl Primitive for U128 {
     fn default() -> Self {
         U128(0)
     }
+
+    fn from_string(s: &str) -> Self {
+        U128(s.parse().unwrap())
+    }
 }
 
 impl AsBytes for U128 {
@@ -240,6 +259,10 @@ impl Primitive for I8 {
     }
     fn default() -> Self {
         I8(0)
+    }
+
+    fn from_string(s: &str) -> Self {
+        I8(s.parse().unwrap())
     }
 }
 
@@ -268,6 +291,10 @@ impl Primitive for I16 {
     fn default() -> Self {
         I16(0)
     }
+
+    fn from_string(s: &str) -> Self {
+        I16(s.parse().unwrap())
+    }
 }
 
 impl AsBytes for I16 {
@@ -294,6 +321,10 @@ impl Primitive for I32 {
     }
     fn default() -> Self {
         I32(0)
+    }
+
+    fn from_string(s: &str) -> Self {
+        I32(s.parse().unwrap())
     }
 }
 
@@ -322,6 +353,10 @@ impl Primitive for I64 {
     fn default() -> Self {
         I64(0)
     }
+
+    fn from_string(s: &str) -> Self {
+        I64(s.parse().unwrap())
+    }
 }
 
 impl AsBytes for I64 {
@@ -348,6 +383,10 @@ impl Primitive for I128 {
     }
     fn default() -> Self {
         I128(0)
+    }
+
+    fn from_string(s: &str) -> Self {
+        I128(s.parse().unwrap())
     }
 }
 
@@ -376,6 +415,10 @@ impl Primitive for F32 {
     fn default() -> Self {
         F32(0.0)
     }
+
+    fn from_string(s: &str) -> Self {
+        F32(s.parse().unwrap())
+    }
 }
 
 impl AsBytes for F32 {
@@ -402,6 +445,10 @@ impl Primitive for F64 {
     }
     fn default() -> Self {
         F64(0.0)
+    }
+
+    fn from_string(s: &str) -> Self {
+        F64(s.parse().unwrap())
     }
 }
 
@@ -430,6 +477,14 @@ impl Primitive for Bool {
     fn default() -> Self {
         Bool(false)
     }
+
+    fn from_string(s: &str) -> Self {
+        if s == "true" {
+            Bool(true)
+        } else {
+            Bool(false)
+        }
+    }
 }
 impl AsBytes for Bool {
     fn to_bytes(&self) -> Box<[u8]> {
@@ -455,6 +510,13 @@ impl Primitive for Char {
     }
     fn default() -> Self {
         Char('\0')
+    }
+
+    fn from_string(s: &str) -> Self {
+        if s.len() != 1 {
+            panic!("Invalid input to char: {}", s);
+        }
+        Char(s.chars().next().unwrap())
     }
 }
 
@@ -483,6 +545,9 @@ impl Primitive for Str {
     }
     fn default() -> Self {
         Str(String::new())
+    }
+    fn from_string(s: &str) -> Self {
+        Str(s.to_string())
     }
 }
 
@@ -595,6 +660,26 @@ impl TypeFactory {
             Types::U16 => U16::from_bytes(bytes).into(),
             Types::U32 => U32::from_bytes(bytes).into(),
             Types::Char => Char::from_bytes(bytes).into(),
+        }
+    }
+
+    pub fn from_string(t: &Types, s: &str) -> Box<dyn AsBytes> {
+        match t {
+            Types::Str => Str::from_string(s).into(),
+            Types::I64 => I64::from_string(s).into(),
+            Types::I128 => I128::from_string(s).into(),
+            Types::U64 => U64::from_string(s).into(),
+            Types::U128 => U128::from_string(s).into(),
+            Types::F64 => F64::from_string(s).into(),
+            Types::F32 => F32::from_string(s).into(),
+            Types::Bool => Bool::from_string(s).into(),
+            Types::I8 => I8::from_string(s).into(),
+            Types::I16 => I16::from_string(s).into(),
+            Types::I32 => I32::from_string(s).into(),
+            Types::U8 => U8::from_string(s).into(),
+            Types::U16 => U16::from_string(s).into(),
+            Types::U32 => U32::from_string(s).into(),
+            Types::Char => Char::from_string(s).into(),
         }
     }
 }

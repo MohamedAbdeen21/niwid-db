@@ -2,6 +2,7 @@ use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::TablePage;
 use crate::pages::{PageId, INVALID_PAGE};
 use crate::tuple::{Entry, TupleId};
+use crate::txn_manager::TxnId;
 
 use super::Table;
 
@@ -12,6 +13,7 @@ pub(super) struct TableIterator {
     next_page: PageId,
     bpm: ArcBufferPool,
     num_tuples: usize,
+    active_txn: Option<TxnId>,
 }
 
 impl TableIterator {
@@ -19,7 +21,7 @@ impl TableIterator {
         let bpm = table.bpm.clone();
         let page: TablePage = bpm
             .lock()
-            .fetch_frame(table.first_page, None)
+            .fetch_frame(table.first_page, table.active_txn)
             .unwrap()
             .reader()
             .into();
@@ -32,6 +34,7 @@ impl TableIterator {
             num_tuples: header.get_num_tuples(),
             page,
             bpm,
+            active_txn: table.active_txn,
             // schema is not needed for now, can copy from table though
         }
     }
@@ -55,7 +58,7 @@ impl Iterator for TableIterator {
             self.page = self
                 .bpm
                 .lock()
-                .fetch_frame(self.next_page, None)
+                .fetch_frame(self.next_page, self.active_txn)
                 .unwrap()
                 .reader()
                 .into();
