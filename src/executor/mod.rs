@@ -6,7 +6,7 @@ use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{self, Null, TypeFactory, Types};
+use crate::types::{self, AsBytes, Null, TypeFactory, Types};
 use anyhow::{anyhow, Result};
 use sqlparser::ast::*;
 use sqlparser::dialect::GenericDialect;
@@ -137,7 +137,6 @@ impl Executor {
     }
 
     fn handle_select(&mut self, body: SetExpr, _limit: Option<Expr>) -> Result<ResultSet> {
-        println!("{:?}", body);
         let table_name = match body {
             SetExpr::Select(ref select) => match &select.from.first().unwrap().relation {
                 TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
@@ -174,27 +173,21 @@ impl Executor {
 
         // handle duplicate columns
         table.scan(|(_, (_, tuple))| {
-            let mut values = tuple.get_values(&schema)?;
+            let values = tuple.get_values(&schema)?;
             let mut result = Vec::with_capacity(columns.len());
             columns
                 .iter()
                 .map(|field| schema.fields.iter().position(|f| &f.name == field).unwrap())
                 .try_for_each(|field| -> Result<()> {
                     let v = match &types[field] {
-                        Types::Str if !values[field].is_null() => {
-                            Box::new(table.fetch_string(&values[field].to_bytes()))
-                        }
-                        t if !values[field].is_null() => {
+                        _ if values[field].is_null() => Box::new(Null()) as Box<dyn AsBytes>,
+                        Types::Str => Box::new(table.fetch_string(&values[field].to_bytes())),
+                        ty => {
                             // a small trick to clone the underlying value
                             // dyn traits can't extend clone or copy
                             let bytes = values[field].to_bytes();
-                            std::mem::replace(
-                                &mut values[field],
-                                TypeFactory::from_bytes(t, &bytes),
-                            )
+                            TypeFactory::from_bytes(ty, &bytes)
                         }
-                        _ if values[field].is_null() => Box::new(Null()),
-                        _ => todo!(),
                     };
 
                     result.push(v);

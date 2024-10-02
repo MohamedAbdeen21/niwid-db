@@ -93,19 +93,25 @@ pub struct Char(pub char);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Null();
 
+macro_rules! impl_simple_ops {
+    ($type:ty) => {
+        fn add(self, other: Self) -> Self {
+            Self(self.0 + other.0)
+        }
+        fn subtract(self, other: Self) -> Self {
+            Self(self.0 - other.0)
+        }
+        fn multiply(self, other: Self) -> Self {
+            Self(self.0 * other.0)
+        }
+        fn divide(self, other: Self) -> Self {
+            Self(self.0 / other.0) // Simple division without checking for division by zero
+        }
+    };
+}
+
 impl Primitive for U8 {
-    fn add(self, other: Self) -> Self {
-        U8(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        U8(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        U8(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        U8(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(U8);
     fn default() -> Self {
         U8(0)
     }
@@ -124,18 +130,7 @@ impl AsBytes for U8 {
 }
 
 impl Primitive for U16 {
-    fn add(self, other: Self) -> Self {
-        U16(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        U16(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        U16(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        U16(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(U16);
     fn default() -> Self {
         U16(0)
     }
@@ -154,18 +149,7 @@ impl AsBytes for U16 {
 }
 
 impl Primitive for U32 {
-    fn add(self, other: Self) -> Self {
-        U32(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        U32(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        U32(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        U32(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(U32);
     fn default() -> Self {
         U32(0)
     }
@@ -185,22 +169,10 @@ impl AsBytes for U32 {
 }
 
 impl Primitive for U64 {
-    fn add(self, other: Self) -> Self {
-        U64(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        U64(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        U64(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        U64(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(U64);
     fn default() -> Self {
         U64(0)
     }
-
     fn from_string(s: &str) -> Self {
         U64(s.parse().unwrap())
     }
@@ -216,18 +188,7 @@ impl AsBytes for U64 {
 }
 
 impl Primitive for U128 {
-    fn add(self, other: Self) -> Self {
-        U128(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        U128(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        U128(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        U128(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(U128);
     fn default() -> Self {
         U128(0)
     }
@@ -247,18 +208,7 @@ impl AsBytes for U128 {
 }
 
 impl Primitive for I8 {
-    fn add(self, other: Self) -> Self {
-        I8(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        I8(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        I8(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        I8(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(I8);
     fn default() -> Self {
         I8(0)
     }
@@ -278,18 +228,7 @@ impl AsBytes for I8 {
 }
 
 impl Primitive for I16 {
-    fn add(self, other: Self) -> Self {
-        I16(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        I16(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        I16(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        I16(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(I16);
     fn default() -> Self {
         I16(0)
     }
@@ -309,18 +248,7 @@ impl AsBytes for I16 {
 }
 
 impl Primitive for I32 {
-    fn add(self, other: Self) -> Self {
-        I32(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        I32(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        I32(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        I32(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(I32);
     fn default() -> Self {
         I32(0)
     }
@@ -340,18 +268,7 @@ impl AsBytes for I32 {
 }
 
 impl Primitive for I64 {
-    fn add(self, other: Self) -> Self {
-        I64(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        I64(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        I64(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        I64(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(I64);
     fn default() -> Self {
         I64(0)
     }
@@ -371,18 +288,7 @@ impl AsBytes for I64 {
 }
 
 impl Primitive for I128 {
-    fn add(self, other: Self) -> Self {
-        I128(self.0.wrapping_add(other.0))
-    }
-    fn subtract(self, other: Self) -> Self {
-        I128(self.0.wrapping_sub(other.0))
-    }
-    fn multiply(self, other: Self) -> Self {
-        I128(self.0.wrapping_mul(other.0))
-    }
-    fn divide(self, other: Self) -> Self {
-        I128(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(I128);
     fn default() -> Self {
         I128(0)
     }
@@ -402,18 +308,7 @@ impl AsBytes for I128 {
 }
 
 impl Primitive for F32 {
-    fn add(self, other: Self) -> Self {
-        F32(self.0 + other.0)
-    }
-    fn subtract(self, other: Self) -> Self {
-        F32(self.0 - other.0)
-    }
-    fn multiply(self, other: Self) -> Self {
-        F32(self.0 * other.0)
-    }
-    fn divide(self, other: Self) -> Self {
-        F32(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(F32);
     fn default() -> Self {
         F32(0.0)
     }
@@ -433,18 +328,7 @@ impl AsBytes for F32 {
 }
 
 impl Primitive for F64 {
-    fn add(self, other: Self) -> Self {
-        F64(self.0 + other.0)
-    }
-    fn subtract(self, other: Self) -> Self {
-        F64(self.0 - other.0)
-    }
-    fn multiply(self, other: Self) -> Self {
-        F64(self.0 * other.0)
-    }
-    fn divide(self, other: Self) -> Self {
-        F64(self.0 / other.0) // Simple division without checking for division by zero
-    }
+    impl_simple_ops!(F64);
     fn default() -> Self {
         F64(0.0)
     }
