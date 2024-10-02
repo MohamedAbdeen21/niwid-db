@@ -17,14 +17,14 @@ pub const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 /// all other fields are helpers (pointers and flags)
 /// that are computed on the fly
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct TablePageData {
     header: TablePageHeader,
     bytes: [u8; PAGE_END],
 }
 
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TablePage {
     data: *mut TablePageData,
     page_id: PageId,

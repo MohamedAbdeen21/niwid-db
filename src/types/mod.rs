@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +23,8 @@ pub enum Types {
     F64,
     Bool,
     Char,
-    Str, // string is stored as a [`TupleId`] to a blob page
+    /// string is stored as a [`TupleId`] to a blob page
+    Str,
 }
 
 impl Types {
@@ -38,7 +40,7 @@ impl Types {
     }
 }
 
-pub trait AsBytes: Debug + 'static {
+pub trait AsBytes: Debug + 'static + Display {
     fn is_null(&self) -> bool {
         false
     }
@@ -601,6 +603,37 @@ macro_rules! impl_into_box {
             }
         }
     };
+}
+
+macro_rules! impl_display {
+    ($type:ty) => {
+        impl Display for $type {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
+impl_display!(U8);
+impl_display!(U16);
+impl_display!(U32);
+impl_display!(U64);
+impl_display!(U128);
+impl_display!(I8);
+impl_display!(I16);
+impl_display!(I32);
+impl_display!(I64);
+impl_display!(I128);
+impl_display!(F32);
+impl_display!(F64);
+impl_display!(Bool);
+impl_display!(Str);
+impl_display!(Char);
+impl Display for Null {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "null")
+    }
 }
 
 impl_into_box!(U8);

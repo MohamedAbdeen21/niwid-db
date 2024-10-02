@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
     ctx.execute_sql("INSERT INTO users VALUES (2, 'Hello')")?;
     ctx.execute_sql("INSERT INTO users VALUES (null, 'World!')")?;
-    ctx.execute_sql("SELECT id, age FROM users")?;
+    ctx.execute_sql("SELECT *, id FROM users")?.show();
 
     ctx.commit_txn()?;
 

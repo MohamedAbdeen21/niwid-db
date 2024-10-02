@@ -1,4 +1,7 @@
+mod result_set;
+
 use crate::catalog::Catalog;
+use crate::executor::result_set::ResultSet;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
@@ -126,37 +129,48 @@ impl Executor {
         };
         table.insert(tuple)?;
 
-        Ok(ResultSet::new())
+        Ok(ResultSet::new(
+            vec!["inserted".to_string()],
+            vec![Types::I64],
+            vec![],
+        ))
     }
 
     fn handle_select(&mut self, body: SetExpr, _limit: Option<Expr>) -> Result<ResultSet> {
-        let (table_name, columns) = match body {
-            SetExpr::Select(select) => {
-                let table = match &select.from.first().unwrap().relation {
-                    TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-                    _ => todo!(),
-                };
-                let columns = select
-                    .projection
-                    .iter()
-                    .map(|e| match e {
-                        SelectItem::UnnamedExpr(Expr::Identifier(ident)) => ident.value.clone(),
-                        _ => todo!(),
-                    })
-                    .collect::<Vec<_>>();
-                (table, columns)
-            }
+        println!("{:?}", body);
+        let table_name = match body {
+            SetExpr::Select(ref select) => match &select.from.first().unwrap().relation {
+                TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
+                _ => todo!(),
+            },
             _ => unimplemented!(),
         };
 
         let table = self.catalog.get_table(&table_name).unwrap();
         let schema = table.get_schema();
 
+        let columns = match body {
+            SetExpr::Select(select) => select
+                .projection
+                .iter()
+                .flat_map(|e| match e {
+                    SelectItem::UnnamedExpr(Expr::Identifier(ident)) => vec![ident.value.clone()],
+                    SelectItem::Wildcard(_) => {
+                        schema.fields.iter().map(|f| f.name.clone()).collect()
+                    }
+                    _ => todo!(),
+                })
+                .collect::<Vec<_>>(),
+            _ => unimplemented!(),
+        };
+
         let types = schema
             .fields
             .iter()
             .map(|f| f.ty.clone())
             .collect::<Vec<_>>();
+
+        let mut results = vec![];
 
         // handle duplicate columns
         table.scan(|(_, (_, tuple))| {
@@ -166,11 +180,21 @@ impl Executor {
                 .iter()
                 .map(|field| schema.fields.iter().position(|f| &f.name == field).unwrap())
                 .try_for_each(|field| -> Result<()> {
-                    let v = match types[field] {
+                    let v = match &types[field] {
                         Types::Str if !values[field].is_null() => {
                             Box::new(table.fetch_string(&values[field].to_bytes()))
                         }
-                        _ => std::mem::replace(&mut values[field], Null().into()),
+                        t if !values[field].is_null() => {
+                            // a small trick to clone the underlying value
+                            // dyn traits can't extend clone or copy
+                            let bytes = values[field].to_bytes();
+                            std::mem::replace(
+                                &mut values[field],
+                                TypeFactory::from_bytes(t, &bytes),
+                            )
+                        }
+                        _ if values[field].is_null() => Box::new(Null()),
+                        _ => todo!(),
                     };
 
                     result.push(v);
@@ -178,13 +202,19 @@ impl Executor {
                     Ok(())
                 })?;
 
-            result.iter().for_each(|v| print!("{:?}, ", v));
-            println!();
+            results.push(result);
 
             Ok(())
         })?;
 
-        Ok(ResultSet::new())
+        let mut output_types = vec![];
+
+        for field in columns.iter() {
+            let field = schema.fields.iter().find(|f| f.name == *field).unwrap();
+            output_types.push(field.ty.clone());
+        }
+
+        Ok(ResultSet::new(columns, output_types, results))
     }
 
     pub fn execute_sql(&mut self, sql: &str) -> Result<ResultSet> {
@@ -203,14 +233,5 @@ impl Executor {
             Statement::CreateTable(_t) => todo!(),
             _ => unimplemented!(),
         }
-    }
-}
-
-pub struct ResultSet {}
-
-// TODO:
-impl ResultSet {
-    pub fn new() -> Self {
-        Self {}
     }
 }
