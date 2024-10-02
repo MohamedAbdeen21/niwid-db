@@ -1,4 +1,5 @@
-use parking_lot::{lock_api::RawRwLock, RwLock, RwLockReadGuard, RwLockUpgradableReadGuard};
+use parking_lot::lock_api::{RawRwLock, RawRwLockUpgrade};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Debug)]
 pub struct Latch {
@@ -12,18 +13,17 @@ impl Latch {
         }
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     pub fn rlock(&self) {
         unsafe { self.lock.raw() }.lock_shared();
     }
 
-    #[allow(unused)]
-    pub fn runlock(&self) {
-        unsafe { self.lock.raw().unlock_shared() };
-    }
-
     pub fn wlock(&self) {
         unsafe { self.lock.raw() }.lock_exclusive();
+    }
+
+    pub fn try_wlock(&self) -> bool {
+        unsafe { self.lock.raw() }.try_lock_exclusive()
     }
 
     pub fn wunlock(&self) {
@@ -34,9 +34,18 @@ impl Latch {
         self.lock.read()
     }
 
+    pub fn upgradable_rlock(&self) {
+        unsafe { self.lock.raw() }.lock_upgradable()
+    }
+
+    pub fn upgrade_write(&self) {
+        assert!(self.is_locked());
+        unsafe { self.lock.raw().upgrade() }
+    }
+
     #[allow(unused)]
-    pub fn upgradable_rlock(&self) -> RwLockUpgradableReadGuard<()> {
-        self.lock.upgradable_read()
+    pub fn release_upgradable(&self) {
+        unsafe { self.lock.raw().unlock_upgradable() }
     }
 
     #[allow(unused)]

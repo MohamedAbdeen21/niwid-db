@@ -53,9 +53,13 @@ impl TablePage {
         if self.read_only {
             panic!("Cannot modify read only page");
         }
-        self.latch.wlock();
+        let locked = self.latch.try_wlock();
+
         self.header_mut().set_next_page_id(page_id);
-        self.latch.wunlock();
+
+        if locked {
+            self.latch.wunlock();
+        }
     }
 
     pub fn get_page_id(&self) -> PageId {
@@ -113,7 +117,6 @@ impl TablePage {
         if self.read_only {
             panic!("Cannot modify read only page");
         }
-        self.latch.wlock();
 
         let tuple_size = tuple.len();
         if tuple_size + SLOT_SIZE > self.free_space() {
@@ -139,8 +142,6 @@ impl TablePage {
         self.header_mut().add_tuple();
         self.header_mut().is_dirty |= true;
 
-        self.latch.wunlock();
-
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
 
@@ -148,7 +149,6 @@ impl TablePage {
         if self.read_only {
             panic!("Cannot modify read only page");
         }
-        self.latch.wlock();
 
         let entry_size = tuple.len() + META_SIZE;
         if entry_size + SLOT_SIZE > self.free_space() {
@@ -177,8 +177,6 @@ impl TablePage {
         self.header_mut().add_tuple();
         self.header_mut().is_dirty |= true;
 
-        self.latch.wunlock();
-
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
 
@@ -186,7 +184,6 @@ impl TablePage {
         if self.read_only {
             panic!("Cannot modify read only page");
         }
-        self.latch.wlock();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
         let mut deleted_meta = TupleMetaData::default(); // TODO: Copy null bitmap
@@ -197,7 +194,6 @@ impl TablePage {
         data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
             .copy_from_slice(deleted_meta.to_bytes());
         self.header_mut().is_dirty |= true;
-        self.latch.wunlock();
     }
 
     pub fn read_tuple(&self, slot: usize) -> Entry {
@@ -352,7 +348,7 @@ mod tests {
         let t1: TablePage = page.into();
         let t2: TablePage = page.into();
 
-        t1.latch.wlock();
+        t1.latch.try_wlock();
 
         assert!(t2.latch.is_locked());
         assert!(page.latch.is_locked());
@@ -363,7 +359,7 @@ mod tests {
         assert!(!page.latch.is_locked());
 
         t1.latch.rlock();
-        let _ = page.latch.upgradable_rlock();
+        page.latch.upgradable_rlock();
         t2.latch.rlock();
 
         Ok(())

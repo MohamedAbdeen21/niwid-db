@@ -65,7 +65,11 @@ impl TransactionManager {
             return Err(anyhow!("page is already locked by a different transaction"));
         }
 
-        self.bpm.lock().shadow_page(txn_id, page_id)?;
+        self.bpm
+            .lock()
+            .shadow_page(txn_id, page_id)?
+            .get_latch()
+            .upgradable_rlock();
 
         self.locked_pages.get_mut(&txn_id).unwrap().push(page_id);
 
@@ -78,7 +82,7 @@ impl TransactionManager {
                 .lock()
                 .fetch_frame(*page_id, None)?
                 .get_latch()
-                .wlock();
+                .upgrade_write();
         }
 
         self.bpm.lock().commit_txn(txn_id)?;

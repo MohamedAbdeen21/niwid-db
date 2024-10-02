@@ -192,9 +192,8 @@ impl BufferPoolManager {
         Ok(())
     }
 
-    pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<()> {
-        // pin original page
-        let _ = self.fetch_frame(page_id, None)?;
+    /// returns the original frame, already pinned
+    pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<&mut Frame> {
         let shadowed_page = self.disk_manager.shadow_page(txn_id, page_id)?;
 
         let shadow_frame_id = self.find_free_frame()?;
@@ -207,9 +206,14 @@ impl BufferPoolManager {
             .unwrap()
             .insert(shadow_frame_id);
 
-        Ok(())
+        // pin original frame
+        let original_frame = self.fetch_frame(page_id, None)?;
+
+        Ok(original_frame)
     }
 
+    /// Commit pages marked as touched during the transactions.
+    /// locks should be upgraded by the calling txn_manager
     pub fn commit_txn(&mut self, txn_id: TxnId) -> Result<()> {
         // commit shadowed pages to txn cache, this is for durability and atomicity
         for frame_id in self.txn_table.get(&txn_id).unwrap() {
@@ -224,26 +228,19 @@ impl BufferPoolManager {
             Err(anyhow!("Committing empty txn"))?;
         }
 
-        for frame_id in self.txn_table.remove(&txn_id).unwrap() {
-            let shadow_frame = take(&mut self.frames[frame_id]);
+        for shadow_frame_id in self.txn_table.remove(&txn_id).unwrap() {
+            let shadow_frame = take(&mut self.frames[shadow_frame_id]);
 
             let shadow_page_id = shadow_frame.reader().get_page_id();
 
             let old_frame_id = self.page_table[&shadow_page_id];
             let old_frame = &mut self.frames[old_frame_id];
 
-            if !old_frame.get_latch().is_locked() {
-                panic!(
-                    "txn {} frame {} page {} is not write-locked before commit",
-                    txn_id, old_frame_id, shadow_page_id
-                );
-            }
-
             old_frame.move_page(shadow_frame);
 
             self.unpin(&shadow_page_id);
 
-            self.free_frames.push_back(frame_id);
+            self.free_frames.push_back(shadow_frame_id);
         }
 
         Ok(())
@@ -325,7 +322,7 @@ mod tests {
         let page = frame.writer();
         let table_page: TablePage = page.into();
 
-        page.get_latch().wlock();
+        page.get_latch().try_wlock();
 
         assert!(frame.get_latch().is_locked());
         assert!(table_page.get_latch().is_locked());
@@ -352,13 +349,15 @@ mod tests {
 
         let page = bpm.new_page()?.writer();
         let lock = page.get_latch().clone();
-        lock.wlock();
 
         let page_id = page.get_page_id();
+        // acquires an upgradable lock
+        lock.upgradable_rlock();
+
         bpm.shadow_page(txn_id, page_id)?;
         let shadow_page = bpm.fetch_frame(page_id, Some(txn_id))?.writer();
 
-        shadow_page.get_latch().wlock();
+        shadow_page.get_latch().try_wlock();
 
         let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         shadow_page.write_bytes(PAGE_END - data.len(), PAGE_END, &data);
@@ -368,15 +367,17 @@ mod tests {
         // effectively temporarily "pining" it.
         assert!(bpm.new_page().is_err());
 
+        lock.upgrade_write();
+        // upgrades the upgradable lock
         bpm.commit_txn(txn_id)?;
+
+        lock.wunlock();
 
         // frame and page are sharing lock
         let new_page = bpm.fetch_frame(page_id, None)?.writer();
-        assert!(new_page.get_latch().is_locked());
+        assert!(!new_page.get_latch().is_locked());
 
         assert_eq!(new_page.read_bytes(PAGE_END - data.len(), PAGE_END), data);
-
-        lock.wunlock();
 
         assert!(bpm.new_page().is_ok());
 

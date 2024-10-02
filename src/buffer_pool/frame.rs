@@ -48,6 +48,7 @@ impl Frame {
     }
 
     pub(super) fn move_page(&mut self, frame: Self) {
+        assert!(self.get_latch().is_locked());
         self.set_page(frame.page);
     }
 
