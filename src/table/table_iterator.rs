@@ -89,7 +89,7 @@ mod tests {
 
     use crate::pages::table_page::TablePage;
     use crate::table::tests::test_table;
-    use crate::tuple::schema::Schema;
+    use crate::tuple::schema::{Field, Schema};
     use crate::tuple::{Entry, Tuple, TupleId};
     use crate::types::{Null, Types, U128, U16, U8};
 
@@ -97,7 +97,10 @@ mod tests {
 
     #[test]
     fn test_skip_deleted() -> Result<()> {
-        let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
+        let schema = Schema::new(vec![
+            Field::new("id", Types::U8, false),
+            Field::new("age", Types::U16, false),
+        ]);
         let mut table = test_table(3, &schema)?;
 
         let t1 = Tuple::new(vec![U8(2).into(), U16(3).into()], &schema);
@@ -127,7 +130,10 @@ mod tests {
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let schema = Schema::new(vec!["a", "b"], vec![Types::U128, Types::U128]);
+        let schema = Schema::new(vec![
+            Field::new("a", Types::U128, false),
+            Field::new("b", Types::U128, false),
+        ]);
 
         let tuples_per_page = 76;
 

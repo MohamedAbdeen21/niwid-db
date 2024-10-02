@@ -1,6 +1,6 @@
 use crate::pages::PageId;
 use crate::table::Table;
-use crate::tuple::schema::Schema;
+use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
 use crate::types::{AsBytes, Str, Types, I128, I64};
 use anyhow::{anyhow, Result};
@@ -18,10 +18,12 @@ pub struct Catalog {
 
 impl Catalog {
     pub fn new() -> Result<Self> {
-        let schema = Schema::new(
-            vec!["table_name", "first_page", "last_page", "schema"],
-            vec![Types::Str, Types::I64, Types::I64, Types::Str],
-        );
+        let schema = Schema::new(vec![
+            Field::new("table_name", Types::Str, false),
+            Field::new("first_page", Types::I64, false),
+            Field::new("last_page", Types::I64, false),
+            Field::new("schema", Types::Str, false),
+        ]);
 
         let table = Table::fetch(
             CATALOG_NAME.to_string(),

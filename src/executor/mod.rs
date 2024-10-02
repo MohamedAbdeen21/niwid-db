@@ -81,10 +81,10 @@ impl Executor {
     fn sql_expr_to_tuple(ident: Vec<Option<String>>, schema: Schema) -> Tuple {
         let values = ident
             .iter()
-            .zip(schema.types.iter())
+            .zip(schema.fields.iter().map(|f| f.ty.clone()))
             .map(|(v, ty)| match v {
                 None => types::Null().into(),
-                Some(v) => TypeFactory::from_string(ty, v),
+                Some(v) => TypeFactory::from_string(&ty, v),
             })
             .collect();
 
@@ -152,15 +152,21 @@ impl Executor {
         let table = self.catalog.get_table(&table_name).unwrap();
         let schema = table.get_schema();
 
+        let types = schema
+            .fields
+            .iter()
+            .map(|f| f.ty.clone())
+            .collect::<Vec<_>>();
+
         // handle duplicate columns
         table.scan(|(_, (_, tuple))| {
             let mut values = tuple.get_values(&schema)?;
             let mut result = Vec::with_capacity(columns.len());
             columns
                 .iter()
-                .map(|field| schema.fields.iter().position(|f| f == field).unwrap())
+                .map(|field| schema.fields.iter().position(|f| &f.name == field).unwrap())
                 .try_for_each(|field| -> Result<()> {
-                    let v = match schema.types[field] {
+                    let v = match types[field] {
                         Types::Str if !values[field].is_null() => {
                             Box::new(table.fetch_string(&values[field].to_bytes()))
                         }

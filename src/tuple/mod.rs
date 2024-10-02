@@ -28,12 +28,12 @@ impl Tuple {
         if values.iter().any(|t| t.is_null()) {
             values = values
                 .into_iter()
-                .zip(schema.types.iter())
+                .zip(schema.fields.iter().map(|f| f.ty.clone()))
                 .enumerate()
                 .map(|(i, (value, type_))| {
                     if value.is_null() {
                         nulls |= 1 << i;
-                        TypeFactory::default(type_)
+                        TypeFactory::default(&type_)
                     } else {
                         value
                     }
@@ -59,7 +59,7 @@ impl Tuple {
         let field_id = schema
             .fields
             .iter()
-            .position(|f| f == field)
+            .position(|f| f.name == field)
             .ok_or(anyhow!("field not found"))?;
 
         self.get_value_at::<T>(field_id as u8, schema)
@@ -69,7 +69,7 @@ impl Tuple {
         let mut values = vec![];
 
         let mut offset = 0;
-        for (i, mut type_) in schema.types.iter().enumerate() {
+        for (i, mut type_) in schema.fields.iter().map(|f| &f.ty).enumerate() {
             if matches!(type_, Types::Str) {
                 type_ = &Types::I128; // size of tuple_id
             }
@@ -91,14 +91,15 @@ impl Tuple {
             return Ok(None);
         }
 
-        if id as usize >= schema.types.len() {
+        let types: Vec<_> = schema.fields.iter().map(|f| &f.ty).collect();
+
+        if id as usize >= schema.fields.len() {
             return Err(anyhow!("field id out of bounds"));
         }
 
-        let dtype = &schema.types[id as usize];
+        let dtype = types[id as usize];
 
-        let offset = schema
-            .types
+        let offset = types
             .iter()
             .take(id as usize)
             .fold(0, |acc, t| acc + t.size());

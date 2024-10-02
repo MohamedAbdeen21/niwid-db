@@ -1,5 +1,3 @@
-mod shadow_page;
-
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
 use crate::txn_manager::TxnId;
@@ -208,7 +206,7 @@ impl DiskManager {
 mod tests {
     use super::*;
     use crate::pages::Page;
-    use crate::tuple::schema::Schema;
+    use crate::tuple::schema::{Field, Schema};
     use crate::types::Types;
     use crate::{pages::table_page::TablePage, tuple::Tuple, types::Str};
     use std::fs::remove_dir_all;
@@ -247,7 +245,9 @@ mod tests {
         page.set_page_id(page_id);
         let mut table_page: TablePage = page.into();
 
-        let dummy_schema = Schema::new(vec!["str"], vec![Types::Str]);
+        // let dummy_schema = Schema::new(vec!["str"], vec![Types::Str]);
+        let dummy_schema = Schema::new(vec![Field::new("str", Types::Str, false)]);
+
         let tuple = Tuple::new(vec![Str("Hello!".to_string()).into()], &dummy_schema);
         let (write_page_id, write_slot_id) = table_page.insert_raw(&tuple)?;
 

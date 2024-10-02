@@ -15,7 +15,7 @@ pub(super) trait Replacer: Send + Sync + Debug {
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct LRU {
     timestamp: i64,
     heap: PriorityQueue<FrameId, i64>,

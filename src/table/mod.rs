@@ -133,16 +133,16 @@ impl Table {
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
-        if !self.schema.types.contains(&Types::Str) {
+        let types: Vec<_> = self.schema.fields.iter().map(|f| f.ty.clone()).collect();
+
+        if !types.contains(&Types::Str) {
             return Ok(tuple);
         }
 
-        let mut offsets: Vec<_> = self
-            .schema
-            .types
+        let mut offsets: Vec<_> = types
             .iter()
             .scan(0, |acc, ty| {
-                let size = if ty == &Types::Str {
+                let size = if *ty == Types::Str {
                     let slice = &tuple.get_data()[*acc..*acc + 2];
                     U16::from_bytes(slice).0 as usize + 2
                 } else {
@@ -155,11 +155,8 @@ impl Table {
 
         offsets.insert(0, 0);
 
-        let data = self
-            .schema
-            .types
-            .clone()
-            .iter()
+        let data = types
+            .into_iter()
             .zip(offsets.windows(2).map(|w| (w[0], w[1])))
             .flat_map(|(ty, (offset, size))| match ty {
                 Types::Str => {
@@ -346,7 +343,7 @@ mod tests {
 
     use super::*;
     use crate::disk_manager::test_path;
-    use crate::tuple::schema::Schema;
+    use crate::tuple::schema::{Field, Schema};
     use crate::types::*;
     use anyhow::Result;
     use parking_lot::FairMutex;
@@ -379,7 +376,10 @@ mod tests {
 
     #[test]
     fn test_unpin_drop() -> Result<()> {
-        let schema = Schema::new(vec!["id", "age"], vec![Types::U8, Types::U16]);
+        let schema = Schema::new(vec![
+            Field::new("id", Types::U8, false),
+            Field::new("age", Types::U16, false),
+        ]);
 
         let mut table = test_table(2, &schema)?;
 
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let schema = Schema::new(vec!["a"], vec![Types::U128]);
+        let schema = Schema::new(vec![Field::new("a", Types::U128, false)]);
         let mut table = test_table(4, &schema)?;
 
         let first_id = table.get_first_page_id();
@@ -451,10 +451,11 @@ mod tests {
     fn test_insert_string() -> Result<()> {
         let s1 = "Hello, World!";
         let s2 = "Hello, Again";
-        let schema = Schema::new(
-            vec!["a", "str", "b"],
-            vec![Types::U8, Types::Str, Types::U8],
-        );
+        let schema = Schema::new(vec![
+            Field::new("a", Types::U8, false),
+            Field::new("str", Types::Str, false),
+            Field::new("b", Types::U8, false),
+        ]);
 
         let mut table = test_table(4, &schema)?;
 
@@ -497,10 +498,11 @@ mod tests {
     fn test_multi_string() -> Result<()> {
         let s1 = "Hello, World!";
         let s2 = "Hello, Again";
-        let schema = Schema::new(
-            vec!["s1", "a", "s2"],
-            vec![Types::Str, Types::U8, Types::Str],
-        );
+        let schema = Schema::new(vec![
+            Field::new("s1", Types::Str, false),
+            Field::new("a", Types::U8, false),
+            Field::new("s2", Types::Str, false),
+        ]);
 
         let mut table = test_table(4, &schema)?;
 
@@ -538,10 +540,11 @@ mod tests {
 
     #[test]
     fn test_delete() -> Result<()> {
-        let schema = Schema::new(
-            vec!["a", "b", "c"],
-            vec![Types::U128, Types::F64, Types::I8],
-        );
+        let schema = Schema::new(vec![
+            Field::new("a", Types::U128, false),
+            Field::new("b", Types::F64, false),
+            Field::new("c", Types::I8, false),
+        ]);
 
         let mut table = test_table(4, &schema)?;
 
@@ -579,10 +582,11 @@ mod tests {
 
     #[test]
     fn test_nulls() -> Result<()> {
-        let schema = Schema::new(
-            vec!["a", "b", "c"],
-            vec![Types::U128, Types::Str, Types::I8],
-        );
+        let schema = Schema::new(vec![
+            Field::new("a", Types::U128, false),
+            Field::new("b", Types::Str, false),
+            Field::new("c", Types::I8, false),
+        ]);
 
         let mut table = test_table(4, &schema)?;
 

@@ -1,5 +1,5 @@
 use parking_lot::lock_api::{RawRwLock, RawRwLockUpgrade};
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockReadGuard};
 
 #[derive(Debug)]
 pub struct Latch {
@@ -16,10 +16,6 @@ impl Latch {
     #[cfg(test)]
     pub fn rlock(&self) {
         unsafe { self.lock.raw() }.lock_shared();
-    }
-
-    pub fn wlock(&self) {
-        unsafe { self.lock.raw() }.lock_exclusive();
     }
 
     pub fn try_wlock(&self) -> bool {

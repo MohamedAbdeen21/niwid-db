@@ -334,7 +334,7 @@ impl TablePageSlot {
 #[cfg(test)]
 mod tests {
     use crate::{
-        tuple::schema::Schema,
+        tuple::schema::{Field, Schema},
         types::{Types, U16},
     };
 
@@ -373,7 +373,7 @@ mod tests {
 
         let tuple = Tuple::new(
             vec![U16(300).into()],
-            &Schema::new(vec!["a"], vec![Types::U16]),
+            &Schema::new(vec![Field::new("a", Types::U16, false)]),
         );
 
         table_page.insert_tuple(&tuple)?;

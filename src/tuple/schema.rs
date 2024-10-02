@@ -2,21 +2,41 @@ use crate::types::Types;
 use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Field {
+    pub name: String,
+    pub ty: Types,
+    pub nullable: bool,
+}
+
+impl Default for Field {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            ty: Types::U8,
+            nullable: false,
+        }
+    }
+}
+
+impl Field {
+    pub fn new(name: &str, ty: Types, nullable: bool) -> Self {
+        Self {
+            name: name.to_string(),
+            ty,
+            nullable,
+        }
+    }
+}
+
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Schema {
-    pub fields: Vec<String>,
-    pub types: Vec<Types>,
+    pub fields: Vec<Field>,
 }
 
 impl Schema {
-    pub fn new(fields: Vec<&str>, types: Vec<Types>) -> Self {
-        if fields.len() != types.len() {
-            panic!("fields and types must be the same length");
-        }
-        Self {
-            fields: fields.iter().map(|s| s.to_string()).collect(),
-            types,
-        }
+    pub fn new(fields: Vec<Field>) -> Self {
+        Self { fields }
     }
 }
 
