@@ -360,7 +360,7 @@ impl Executor {
                 selection,
                 ..
             } => self.handle_update(table, assignments, from, selection),
-            Statement::CreateTable(_t) => todo!(),
+            Statement::CreateTable(CreateTable { name, .. }) => todo!(),
             _ => unimplemented!(),
         }
     }

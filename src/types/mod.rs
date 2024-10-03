@@ -38,6 +38,47 @@ impl Types {
             Types::Str => std::mem::size_of::<TupleId>(),
         }
     }
+
+    pub fn to_sql(&self) -> String {
+        match self {
+            Types::U8 => "TINYINT UNSIGNED".to_string(),
+            Types::U16 => "SMALLINT UNSIGNED".to_string(),
+            Types::U32 => "INT UNSIGNED".to_string(),
+            Types::U64 => "BIGINT UNSIGNED".to_string(),
+            Types::U128 => "BIGINT UNSIGNED".to_string(),
+            Types::I8 => "TINYINT".to_string(),
+            Types::I16 => "SMALLINT".to_string(),
+            Types::I32 => "INT".to_string(),
+            Types::I64 => "BIGINT".to_string(),
+            Types::I128 => "BIGINT".to_string(),
+            Types::F32 => "FLOAT".to_string(),
+            Types::F64 => "DOUBLE".to_string(),
+            Types::Bool => "BOOLEAN".to_string(),
+            Types::Char => "CHAR".to_string(),
+            Types::Str => "VARCHAR".to_string(),
+        }
+    }
+
+    pub fn from_sql(s: &str) -> Self {
+        match s {
+            "TINYINT UNSIGNED" => Types::U8,
+            "SMALLINT UNSIGNED" => Types::U16,
+            "INT UNSIGNED" => Types::U32,
+            "BIGINT UNSIGNED" => Types::U64,
+            "BIGINT UNSIGNED" => Types::U128,
+            "TINYINT" => Types::I8,
+            "SMALLINT" => Types::I16,
+            "INT" => Types::I32,
+            "BIGINT" => Types::I64,
+            "BIGINT" => Types::I128,
+            "FLOAT" => Types::F32,
+            "DOUBLE" => Types::F64,
+            "BOOLEAN" => Types::Bool,
+            "CHAR" => Types::Char,
+            "VARCHAR" => Types::Str,
+            _ => panic!("Unsupported type: {}", s),
+        }
+    }
 }
 
 pub trait AsBytes: Debug + 'static + Display {
