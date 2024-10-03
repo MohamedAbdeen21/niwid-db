@@ -304,8 +304,7 @@ impl Table {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn update(&mut self, old_tuple: Tuple, new_tuple: Tuple) -> Result<TupleId> {
+    pub fn update(&mut self, tuple_id: Option<TupleId>, new_tuple: Tuple) -> Result<TupleId> {
         // updates should run inside txns, if a txn is
         // already live use it else create a scoped txn here
         let self_txn = self.active_txn.is_none();
@@ -314,16 +313,8 @@ impl Table {
             self.new_txn()?;
         }
 
-        let mut tuple_id = None;
-        self.scan(|(id, (_, tuple))| {
-            if *tuple == old_tuple {
-                tuple_id = Some(*id)
-            }
-            Ok(())
-        })?;
-
         match tuple_id {
-            None => return Err(anyhow!("Tuple not found")),
+            None => todo!(),
             Some(id) => self.delete(id)?,
         }
 

@@ -112,6 +112,32 @@ impl Tuple {
     pub fn get_data(&self) -> &[u8] {
         &self.data
     }
+
+    #[allow(unused)]
+    pub fn set_field(
+        &mut self,
+        field: u8,
+        value: Option<Box<dyn AsBytes>>,
+        schema: &Schema,
+    ) -> Result<()> {
+        if value.is_none() {
+            self._null_bitmap |= 1 << field;
+        } else {
+            let offset = schema
+                .fields
+                .iter()
+                .take(field as usize)
+                .fold(0, |acc, f| acc + f.ty.size());
+
+            let size = schema.fields[field as usize].ty.size();
+
+            self._null_bitmap &= !(1 << field);
+
+            self.data[offset..offset + size].copy_from_slice(&value.unwrap().to_bytes());
+        }
+
+        Ok(())
+    }
 }
 
 impl Serialize for Tuple {

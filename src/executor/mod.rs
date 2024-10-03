@@ -6,7 +6,7 @@ use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{self, AsBytes, Null, TypeFactory, Types};
+use crate::types::{self, AsBytes, Null, TypeFactory, Types, U128};
 use anyhow::{anyhow, Result};
 use sqlparser::ast::*;
 use sqlparser::dialect::GenericDialect;
@@ -136,6 +136,133 @@ impl Executor {
         ))
     }
 
+    fn handle_update(
+        &mut self,
+        table: TableWithJoins,
+        assignments: Vec<Assignment>,
+        _from: Option<TableWithJoins>,
+        filter: Option<Expr>,
+    ) -> Result<ResultSet> {
+        let table_name = match table.relation {
+            TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
+            _ => todo!(),
+        };
+
+        let table = self.catalog.get_table(&table_name).unwrap();
+        let schema = table.get_schema();
+
+        let target_tuples = match filter {
+            None => todo!(),
+            Some(filter) => match filter {
+                Expr::BinaryOp { left, op, right } => match op {
+                    BinaryOperator::Eq => {
+                        let col = if let Expr::Identifier(ident) = *left {
+                            ident.value.clone()
+                        } else {
+                            todo!()
+                        };
+
+                        let value = match *right {
+                            Expr::Value(Value::Number(v, _)) => Some(v),
+                            Expr::Value(Value::Null) => None,
+                            Expr::Value(Value::SingleQuotedString(v)) => Some(v),
+                            _ => todo!(),
+                        };
+
+                        let mut tuples = vec![];
+                        table.scan(|(id, (_, tuple))| {
+                            let col_index =
+                                schema.fields.iter().position(|f| f.name == col).unwrap();
+
+                            let ty = schema.fields[col_index].ty.clone();
+
+                            // TODO: handle wrong type
+                            match &value {
+                                None if tuple.get_values(&schema)?[col_index].is_null() => {
+                                    tuples.push((id.clone(), tuple.clone()));
+                                }
+                                Some(v) if ty == Types::Str => {
+                                    let d = tuple
+                                        .get_value_at::<U128>(col_index as u8, &schema)?
+                                        .unwrap();
+                                    let string = table.fetch_string(&d.to_bytes()).0.clone();
+                                    if string == *v {
+                                        tuples.push((id.clone(), tuple.clone()));
+                                    }
+                                }
+                                Some(v)
+                                    if tuple.get_values(&schema)?[col_index].to_bytes()
+                                        == TypeFactory::from_string(&ty, &v).to_bytes() =>
+                                {
+                                    tuples.push((id.clone(), tuple.clone()));
+                                }
+                                _ => (),
+                            }
+
+                            Ok(())
+                        })?;
+
+                        tuples
+                    }
+                    _ => todo!(),
+                },
+                _ => todo!(),
+            },
+        };
+
+        let assign = assignments.iter().map(|assignment| match assignment {
+            Assignment { target, value } => {
+                let col = match target {
+                    AssignmentTarget::ColumnName(col) => col.0.first().unwrap().value.as_str(),
+                    _ => todo!(),
+                };
+
+                let field = schema.fields.iter().position(|f| f.name == col).unwrap();
+
+                let ty = schema.fields[field].ty.clone();
+
+                let v = match value {
+                    Expr::Value(Value::Number(v, _)) => TypeFactory::from_string(&ty, &v.clone()),
+                    Expr::Value(Value::SingleQuotedString(v)) => TypeFactory::from_string(&ty, v),
+                    _ => todo!(),
+                };
+
+                (field, v)
+            }
+        });
+
+        let mut new_tuples = vec![];
+
+        for ((id, tuple), (col_id, value)) in target_tuples.iter().zip(assign) {
+            let mut tuple_values = vec![];
+            for (i, field) in tuple.get_values(&schema).unwrap().iter().enumerate() {
+                let x = if i != col_id {
+                    if matches!(schema.fields[i].ty, Types::Str) {
+                        let d = tuple
+                            .get_value_at::<U128>(i as u8, &schema)
+                            .unwrap()
+                            .unwrap();
+                        let string = table.fetch_string(&d.to_bytes()).0.clone();
+                        TypeFactory::from_string(&Types::Str, &string)
+                    } else {
+                        TypeFactory::from_bytes(&schema.fields[i].ty, &field.to_bytes())
+                    }
+                } else {
+                    TypeFactory::from_bytes(&schema.fields[i].ty, &value.to_bytes())
+                };
+                tuple_values.push(x);
+            }
+
+            new_tuples.push((id, Tuple::new(tuple_values, &schema)))
+        }
+
+        new_tuples.into_iter().for_each(|(id, new_tuple)| {
+            table.update(Some(*id), new_tuple).unwrap();
+        });
+
+        Ok(ResultSet::new(vec![], vec![], vec![]))
+    }
+
     fn handle_select(&mut self, body: SetExpr, _limit: Option<Expr>) -> Result<ResultSet> {
         let table_name = match body {
             SetExpr::Select(ref select) => match &select.from.first().unwrap().relation {
@@ -223,6 +350,13 @@ impl Executor {
                 let Query { body, limit, .. } = *query;
                 self.handle_select(*body, limit)
             }
+            Statement::Update {
+                table,
+                assignments,
+                from,
+                selection,
+                ..
+            } => self.handle_update(table, assignments, from, selection),
             Statement::CreateTable(_t) => todo!(),
             _ => unimplemented!(),
         }

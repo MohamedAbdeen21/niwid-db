@@ -21,13 +21,18 @@ fn main() -> Result<()> {
     // TODO: Use fields for handling nullability
     let schema = Schema::new(vec![
         Field::new("id", Types::U8, true),
-        Field::new("age", Types::Str, false),
+        Field::new("msg", Types::Str, false),
     ]);
 
     let _ = ctx.add_table("users", &schema, true)?;
 
-    ctx.execute_sql("INSERT INTO users VALUES (2, 'Hello')")?;
-    ctx.execute_sql("INSERT INTO users VALUES (null, 'World!')")?;
+    ctx.execute_sql("INSERT INTO users VALUES (1, 'foo')")?;
+    ctx.execute_sql("INSERT INTO users VALUES (2, 'bar')")?;
+    ctx.execute_sql("INSERT INTO users VALUES (3, 'baz')")?;
+
+    ctx.execute_sql("UPDATE users SET msg='baz2' WHERE id=3")?;
+    ctx.execute_sql("UPDATE users SET id=4 WHERE msg='foo'")?;
+
     ctx.execute_sql("SELECT *, id FROM users")?.show();
 
     ctx.commit_txn()?;
