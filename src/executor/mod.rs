@@ -185,7 +185,7 @@ impl Executor {
                                     if let Some(d) =
                                         tuple.get_value_at::<StrAddr>(col_index as u8, &schema)?
                                     {
-                                        let string = table.fetch_string(d).0.clone();
+                                        let string = table.fetch_string(&d).0.clone();
                                         if string == *v {
                                             tuples.push((*id, tuple.clone()));
                                         }
@@ -242,7 +242,7 @@ impl Executor {
                             if let Some(s) =
                                 tuple.get_value_at::<StrAddr>(i as u8, &schema).unwrap()
                             {
-                                let string = table.fetch_string(s).0.clone();
+                                let string = table.fetch_string(&s).0.clone();
                                 TypeFactory::from_string(&Types::Str, &string)
                             } else {
                                 Box::new(Null())
@@ -311,10 +311,7 @@ impl Executor {
                 .try_for_each(|field| -> Result<()> {
                     let v = match &types[field] {
                         _ if values[field].is_null() => Box::new(Null()) as Box<dyn AsBytes>,
-                        Types::Str => {
-                            let d = StrAddr::from_bytes(&values[field].to_bytes());
-                            Box::new(table.fetch_string(d))
-                        }
+                        Types::Str => Box::new(table.fetch_string(&*values[field])),
                         ty => {
                             // a small trick to clone the underlying value
                             // dyn traits can't extend clone or copy

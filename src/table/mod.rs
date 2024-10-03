@@ -5,7 +5,7 @@ use crate::pages::PageId;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{AsBytes, Str, StrAddr, Types, U16};
+use crate::types::{AsBytes, Str, Types, U16};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
@@ -206,7 +206,7 @@ impl Table {
 
     /// fetch the string from the tuple, takes TupleId bytes
     /// (page_id, slot_id)
-    pub fn fetch_string(&self, str_pointer: StrAddr) -> Str {
+    pub fn fetch_string(&self, str_pointer: &dyn AsBytes) -> Str {
         let (page, slot) = TupleId::from_bytes(&str_pointer.to_bytes());
 
         if let Some(id) = self.active_txn {
@@ -464,9 +464,8 @@ mod tests {
         let mut counter = 0;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
-            let tuple = &tuple;
             let tuple_bytes = tuple.get_value_of::<StrAddr>("str", &schema)?.unwrap();
-            let string = table.fetch_string(tuple_bytes);
+            let string = table.fetch_string(&tuple_bytes);
             assert_eq!(
                 string,
                 if counter == 0 {
@@ -507,17 +506,15 @@ mod tests {
         table.insert(tuple)?;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
-            let tuple = &tuple;
-            let tuple_bytes = tuple.get_value_at::<StrAddr>(0, &schema)?.unwrap();
-            let read_s1 = table.fetch_string(tuple_bytes);
+            let values = tuple.get_values(&schema)?;
+            let read_s1 = table.fetch_string(&*values[0]);
 
-            let a = tuple.get_value_at::<U8>(1, &schema)?.unwrap();
+            let a = U8::from_bytes(&values[1].to_bytes()).0;
 
-            let tuple_bytes = tuple.get_value_at::<StrAddr>(2, &schema)?.unwrap();
-            let read_s2 = table.fetch_string(tuple_bytes);
+            let read_s2 = table.fetch_string(&*values[2]);
 
             assert_eq!(read_s1.0, s1);
-            assert_eq!(a.0, 100);
+            assert_eq!(a, 100);
             assert_eq!(read_s2.0, s2);
 
             Ok(())

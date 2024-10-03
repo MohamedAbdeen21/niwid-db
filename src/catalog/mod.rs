@@ -34,16 +34,11 @@ impl Catalog {
 
         let mut tables = vec![];
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
-            let name_bytes = tuple
-                .get_value_of::<StrAddr>("table_name", &schema)?
-                .unwrap();
-            let name = table.fetch_string(name_bytes);
-            let first_page_id =
-                tuple.get_value_of::<I64>("first_page", &schema)?.unwrap().0 as PageId;
-            let last_page_id =
-                tuple.get_value_of::<I64>("last_page", &schema)?.unwrap().0 as PageId;
-            let schema_bytes = tuple.get_value_of::<StrAddr>("schema", &schema)?.unwrap();
-            let schema = table.fetch_string(schema_bytes);
+            let values = tuple.get_values(&schema)?;
+            let name = table.fetch_string(&*values[0]);
+            let first_page_id = I64::from_bytes(&values[1].to_bytes()).0;
+            let last_page_id = I64::from_bytes(&values[2].to_bytes()).0;
+            let schema = table.fetch_string(&*values[3]);
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
             tables.push((
@@ -107,7 +102,7 @@ impl Catalog {
                 let name_bytes = tuple
                     .get_value_of::<StrAddr>("table_name", &self.schema)?
                     .unwrap();
-                let name = self.table.fetch_string(name_bytes).0;
+                let name = self.table.fetch_string(&name_bytes).0;
 
                 if name == table_name {
                     tuple_id = Some(*id);
