@@ -416,6 +416,8 @@ impl AsBytes for Char {
     }
 }
 
+pub type StrAddr = U128;
+
 impl Primitive for Str {
     fn add(self, _other: Self) -> Self {
         unimplemented!()
@@ -537,66 +539,40 @@ impl_into_box!(Str);
 impl_into_box!(Char);
 impl_into_box!(Null);
 
+macro_rules! impl_fn {
+    ($var:ident, $method:ident $(, $arg:expr)?) => {
+        match $var {
+            Types::Str => Str::$method($($arg)?).into(),
+            Types::I64 => I64::$method($($arg)?).into(),
+            Types::I128 => I128::$method($($arg)?).into(),
+            Types::U64 => U64::$method($($arg)?).into(),
+            Types::U128 => U128::$method($($arg)?).into(),
+            Types::F64 => F64::$method($($arg)?).into(),
+            Types::F32 => F32::$method($($arg)?).into(),
+            Types::Bool => Bool::$method($($arg)?).into(),
+            Types::I8 => I8::$method($($arg)?).into(),
+            Types::I16 => I16::$method($($arg)?).into(),
+            Types::I32 => I32::$method($($arg)?).into(),
+            Types::U8 => U8::$method($($arg)?).into(),
+            Types::U16 => U16::$method($($arg)?).into(),
+            Types::U32 => U32::$method($($arg)?).into(),
+            Types::Char => Char::$method($($arg)?).into(),
+        }
+    };
+}
+
 pub struct TypeFactory {}
 
 impl TypeFactory {
     pub fn default(t: &Types) -> Box<dyn AsBytes> {
-        match t {
-            Types::Str => Str::default().into(),
-            Types::I64 => I64::default().into(),
-            Types::I128 => I128::default().into(),
-            Types::U64 => U64::default().into(),
-            Types::U128 => U128::default().into(),
-            Types::F64 => F64::default().into(),
-            Types::F32 => F32::default().into(),
-            Types::Bool => Bool::default().into(),
-            Types::I8 => I8::default().into(),
-            Types::I16 => I16::default().into(),
-            Types::I32 => I32::default().into(),
-            Types::U8 => U8::default().into(),
-            Types::U16 => U16::default().into(),
-            Types::U32 => U32::default().into(),
-            Types::Char => Char::default().into(),
-        }
+        impl_fn!(t, default)
     }
 
     pub fn from_bytes(t: &Types, bytes: &[u8]) -> Box<dyn AsBytes> {
-        match t {
-            Types::Str => Str::from_bytes(bytes).into(),
-            Types::I64 => I64::from_bytes(bytes).into(),
-            Types::I128 => I128::from_bytes(bytes).into(),
-            Types::U64 => U64::from_bytes(bytes).into(),
-            Types::U128 => U128::from_bytes(bytes).into(),
-            Types::F64 => F64::from_bytes(bytes).into(),
-            Types::F32 => F32::from_bytes(bytes).into(),
-            Types::Bool => Bool::from_bytes(bytes).into(),
-            Types::I8 => I8::from_bytes(bytes).into(),
-            Types::I16 => I16::from_bytes(bytes).into(),
-            Types::I32 => I32::from_bytes(bytes).into(),
-            Types::U8 => U8::from_bytes(bytes).into(),
-            Types::U16 => U16::from_bytes(bytes).into(),
-            Types::U32 => U32::from_bytes(bytes).into(),
-            Types::Char => Char::from_bytes(bytes).into(),
-        }
+        impl_fn!(t, from_bytes, bytes)
     }
 
     pub fn from_string(t: &Types, s: &str) -> Box<dyn AsBytes> {
-        match t {
-            Types::Str => Str::from_string(s).into(),
-            Types::I64 => I64::from_string(s).into(),
-            Types::I128 => I128::from_string(s).into(),
-            Types::U64 => U64::from_string(s).into(),
-            Types::U128 => U128::from_string(s).into(),
-            Types::F64 => F64::from_string(s).into(),
-            Types::F32 => F32::from_string(s).into(),
-            Types::Bool => Bool::from_string(s).into(),
-            Types::I8 => I8::from_string(s).into(),
-            Types::I16 => I16::from_string(s).into(),
-            Types::I32 => I32::from_string(s).into(),
-            Types::U8 => U8::from_string(s).into(),
-            Types::U16 => U16::from_string(s).into(),
-            Types::U32 => U32::from_string(s).into(),
-            Types::Char => Char::from_string(s).into(),
-        }
+        impl_fn!(t, from_string, s)
     }
 }

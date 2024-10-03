@@ -29,9 +29,11 @@ fn main() -> Result<()> {
     ctx.execute_sql("INSERT INTO users VALUES (1, 'foo')")?;
     ctx.execute_sql("INSERT INTO users VALUES (2, 'bar')")?;
     ctx.execute_sql("INSERT INTO users VALUES (3, 'baz')")?;
+    ctx.execute_sql("INSERT INTO users VALUES (4, null)")?;
 
     ctx.execute_sql("UPDATE users SET msg='baz2' WHERE id=3")?;
     ctx.execute_sql("UPDATE users SET id=4 WHERE msg='foo'")?;
+    ctx.execute_sql("UPDATE users SET id=5 WHERE msg=null")?;
 
     ctx.execute_sql("SELECT *, id FROM users")?.show();
 

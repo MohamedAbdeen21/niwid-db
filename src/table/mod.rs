@@ -5,7 +5,7 @@ use crate::pages::PageId;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{AsBytes, Str, Types, U16};
+use crate::types::{AsBytes, Str, StrAddr, Types, U16};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
@@ -172,6 +172,15 @@ impl Table {
         Ok(new_tuple)
     }
 
+    pub fn try_start_txn(&mut self, id: TxnId) -> bool {
+        if self.active_txn.is_some() {
+            false
+        } else {
+            self.start_txn(id).unwrap();
+            true
+        }
+    }
+
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
         if self.active_txn.is_some() {
             Err(anyhow!("Another transaction is active"))
@@ -179,12 +188,6 @@ impl Table {
             self.active_txn = Some(txn_id);
             Ok(())
         }
-    }
-
-    fn new_txn(&mut self) -> Result<TxnId> {
-        let id = self.txn_manager.lock().start()?;
-        self.active_txn = Some(id);
-        Ok(id)
     }
 
     pub fn commit_txn(&mut self) -> Result<()> {
@@ -203,8 +206,8 @@ impl Table {
 
     /// fetch the string from the tuple, takes TupleId bytes
     /// (page_id, slot_id)
-    pub fn fetch_string(&self, tuple_id_data: &[u8]) -> Str {
-        let (page, slot) = TupleId::from_bytes(tuple_id_data);
+    pub fn fetch_string(&self, str_pointer: StrAddr) -> Str {
+        let (page, slot) = TupleId::from_bytes(&str_pointer.to_bytes());
 
         if let Some(id) = self.active_txn {
             self.txn_manager.lock().touch_page(id, page).unwrap();
@@ -307,11 +310,7 @@ impl Table {
     pub fn update(&mut self, tuple_id: Option<TupleId>, new_tuple: Tuple) -> Result<TupleId> {
         // updates should run inside txns, if a txn is
         // already live use it else create a scoped txn here
-        let self_txn = self.active_txn.is_none();
-
-        if self_txn {
-            self.new_txn()?;
-        }
+        let txn = self.try_start_txn(0);
 
         match tuple_id {
             None => todo!(),
@@ -320,7 +319,7 @@ impl Table {
 
         let tuple_id = self.insert(new_tuple)?;
 
-        if self_txn {
+        if txn {
             self.commit_txn()?
         }
 
@@ -466,8 +465,8 @@ mod tests {
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple = &tuple;
-            let tuple_bytes = tuple.get_value_of::<U128>("str", &schema)?.unwrap();
-            let string = table.fetch_string(&tuple_bytes.to_bytes());
+            let tuple_bytes = tuple.get_value_of::<StrAddr>("str", &schema)?.unwrap();
+            let string = table.fetch_string(tuple_bytes);
             assert_eq!(
                 string,
                 if counter == 0 {
@@ -509,13 +508,13 @@ mod tests {
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple = &tuple;
-            let tuple_bytes = tuple.get_value_at::<U128>(0, &schema)?.unwrap();
-            let read_s1 = table.fetch_string(&tuple_bytes.to_bytes());
+            let tuple_bytes = tuple.get_value_at::<StrAddr>(0, &schema)?.unwrap();
+            let read_s1 = table.fetch_string(tuple_bytes);
 
             let a = tuple.get_value_at::<U8>(1, &schema)?.unwrap();
 
-            let tuple_bytes = tuple.get_value_at::<U128>(2, &schema)?.unwrap();
-            let read_s2 = table.fetch_string(&tuple_bytes.to_bytes());
+            let tuple_bytes = tuple.get_value_at::<StrAddr>(2, &schema)?.unwrap();
+            let read_s2 = table.fetch_string(tuple_bytes);
 
             assert_eq!(read_s1.0, s1);
             assert_eq!(a.0, 100);

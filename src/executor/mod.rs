@@ -6,7 +6,7 @@ use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{self, AsBytes, Null, TypeFactory, Types, U128};
+use crate::types::{self, AsBytes, Null, StrAddr, TypeFactory, Types};
 use anyhow::{anyhow, Result};
 use sqlparser::ast::*;
 use sqlparser::dialect::GenericDialect;
@@ -179,22 +179,23 @@ impl Executor {
                             // TODO: handle wrong type
                             match &value {
                                 None if tuple.get_values(&schema)?[col_index].is_null() => {
-                                    tuples.push((id.clone(), tuple.clone()));
+                                    tuples.push((*id, tuple.clone()));
                                 }
                                 Some(v) if ty == Types::Str => {
-                                    let d = tuple
-                                        .get_value_at::<U128>(col_index as u8, &schema)?
-                                        .unwrap();
-                                    let string = table.fetch_string(&d.to_bytes()).0.clone();
-                                    if string == *v {
-                                        tuples.push((id.clone(), tuple.clone()));
+                                    if let Some(d) =
+                                        tuple.get_value_at::<StrAddr>(col_index as u8, &schema)?
+                                    {
+                                        let string = table.fetch_string(d).0.clone();
+                                        if string == *v {
+                                            tuples.push((*id, tuple.clone()));
+                                        }
                                     }
                                 }
                                 Some(v)
                                     if tuple.get_values(&schema)?[col_index].to_bytes()
-                                        == TypeFactory::from_string(&ty, &v).to_bytes() =>
+                                        == TypeFactory::from_string(&ty, v).to_bytes() =>
                                 {
-                                    tuples.push((id.clone(), tuple.clone()));
+                                    tuples.push((*id, tuple.clone()));
                                 }
                                 _ => (),
                             }
@@ -210,25 +211,24 @@ impl Executor {
             },
         };
 
-        let assign = assignments.iter().map(|assignment| match assignment {
-            Assignment { target, value } => {
-                let col = match target {
-                    AssignmentTarget::ColumnName(col) => col.0.first().unwrap().value.as_str(),
-                    _ => todo!(),
-                };
+        let assign = assignments.iter().map(|assignment| {
+            let Assignment { target, value } = assignment;
+            let col = match target {
+                AssignmentTarget::ColumnName(col) => col.0.first().unwrap().value.as_str(),
+                _ => todo!(),
+            };
 
-                let field = schema.fields.iter().position(|f| f.name == col).unwrap();
+            let field = schema.fields.iter().position(|f| f.name == col).unwrap();
 
-                let ty = schema.fields[field].ty.clone();
+            let ty = schema.fields[field].ty.clone();
 
-                let v = match value {
-                    Expr::Value(Value::Number(v, _)) => TypeFactory::from_string(&ty, &v.clone()),
-                    Expr::Value(Value::SingleQuotedString(v)) => TypeFactory::from_string(&ty, v),
-                    _ => todo!(),
-                };
+            let v = match value {
+                Expr::Value(Value::Number(v, _)) => TypeFactory::from_string(&ty, &v.clone()),
+                Expr::Value(Value::SingleQuotedString(v)) => TypeFactory::from_string(&ty, v),
+                _ => todo!(),
+            };
 
-                (field, v)
-            }
+            (field, v)
         });
 
         let mut new_tuples = vec![];
@@ -236,21 +236,24 @@ impl Executor {
         for ((id, tuple), (col_id, value)) in target_tuples.iter().zip(assign) {
             let mut tuple_values = vec![];
             for (i, field) in tuple.get_values(&schema).unwrap().iter().enumerate() {
-                let x = if i != col_id {
-                    if matches!(schema.fields[i].ty, Types::Str) {
-                        let d = tuple
-                            .get_value_at::<U128>(i as u8, &schema)
-                            .unwrap()
-                            .unwrap();
-                        let string = table.fetch_string(&d.to_bytes()).0.clone();
-                        TypeFactory::from_string(&Types::Str, &string)
+                tuple_values.push({
+                    if i != col_id {
+                        if matches!(schema.fields[i].ty, Types::Str) {
+                            if let Some(s) =
+                                tuple.get_value_at::<StrAddr>(i as u8, &schema).unwrap()
+                            {
+                                let string = table.fetch_string(s).0.clone();
+                                TypeFactory::from_string(&Types::Str, &string)
+                            } else {
+                                Box::new(Null())
+                            }
+                        } else {
+                            TypeFactory::from_bytes(&schema.fields[i].ty, &field.to_bytes())
+                        }
                     } else {
-                        TypeFactory::from_bytes(&schema.fields[i].ty, &field.to_bytes())
+                        TypeFactory::from_bytes(&schema.fields[i].ty, &value.to_bytes())
                     }
-                } else {
-                    TypeFactory::from_bytes(&schema.fields[i].ty, &value.to_bytes())
-                };
-                tuple_values.push(x);
+                });
             }
 
             new_tuples.push((id, Tuple::new(tuple_values, &schema)))
@@ -308,7 +311,10 @@ impl Executor {
                 .try_for_each(|field| -> Result<()> {
                     let v = match &types[field] {
                         _ if values[field].is_null() => Box::new(Null()) as Box<dyn AsBytes>,
-                        Types::Str => Box::new(table.fetch_string(&values[field].to_bytes())),
+                        Types::Str => {
+                            let d = StrAddr::from_bytes(&values[field].to_bytes());
+                            Box::new(table.fetch_string(d))
+                        }
                         ty => {
                             // a small trick to clone the underlying value
                             // dyn traits can't extend clone or copy

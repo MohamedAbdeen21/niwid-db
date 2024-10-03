@@ -28,7 +28,8 @@ impl TransactionManager {
 
     pub fn new() -> Self {
         Self {
-            next_txn_id: 0,
+            // 0 is preserved for operations like update
+            next_txn_id: 1,
             bpm: BufferPoolManager::get(),
             locked_pages: HashMap::new(),
         }

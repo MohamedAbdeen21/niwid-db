@@ -2,10 +2,10 @@ use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
-use crate::types::{AsBytes, Str, Types, I128, I64};
+use crate::types::{AsBytes, Str, StrAddr, Types, I64};
 use anyhow::{anyhow, Result};
 
-// preserve page_id 0 for catalog, bpm starts assigning at 1
+// preserve page_id 1 for catalog, bpm starts assigning at 2
 pub const CATALOG_PAGE: PageId = 1;
 pub const CATALOG_NAME: &str = "__CATALOG__";
 
@@ -34,14 +34,16 @@ impl Catalog {
 
         let mut tables = vec![];
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
-            let name_bytes = tuple.get_value_of::<I128>("table_name", &schema)?.unwrap();
-            let name = table.fetch_string(&name_bytes.to_bytes());
+            let name_bytes = tuple
+                .get_value_of::<StrAddr>("table_name", &schema)?
+                .unwrap();
+            let name = table.fetch_string(name_bytes);
             let first_page_id =
                 tuple.get_value_of::<I64>("first_page", &schema)?.unwrap().0 as PageId;
             let last_page_id =
                 tuple.get_value_of::<I64>("last_page", &schema)?.unwrap().0 as PageId;
-            let schema_bytes = &tuple.get_value_of::<I128>("schema", &schema)?.unwrap();
-            let schema = table.fetch_string(&schema_bytes.to_bytes());
+            let schema_bytes = tuple.get_value_of::<StrAddr>("schema", &schema)?.unwrap();
+            let schema = table.fetch_string(schema_bytes);
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
             tables.push((
@@ -103,10 +105,9 @@ impl Catalog {
         self.table
             .scan(|(id, (_, tuple))| {
                 let name_bytes = tuple
-                    .get_value_of::<I128>("table_name", &self.schema)?
-                    .unwrap()
-                    .to_bytes();
-                let name = self.table.fetch_string(&name_bytes).0;
+                    .get_value_of::<StrAddr>("table_name", &self.schema)?
+                    .unwrap();
+                let name = self.table.fetch_string(name_bytes).0;
 
                 if name == table_name {
                     tuple_id = Some(*id);

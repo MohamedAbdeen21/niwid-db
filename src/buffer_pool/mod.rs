@@ -63,7 +63,7 @@ impl BufferPoolManager {
             Err(_) => {
                 let mut page = Page::new();
                 page.set_page_id(BUFFER_POOL_PAGE);
-                page.write_bytes(2, 10, &1_i64.to_ne_bytes());
+                page.write_bytes(2, 10, &2_i64.to_ne_bytes());
                 page
             }
         };
@@ -85,7 +85,7 @@ impl BufferPoolManager {
         self.next_page_id
             .write_bytes(2, 10, &(id + 1).to_ne_bytes());
         self.disk_manager.write_to_file(&self.next_page_id, None)?;
-        Ok(id + 1)
+        Ok(id)
     }
 
     fn find_free_frame(&mut self) -> Result<FrameId> {
