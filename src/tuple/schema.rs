@@ -40,7 +40,8 @@ impl Schema {
         Self { fields }
     }
 
-    fn to_sql(&self) -> String {
+    #[allow(unused)]
+    pub fn to_sql(&self) -> String {
         let mut sql = String::new();
         for (i, field) in self.fields.iter().enumerate() {
             if i != 0 {
@@ -56,7 +57,7 @@ impl Schema {
         sql
     }
 
-    fn from_sql(cols: Vec<ColumnDef>) -> Self {
+    pub fn from_sql(cols: Vec<ColumnDef>) -> Self {
         let fields = cols
             .iter()
             .map(|col| {
@@ -68,7 +69,7 @@ impl Schema {
                 } = col;
 
                 // TODO: actually check the vec of structs for the value
-                let nullable = if options.is_empty() { true } else { false };
+                let nullable = options.is_empty();
 
                 Field::new(
                     &name.value,

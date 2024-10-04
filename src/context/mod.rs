@@ -1,7 +1,7 @@
 mod result_set;
 
 use crate::catalog::Catalog;
-use crate::executor::result_set::ResultSet;
+use crate::context::result_set::ResultSet;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
@@ -12,7 +12,7 @@ use sqlparser::ast::*;
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-pub struct Executor {
+pub struct Context {
     pub catalog: Catalog,
     txn_manager: ArcTransactionManager,
     active_txn: Option<TxnId>,
@@ -21,7 +21,7 @@ pub struct Executor {
 }
 
 #[allow(dead_code)]
-impl Executor {
+impl Context {
     pub fn new() -> Result<Self> {
         Ok(Self {
             catalog: Catalog::new()?,
@@ -340,9 +340,20 @@ impl Executor {
         Ok(ResultSet::new(columns, output_types, results))
     }
 
-    pub fn execute_sql(&mut self, sql: &str) -> Result<ResultSet> {
+    fn handle_create(
+        &mut self,
+        table: String,
+        columns: Vec<ColumnDef>,
+        if_not_exists: bool,
+    ) -> Result<ResultSet> {
+        let schema = Schema::from_sql(columns);
+        self.add_table(&table, &schema, if_not_exists)?;
+        Ok(ResultSet::default())
+    }
+
+    pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
         let statment = Parser::new(&GenericDialect)
-            .try_with_sql(sql)?
+            .try_with_sql(&sql.into())?
             .parse_statement()?;
 
         match statment {
@@ -360,7 +371,16 @@ impl Executor {
                 selection,
                 ..
             } => self.handle_update(table, assignments, from, selection),
-            Statement::CreateTable(CreateTable { name, .. }) => todo!(),
+            Statement::CreateTable(CreateTable {
+                name,
+                columns,
+                if_not_exists,
+                ..
+            }) => self.handle_create(
+                name.0.first().unwrap().value.clone(),
+                columns,
+                if_not_exists,
+            ),
             _ => unimplemented!(),
         }
     }

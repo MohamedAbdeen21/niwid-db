@@ -1,20 +1,10 @@
-mod buffer_pool;
-mod catalog;
-mod disk_manager;
-mod executor;
-mod pages;
-mod table;
-mod tuple;
-mod txn_manager;
-mod types;
-
 use anyhow::Result;
-use executor::Executor;
-use tuple::schema::{Field, Schema};
-use types::Types;
+use idk::context::Context;
+use idk::tuple::schema::{Field, Schema};
+use idk::types::Types;
 
 fn main() -> Result<()> {
-    let mut ctx = Executor::new()?;
+    let mut ctx = Context::new()?;
 
     ctx.start_txn()?;
 
@@ -24,7 +14,12 @@ fn main() -> Result<()> {
         Field::new("msg", Types::Str, false),
     ]);
 
-    let _ = ctx.add_table("users", &schema, true)?;
+    ctx.execute_sql(format!(
+        "CREATE TABLE IF NOT EXISTS users (
+                {}
+        )",
+        schema.to_sql(),
+    ))?;
 
     ctx.execute_sql("INSERT INTO users VALUES (1, 'foo')")?;
     ctx.execute_sql("INSERT INTO users VALUES (2, 'bar')")?;

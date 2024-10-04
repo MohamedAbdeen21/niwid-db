@@ -1,5 +1,6 @@
 use crate::types::{AsBytes, Types};
 
+#[derive(Default)]
 pub struct ResultSet {
     cols: Vec<String>,
     types: Vec<Types>,

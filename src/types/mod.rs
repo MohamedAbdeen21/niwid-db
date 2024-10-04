@@ -44,11 +44,13 @@ impl Types {
             Types::U8 => "TINYINT UNSIGNED".to_string(),
             Types::U16 => "SMALLINT UNSIGNED".to_string(),
             Types::U32 => "INT UNSIGNED".to_string(),
+            // TODO: check this
             Types::U64 => "BIGINT UNSIGNED".to_string(),
             Types::U128 => "BIGINT UNSIGNED".to_string(),
             Types::I8 => "TINYINT".to_string(),
             Types::I16 => "SMALLINT".to_string(),
             Types::I32 => "INT".to_string(),
+            // TODO: check this
             Types::I64 => "BIGINT".to_string(),
             Types::I128 => "BIGINT".to_string(),
             Types::F32 => "FLOAT".to_string(),
@@ -59,6 +61,7 @@ impl Types {
         }
     }
 
+    #[allow(unreachable_patterns)]
     pub fn from_sql(s: &str) -> Self {
         match s {
             "TINYINT UNSIGNED" => Types::U8,
