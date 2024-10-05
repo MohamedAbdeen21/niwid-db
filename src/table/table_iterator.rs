@@ -47,7 +47,7 @@ impl Iterator for TableIterator {
         // current page is done, drop it
         if self.current_slot >= self.num_tuples {
             let page_id = self.page.get_page_id();
-            self.bpm.lock().unpin(&page_id);
+            self.bpm.lock().unpin(&page_id, self.active_txn);
         }
 
         if self.current_slot >= self.num_tuples && self.next_page == INVALID_PAGE {

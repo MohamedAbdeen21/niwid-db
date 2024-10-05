@@ -69,6 +69,10 @@ impl Page {
         }
     }
 
+    pub fn mark_clean(&mut self) {
+        self.data[0] = 0;
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.data[0] == 1
     }
