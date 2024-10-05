@@ -1,5 +1,6 @@
 mod result_set;
 
+use crate::buffer_pool::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::context::result_set::ResultSet;
 use crate::table::Table;
@@ -383,5 +384,16 @@ impl Context {
             ),
             _ => unimplemented!(),
         }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        // static objects don't call drop, need to make
+        // sure that frames persist on disk
+        BufferPoolManager::get()
+            .lock()
+            .flush(None)
+            .expect("Shutdown: Flushing buffer pool failed");
     }
 }

@@ -115,13 +115,17 @@ impl Table {
             .into();
 
         if let Ok(id) = blob_page.insert_raw(&tuple) {
+            self.bpm.lock().unpin(&self.blob_page, self.active_txn);
+            if self.active_txn.is_none() {
+                self.bpm.lock().flush(Some(self.blob_page))?;
+            }
             return Ok(id);
         }
 
         // page is full, add another page
-        let mut new_blob_page: TablePage = self.bpm.lock().new_page()?.writer().into();
+        let new_blob_page: TablePage = self.bpm.lock().new_page()?.writer().into();
 
-        self.bpm.lock().unpin(&self.blob_page);
+        self.bpm.lock().unpin(&self.blob_page, self.active_txn);
 
         self.blob_page = new_blob_page.get_page_id();
 
@@ -129,7 +133,7 @@ impl Table {
             self.txn_manager.lock().touch_page(id, self.blob_page)?;
         }
 
-        new_blob_page.insert_raw(&tuple)
+        self.insert_string(bytes)
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
@@ -172,11 +176,11 @@ impl Table {
         Ok(new_tuple)
     }
 
-    pub fn try_start_txn(&mut self, id: TxnId) -> bool {
+    pub fn try_start_txn(&mut self, txn_id: TxnId) -> bool {
         if self.active_txn.is_some() {
             false
         } else {
-            self.start_txn(id).unwrap();
+            self.start_txn(txn_id).unwrap();
             true
         }
     }
@@ -222,25 +226,8 @@ impl Table {
             .into();
 
         let tuple = blob_page.read_raw(slot);
-        self.bpm.lock().unpin(&page);
+        self.bpm.lock().unpin(&page, self.active_txn);
         Str::from_raw_bytes(tuple.get_data())
-    }
-
-    #[allow(unused)]
-    pub fn fetch_tuple(&self, tuple_id: TupleId) -> Result<Entry> {
-        let (page_id, slot) = tuple_id;
-        let page: TablePage = self
-            .bpm
-            .lock()
-            .fetch_frame(page_id, self.active_txn)?
-            .reader()
-            .into();
-
-        let entry = page.read_tuple(slot);
-
-        self.bpm.lock().unpin(&page_id);
-
-        Ok(entry)
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
@@ -261,27 +248,25 @@ impl Table {
             .writer()
             .into();
 
-        if let Ok(id) = last_page.insert_tuple(&tuple) {
-            self.bpm.lock().unpin(&self.last_page);
+        let id = last_page.insert_tuple(&tuple);
+
+        self.bpm.lock().unpin(&self.last_page, self.active_txn);
+
+        if let Ok(id) = id {
+            if self.active_txn.is_none() {
+                self.bpm.lock().flush(Some(self.last_page))?;
+            }
             return Ok(id);
         }
 
         // page is full, add another page and link to table
-        let mut new_page: TablePage = self.bpm.lock().new_page()?.writer().into();
-
-        let page_id = new_page.get_page_id();
+        let page_id = self.bpm.lock().new_page()?.writer().get_page_id();
 
         last_page.set_next_page_id(page_id);
 
-        self.bpm.lock().unpin(&self.last_page);
-
         self.last_page = page_id;
 
-        if let Some(id) = self.active_txn {
-            self.txn_manager.lock().touch_page(id, self.last_page)?;
-        }
-
-        new_page.insert_tuple(&tuple)
+        self.insert(tuple)
     }
 
     pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>) -> Result<()> {
@@ -302,16 +287,12 @@ impl Table {
 
         let page_id = page.get_page_id();
 
-        self.bpm.lock().unpin(&page_id);
+        self.bpm.lock().unpin(&page_id, self.active_txn);
 
         Ok(())
     }
 
     pub fn update(&mut self, tuple_id: Option<TupleId>, new_tuple: Tuple) -> Result<TupleId> {
-        // updates should run inside txns, if a txn is
-        // already live use it else create a scoped txn here
-        let txn = self.try_start_txn(0);
-
         match tuple_id {
             None => todo!(),
             Some(id) => self.delete(id)?,
@@ -319,8 +300,8 @@ impl Table {
 
         let tuple_id = self.insert(new_tuple)?;
 
-        if txn {
-            self.commit_txn()?
+        if self.active_txn.is_none() {
+            self.bpm.lock().flush(Some(self.last_page))?;
         }
 
         Ok(tuple_id)

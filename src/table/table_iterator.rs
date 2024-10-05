@@ -47,7 +47,7 @@ impl Iterator for TableIterator {
         // current page is done, drop it
         if self.current_slot >= self.num_tuples {
             let page_id = self.page.get_page_id();
-            self.bpm.lock().unpin(&page_id);
+            self.bpm.lock().unpin(&page_id, self.active_txn);
         }
 
         if self.current_slot >= self.num_tuples && self.next_page == INVALID_PAGE {
@@ -160,6 +160,8 @@ mod tests {
 
         assert_ne!(table.first_page, table.last_page);
 
+        table.bpm.lock().unpin(&table.first_page, None);
+
         let mut counter = 0;
         let scanner = |_: (TupleId, Entry)| -> Result<()> {
             counter += 1;
@@ -172,7 +174,7 @@ mod tests {
                 .lock()
                 .get_pin_count(&table.get_first_page_id())
                 .unwrap(),
-            1
+            0
         );
 
         TableIterator::new(&table).try_for_each(scanner)?;

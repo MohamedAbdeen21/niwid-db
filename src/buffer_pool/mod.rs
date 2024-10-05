@@ -4,6 +4,7 @@ mod replacer;
 use crate::catalog::CATALOG_PAGE;
 use crate::disk_manager::{DiskManager, DISK_STORAGE};
 use crate::pages::{Page, PageId, INVALID_PAGE};
+use crate::printdbg;
 use crate::txn_manager::TxnId;
 use anyhow::{anyhow, Result};
 use frame::Frame;
@@ -104,13 +105,13 @@ impl BufferPoolManager {
             *match self
                 .txn_table
                 .get(&id)
-                .unwrap()
+                .unwrap_or(&HashSet::default())
                 .iter()
                 .find(|f| self.frames[**f].get_page_id() == page_id)
             {
                 // default to the original page if the page was not touched/shadowed
-                // None => return self.fetch_frame(page_id, None),
-                None => unreachable!(),
+                None => return self.fetch_frame(page_id, None),
+                // None => unreachable!(),
                 Some(frame) => frame,
             }
         } else if let Some(frame_id) = self.page_table.get(&page_id) {
@@ -129,6 +130,12 @@ impl BufferPoolManager {
         frame.pin();
         self.replacer.record_access(frame_id);
 
+        printdbg!(
+            "Fetched frame {} with pin count {}",
+            page_id,
+            frame.get_pin_count()
+        );
+
         Ok(frame)
     }
 
@@ -144,6 +151,8 @@ impl BufferPoolManager {
 
         let mut page = Page::new();
         page.set_page_id(page_id);
+
+        printdbg!("Created page {} and writing to disk", page_id);
         self.disk_manager.write_to_file(&page, None)?;
 
         frame.set_page(page);
@@ -160,19 +169,38 @@ impl BufferPoolManager {
 
         self.page_table.remove(&page.get_page_id());
 
+        printdbg!(
+            "Page {} chosen for eviction, is dirty: {}",
+            page.get_page_id(),
+            page.is_dirty()
+        );
         if page.is_dirty() {
+            printdbg!("Writing dirty page to disk before eviction");
             self.disk_manager.write_to_file(page, None).unwrap();
+            page.mark_clean();
         }
 
         frame_id
     }
 
-    pub fn unpin(&mut self, page_id: &PageId) {
+    pub fn unpin(&mut self, page_id: &PageId, txn_id: Option<TxnId>) {
+        // TODO: we expect all shadow frames to be dropped when txn ends, right? ...
+        if txn_id.is_some() && self.txn_table.contains_key(&txn_id.unwrap()) {
+            return;
+        }
         let frame_id = *self.page_table.get(page_id).unwrap();
         let frame = &mut self.frames[frame_id];
+        assert!(frame.get_pin_count() > 0);
         frame.unpin();
 
+        printdbg!(
+            "frame {} unpinned, pin count: {}",
+            frame_id,
+            frame.get_pin_count()
+        );
+
         if frame.get_pin_count() == 0 {
+            printdbg!("frame {} marked as evictable", frame_id);
             self.replacer.set_evictable(frame_id, true);
         }
     }
@@ -217,16 +245,12 @@ impl BufferPoolManager {
     pub fn commit_txn(&mut self, txn_id: TxnId) -> Result<()> {
         // commit shadowed pages to txn cache, this is for durability and atomicity
         for frame_id in self.txn_table.get(&txn_id).unwrap() {
-            let page = self.frames[*frame_id].reader();
+            let page = self.frames[*frame_id].writer();
             self.disk_manager.write_to_file(page, Some(txn_id))?;
+            page.mark_clean();
         }
 
         self.disk_manager.commit_txn(txn_id)?;
-
-        // empty txns are generally okay, this is just for debugging
-        if self.txn_table.get(&txn_id).unwrap().is_empty() {
-            Err(anyhow!("Committing empty txn"))?;
-        }
 
         for shadow_frame_id in self.txn_table.remove(&txn_id).unwrap() {
             let shadow_frame = take(&mut self.frames[shadow_frame_id]);
@@ -238,7 +262,7 @@ impl BufferPoolManager {
 
             old_frame.move_page(shadow_frame);
 
-            self.unpin(&shadow_page_id);
+            self.unpin(&shadow_page_id, None);
 
             self.free_frames.push_back(shadow_frame_id);
         }
@@ -249,6 +273,26 @@ impl BufferPoolManager {
     pub fn abort_txn(&mut self, _txn_id: TxnId) -> Result<()> {
         todo!()
     }
+
+    pub fn flush(&mut self, page_id: Option<PageId>) -> Result<()> {
+        // TODO: do we need to check txns?
+        if let Some(id) = page_id {
+            let frame_id = self.page_table.get(&id).unwrap();
+            let page = self.frames[*frame_id].writer();
+            self.disk_manager.write_to_file(page, None)?;
+            return Ok(());
+        }
+
+        self.frames
+            .iter_mut()
+            .filter(|f| f.reader().get_page_id() != INVALID_PAGE && f.reader().is_dirty())
+            .inspect(|f| {
+                printdbg!("frame {} pin count: {}", f.get_page_id(), f.get_pin_count());
+                assert!(f.get_pin_count() == 0)
+            })
+            .map(|f| f.writer())
+            .try_for_each(|p| self.disk_manager.write_to_file(p, None))
+    }
 }
 
 lazy_static! {
@@ -256,17 +300,6 @@ lazy_static! {
         BUFFER_POOL_SIZE,
         DISK_STORAGE
     )));
-}
-
-impl Drop for BufferPoolManager {
-    fn drop(&mut self) {
-        // TODO: do we need to check txns?
-        self.frames
-            .iter_mut()
-            .filter(|f| f.reader().get_page_id() != INVALID_PAGE)
-            .map(|f| f.writer())
-            .for_each(|p| self.disk_manager.write_to_file(p, None).unwrap())
-    }
 }
 
 #[cfg(test)]
@@ -299,7 +332,7 @@ mod tests {
 
         assert!(bpm.new_page().is_err());
 
-        bpm.unpin(&p1);
+        bpm.unpin(&p1, None);
 
         assert!(bpm.new_page().is_ok());
 

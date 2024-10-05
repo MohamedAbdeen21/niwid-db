@@ -28,8 +28,7 @@ impl TransactionManager {
 
     pub fn new() -> Self {
         Self {
-            // 0 is preserved for operations like update
-            next_txn_id: 1,
+            next_txn_id: 0,
             bpm: BufferPoolManager::get(),
             locked_pages: HashMap::new(),
         }
@@ -57,7 +56,7 @@ impl TransactionManager {
     pub fn touch_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<()> {
         let txn_pages = match self.locked_pages.get(&txn_id) {
             Some(pages) => pages,
-            None => return Err(anyhow!("Invalid txn id")),
+            None => return Err(anyhow!("Invalid txn id {}", txn_id)),
         };
 
         if txn_pages.contains(&page_id) {
@@ -84,6 +83,7 @@ impl TransactionManager {
                 .fetch_frame(*page_id, None)?
                 .get_latch()
                 .upgrade_write();
+            self.bpm.lock().unpin(page_id, None);
         }
 
         self.bpm.lock().commit_txn(txn_id)?;
@@ -94,6 +94,7 @@ impl TransactionManager {
                 .fetch_frame(*page_id, None)?
                 .get_latch()
                 .wunlock();
+            self.bpm.lock().unpin(page_id, None);
         }
 
         self.locked_pages.remove(&txn_id);
