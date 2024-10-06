@@ -25,6 +25,7 @@ pub enum Types {
     Char,
     /// string is stored as a [`TupleId`] to a blob page
     Str,
+    StrAddr,
 }
 
 impl Types {
@@ -34,7 +35,7 @@ impl Types {
             Types::U16 | Types::I16 => 2,
             Types::U32 | Types::I32 | Types::F32 => 4,
             Types::U64 | Types::I64 | Types::F64 => 8,
-            Types::U128 | Types::I128 => 16,
+            Types::U128 | Types::I128 | Types::StrAddr => 16,
             Types::Str => std::mem::size_of::<TupleId>(),
         }
     }
@@ -58,6 +59,7 @@ impl Types {
             Types::Bool => "BOOLEAN".to_string(),
             Types::Char => "CHAR".to_string(),
             Types::Str => "VARCHAR".to_string(),
+            Types::StrAddr => unreachable!(),
         }
     }
 
@@ -83,6 +85,143 @@ impl Types {
         }
     }
 }
+macro_rules! impl_value_methods {
+    ($($variant:ident($ty:ident)),+ $(,)?) => {
+        impl Value {
+            $(
+                pub fn $ty(&self) -> $ty {
+                    if let Value::$variant(v) = self {
+                        v.0.clone()
+                    } else {
+                        panic!("forced conversion error: {:?} => {}", self, stringify!($variant))
+                    }
+                }
+            )*
+        }
+    };
+}
+
+impl Value {
+    pub fn str_addr(&self) -> StrAddr {
+        if let Value::Str(v) = self {
+            println!("str_addr str: {:?}", v);
+            U128(ValueFactory::from_bytes(&Types::U128, &v.to_bytes()).u128())
+        } else if let Value::StrAddr(v) = self {
+            println!("str_addr addr: {:?}", v);
+            v.clone()
+        } else {
+            panic!("forced conversion error: {:?} => StrAddr", self)
+        }
+    }
+}
+
+impl Value {
+    pub fn str(&self) -> String {
+        unreachable!("strings are stored as pointers, use str_addr() instead")
+    }
+}
+
+impl_value_methods!(
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    U128(u128),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    I128(i128),
+    F32(f32),
+    F64(f64),
+    Bool(bool),
+    Char(char),
+);
+
+#[derive(Debug, Clone)]
+pub enum Value {
+    U8(U8),
+    U16(U16),
+    U32(U32),
+    U64(U64),
+    U128(U128),
+    I8(I8),
+    I16(I16),
+    I32(I32),
+    I64(I64),
+    I128(I128),
+    F32(F32),
+    F64(F64),
+    Bool(Bool),
+    Char(Char),
+    Str(Str),
+    StrAddr(StrAddr),
+    Null,
+}
+
+impl AsBytes for Value {
+    fn to_bytes(&self) -> Box<[u8]> {
+        match self {
+            Value::U8(v) => v.to_bytes(),
+            Value::U16(v) => v.to_bytes(),
+            Value::U32(v) => v.to_bytes(),
+            Value::U64(v) => v.to_bytes(),
+            Value::U128(v) => v.to_bytes(),
+            Value::I8(v) => v.to_bytes(),
+            Value::I16(v) => v.to_bytes(),
+            Value::I32(v) => v.to_bytes(),
+            Value::I64(v) => v.to_bytes(),
+            Value::I128(v) => v.to_bytes(),
+            Value::F32(v) => v.to_bytes(),
+            Value::F64(v) => v.to_bytes(),
+            Value::Bool(v) => v.to_bytes(),
+            Value::Char(v) => v.to_bytes(),
+            Value::Str(v) => v.to_bytes(),
+            Value::StrAddr(v) => v.to_bytes(),
+            Value::Null => unreachable!("can't convert null to bytes"),
+        }
+    }
+
+    fn from_bytes(_bytes: &[u8]) -> Self
+    where
+        Self: Sized,
+    {
+        unimplemented!("Use ValueFactory instead");
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Null => write!(f, "null"),
+            Value::U8(v) => write!(f, "{:?}", v.0),
+            Value::U16(v) => write!(f, "{:?}", v.0),
+            Value::U32(v) => write!(f, "{:?}", v.0),
+            Value::U64(v) => write!(f, "{:?}", v.0),
+            Value::U128(v) => write!(f, "{:?}", v.0),
+            Value::I8(v) => write!(f, "{:?}", v.0),
+            Value::I16(v) => write!(f, "{:?}", v.0),
+            Value::I32(v) => write!(f, "{:?}", v.0),
+            Value::I64(v) => write!(f, "{:?}", v.0),
+            Value::I128(v) => write!(f, "{:?}", v.0),
+            Value::F32(v) => write!(f, "{:?}", v.0),
+            Value::F64(v) => write!(f, "{:?}", v.0),
+            Value::Bool(v) => write!(f, "{:?}", v.0),
+            Value::Char(v) => write!(f, "{:?}", v.0),
+            Value::Str(v) => write!(f, "{:?}", v.0),
+            Value::StrAddr(v) => write!(f, "{:?}", v.0),
+        }
+    }
+}
+
+impl Value {
+    pub fn is_null(&self) -> bool {
+        match self {
+            Value::Null => true,
+            _ => false,
+        }
+    }
+}
 
 pub trait AsBytes: Debug + 'static + Display {
     fn is_null(&self) -> bool {
@@ -94,12 +233,7 @@ pub trait AsBytes: Debug + 'static + Display {
         Self: Sized;
 }
 
-#[allow(unused)]
 pub trait Primitive {
-    fn add(self, other: Self) -> Self;
-    fn subtract(self, other: Self) -> Self;
-    fn multiply(self, other: Self) -> Self;
-    fn divide(self, other: Self) -> Self;
     fn default() -> Self;
     fn from_string(s: &str) -> Self;
 }
@@ -134,28 +268,8 @@ pub struct Bool(pub bool);
 pub struct Str(pub String);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Char(pub char);
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Null();
-
-macro_rules! impl_simple_ops {
-    ($type:ty) => {
-        fn add(self, other: Self) -> Self {
-            Self(self.0 + other.0)
-        }
-        fn subtract(self, other: Self) -> Self {
-            Self(self.0 - other.0)
-        }
-        fn multiply(self, other: Self) -> Self {
-            Self(self.0 * other.0)
-        }
-        fn divide(self, other: Self) -> Self {
-            Self(self.0 / other.0) // Simple division without checking for division by zero
-        }
-    };
-}
 
 impl Primitive for U8 {
-    impl_simple_ops!(U8);
     fn default() -> Self {
         U8(0)
     }
@@ -174,7 +288,6 @@ impl AsBytes for U8 {
 }
 
 impl Primitive for U16 {
-    impl_simple_ops!(U16);
     fn default() -> Self {
         U16(0)
     }
@@ -193,7 +306,6 @@ impl AsBytes for U16 {
 }
 
 impl Primitive for U32 {
-    impl_simple_ops!(U32);
     fn default() -> Self {
         U32(0)
     }
@@ -213,7 +325,6 @@ impl AsBytes for U32 {
 }
 
 impl Primitive for U64 {
-    impl_simple_ops!(U64);
     fn default() -> Self {
         U64(0)
     }
@@ -232,7 +343,6 @@ impl AsBytes for U64 {
 }
 
 impl Primitive for U128 {
-    impl_simple_ops!(U128);
     fn default() -> Self {
         U128(0)
     }
@@ -252,7 +362,6 @@ impl AsBytes for U128 {
 }
 
 impl Primitive for I8 {
-    impl_simple_ops!(I8);
     fn default() -> Self {
         I8(0)
     }
@@ -272,7 +381,6 @@ impl AsBytes for I8 {
 }
 
 impl Primitive for I16 {
-    impl_simple_ops!(I16);
     fn default() -> Self {
         I16(0)
     }
@@ -292,7 +400,6 @@ impl AsBytes for I16 {
 }
 
 impl Primitive for I32 {
-    impl_simple_ops!(I32);
     fn default() -> Self {
         I32(0)
     }
@@ -312,7 +419,6 @@ impl AsBytes for I32 {
 }
 
 impl Primitive for I64 {
-    impl_simple_ops!(I64);
     fn default() -> Self {
         I64(0)
     }
@@ -332,7 +438,6 @@ impl AsBytes for I64 {
 }
 
 impl Primitive for I128 {
-    impl_simple_ops!(I128);
     fn default() -> Self {
         I128(0)
     }
@@ -352,7 +457,6 @@ impl AsBytes for I128 {
 }
 
 impl Primitive for F32 {
-    impl_simple_ops!(F32);
     fn default() -> Self {
         F32(0.0)
     }
@@ -372,7 +476,6 @@ impl AsBytes for F32 {
 }
 
 impl Primitive for F64 {
-    impl_simple_ops!(F64);
     fn default() -> Self {
         F64(0.0)
     }
@@ -392,18 +495,6 @@ impl AsBytes for F64 {
 }
 
 impl Primitive for Bool {
-    fn add(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn subtract(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn multiply(self, other: Self) -> Self {
-        Bool(self.0 && other.0)
-    }
-    fn divide(self, _other: Self) -> Self {
-        unimplemented!()
-    }
     fn default() -> Self {
         Bool(false)
     }
@@ -426,18 +517,6 @@ impl AsBytes for Bool {
 }
 
 impl Primitive for Char {
-    fn add(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn subtract(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn multiply(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn divide(self, _other: Self) -> Self {
-        unimplemented!()
-    }
     fn default() -> Self {
         Char('\0')
     }
@@ -463,18 +542,6 @@ impl AsBytes for Char {
 pub type StrAddr = U128;
 
 impl Primitive for Str {
-    fn add(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn subtract(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn multiply(self, _other: Self) -> Self {
-        unimplemented!()
-    }
-    fn divide(self, _other: Self) -> Self {
-        unimplemented!()
-    }
     fn default() -> Self {
         Str(String::new())
     }
@@ -513,24 +580,25 @@ impl Str {
     }
 }
 
-impl AsBytes for Null {
-    fn to_bytes(&self) -> Box<[u8]> {
-        panic!("Null cannot be converted to bytes")
-    }
-    fn from_bytes(_bytes: &[u8]) -> Self {
-        panic!("Null cannot be created from bytes")
-    }
-    fn is_null(&self) -> bool {
-        true
-    }
-}
-
-macro_rules! impl_into_box {
-    ($type:ty) => {
-        impl From<$type> for Box<dyn AsBytes> {
-            fn from(value: $type) -> Box<dyn AsBytes> {
-                Box::new(value)
-            }
+macro_rules! impl_fn {
+    ($var:ident, $method:ident $(, $arg:expr)?) => {
+        match $var {
+            Types::Str => Value::Str(Str::$method($($arg)?)),
+            Types::I64 => Value::I64(I64::$method($($arg)?)),
+            Types::I128 => Value::I128(I128::$method($($arg)?)),
+            Types::U64 => Value::U64(U64::$method($($arg)?)),
+            Types::U128 => Value::U128(U128::$method($($arg)?)),
+            Types::F64 => Value::F64(F64::$method($($arg)?)),
+            Types::F32 => Value::F32(F32::$method($($arg)?)),
+            Types::Bool => Value::Bool(Bool::$method($($arg)?)),
+            Types::I8 => Value::I8(I8::$method($($arg)?)),
+            Types::I16 => Value::I16(I16::$method($($arg)?)),
+            Types::I32 => Value::I32(I32::$method($($arg)?)),
+            Types::U8 => Value::U8(U8::$method($($arg)?)),
+            Types::U16 => Value::U16(U16::$method($($arg)?)),
+            Types::U32 => Value::U32(U32::$method($($arg)?)),
+            Types::Char => Value::Char(Char::$method($($arg)?)),
+            Types::StrAddr => Value::StrAddr(StrAddr::$method($($arg)?)),
         }
     };
 }
@@ -560,63 +628,23 @@ impl_display!(F64);
 impl_display!(Bool);
 impl_display!(Str);
 impl_display!(Char);
-impl Display for Null {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "null")
-    }
-}
 
-impl_into_box!(U8);
-impl_into_box!(U16);
-impl_into_box!(U32);
-impl_into_box!(U64);
-impl_into_box!(U128);
-impl_into_box!(I8);
-impl_into_box!(I16);
-impl_into_box!(I32);
-impl_into_box!(I64);
-impl_into_box!(I128);
-impl_into_box!(F32);
-impl_into_box!(F64);
-impl_into_box!(Bool);
-impl_into_box!(Str);
-impl_into_box!(Char);
-impl_into_box!(Null);
+pub struct ValueFactory {}
 
-macro_rules! impl_fn {
-    ($var:ident, $method:ident $(, $arg:expr)?) => {
-        match $var {
-            Types::Str => Str::$method($($arg)?).into(),
-            Types::I64 => I64::$method($($arg)?).into(),
-            Types::I128 => I128::$method($($arg)?).into(),
-            Types::U64 => U64::$method($($arg)?).into(),
-            Types::U128 => U128::$method($($arg)?).into(),
-            Types::F64 => F64::$method($($arg)?).into(),
-            Types::F32 => F32::$method($($arg)?).into(),
-            Types::Bool => Bool::$method($($arg)?).into(),
-            Types::I8 => I8::$method($($arg)?).into(),
-            Types::I16 => I16::$method($($arg)?).into(),
-            Types::I32 => I32::$method($($arg)?).into(),
-            Types::U8 => U8::$method($($arg)?).into(),
-            Types::U16 => U16::$method($($arg)?).into(),
-            Types::U32 => U32::$method($($arg)?).into(),
-            Types::Char => Char::$method($($arg)?).into(),
-        }
-    };
-}
-
-pub struct TypeFactory {}
-
-impl TypeFactory {
-    pub fn default(t: &Types) -> Box<dyn AsBytes> {
+impl ValueFactory {
+    pub fn default(t: &Types) -> Value {
         impl_fn!(t, default)
     }
 
-    pub fn from_bytes(t: &Types, bytes: &[u8]) -> Box<dyn AsBytes> {
+    pub fn from_bytes(t: &Types, bytes: &[u8]) -> Value {
         impl_fn!(t, from_bytes, bytes)
     }
 
-    pub fn from_string(t: &Types, s: &str) -> Box<dyn AsBytes> {
+    pub fn from_string(t: &Types, s: &str) -> Value {
         impl_fn!(t, from_string, s)
+    }
+
+    pub fn null() -> Value {
+        Value::Null
     }
 }

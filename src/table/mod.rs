@@ -1,11 +1,11 @@
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
-use crate::pages::traits::Serialize;
 use crate::pages::PageId;
+use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{AsBytes, Str, Types, U16};
+use crate::types::{AsBytes, Str, StrAddr, Types, ValueFactory};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
@@ -101,7 +101,10 @@ impl Table {
             return Err(anyhow!("Tuple is too long"));
         }
 
-        let tuple = Tuple::new(vec![Str::from_raw_bytes(bytes).into()], &Schema::default());
+        let tuple = Tuple::new(
+            vec![ValueFactory::from_bytes(&Types::Str, bytes)],
+            &Schema::default(),
+        );
 
         if let Some(id) = self.active_txn {
             self.txn_manager.lock().touch_page(id, self.blob_page)?;
@@ -137,18 +140,37 @@ impl Table {
     }
 
     fn insert_strings(&mut self, tuple: Tuple) -> Result<Tuple> {
-        let types: Vec<_> = self.schema.fields.iter().map(|f| f.ty.clone()).collect();
+        let types: Vec<Types> = self.schema.fields.iter().map(|f| f.ty.clone()).collect();
 
         if !types.contains(&Types::Str) {
             return Ok(tuple);
         }
+
+        let fields: Vec<Field> = self
+            .schema
+            .fields
+            .iter()
+            .cloned()
+            .map(|f| match f {
+                Field {
+                    ty: Types::Str,
+                    name,
+                    nullable,
+                } => Field {
+                    ty: Types::StrAddr,
+                    name: name.clone(),
+                    nullable,
+                },
+                e => e,
+            })
+            .collect();
 
         let mut offsets: Vec<_> = types
             .iter()
             .scan(0, |acc, ty| {
                 let size = if *ty == Types::Str {
                     let slice = &tuple.get_data()[*acc..*acc + 2];
-                    U16::from_bytes(slice).0 as usize + 2
+                    ValueFactory::from_bytes(&Types::U16, slice).u16() as usize + 2
                 } else {
                     ty.size()
                 };
@@ -159,19 +181,21 @@ impl Table {
 
         offsets.insert(0, 0);
 
-        let data = types
+        let values = types
             .into_iter()
             .zip(offsets.windows(2).map(|w| (w[0], w[1])))
-            .flat_map(|(ty, (offset, size))| match ty {
+            .map(|(ty, (offset, size))| match ty {
                 Types::Str => {
                     let str_bytes = &tuple.get_data()[offset..size];
-                    self.insert_string(str_bytes).unwrap().to_bytes()
+                    let addr = &self.insert_string(str_bytes).unwrap().to_bytes();
+                    println!("inserted at addr: {:?}", addr);
+                    ValueFactory::from_bytes(&Types::StrAddr, addr)
                 }
-                _ => tuple.get_data()[offset..size].to_vec(),
+                _ => ValueFactory::from_bytes(&ty, &tuple.get_data()[offset..size]),
             })
             .collect::<Vec<_>>();
 
-        let mut new_tuple = Tuple::from_bytes(&data);
+        let mut new_tuple = Tuple::new(values, &Schema { fields });
         new_tuple._null_bitmap = tuple._null_bitmap;
         Ok(new_tuple)
     }
@@ -210,7 +234,7 @@ impl Table {
 
     /// fetch the string from the tuple, takes TupleId bytes
     /// (page_id, slot_id)
-    pub fn fetch_string(&self, str_pointer: &dyn AsBytes) -> Str {
+    pub fn fetch_string(&self, str_pointer: StrAddr) -> Str {
         let (page, slot) = TupleId::from_bytes(&str_pointer.to_bytes());
 
         if let Some(id) = self.active_txn {
@@ -235,7 +259,9 @@ impl Table {
             return Err(anyhow!("Tuple is too long"));
         }
 
+        println!("inserting tuple: {:?}", tuple);
         let tuple = self.insert_strings(tuple)?;
+        println!("inserted tuple: {:?}", tuple);
 
         if let Some(id) = self.active_txn {
             self.txn_manager.lock().touch_page(id, self.last_page)?;
@@ -356,7 +382,10 @@ mod tests {
 
         let bpm = table.bpm.clone();
 
-        let tuple_data: Vec<Box<dyn AsBytes>> = vec![U8(2).into(), U16(50000).into()];
+        let tuple_data: Vec<Value> = vec![
+            ValueFactory::from_string(&Types::U8, "2"),
+            ValueFactory::from_string(&Types::U16, "50000"),
+        ];
         let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
 
@@ -383,20 +412,29 @@ mod tests {
         let tuples_per_page = 110;
 
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(vec![U128(i).into()], &schema);
+            let tuple = Tuple::new(
+                vec![ValueFactory::from_string(&Types::U128, &i.to_string())],
+                &schema,
+            );
             table.insert(tuple)?;
         }
 
         assert_eq!(table.first_page, table.last_page);
 
-        table.insert(Tuple::new(vec![U128(9999).into()], &schema))?;
+        table.insert(Tuple::new(
+            vec![ValueFactory::from_string(&Types::U128, "99999")],
+            &schema,
+        ))?;
         let second_id = table.get_last_page_id();
 
         assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(vec![U128(i).into()], &schema);
+            let tuple = Tuple::new(
+                vec![ValueFactory::from_string(&Types::U128, &i.to_string())],
+                &schema,
+            );
             table.insert(tuple)?;
         }
 
@@ -431,13 +469,21 @@ mod tests {
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
-            vec![U8(100).into(), Str(s1.to_string()).into(), U8(50).into()],
+            vec![
+                ValueFactory::from_string(&Types::U8, "100"),
+                ValueFactory::from_string(&Types::Str, s1),
+                ValueFactory::from_string(&Types::U8, "50"),
+            ],
             &schema,
         );
         table.insert(tuple)?;
 
         let tuple = Tuple::new(
-            vec![U8(20).into(), Str(s2.to_string()).into(), U8(10).into()],
+            vec![
+                ValueFactory::from_string(&Types::U8, "20"),
+                ValueFactory::from_string(&Types::Str, s2),
+                ValueFactory::from_string(&Types::U8, "10"),
+            ],
             &schema,
         );
         table.insert(tuple)?;
@@ -445,8 +491,9 @@ mod tests {
         let mut counter = 0;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
-            let tuple_bytes = tuple.get_value_of::<StrAddr>("str", &schema)?.unwrap();
-            let string = table.fetch_string(&tuple_bytes);
+            let tuple_bytes = tuple.get_value_of("str", &schema)?.unwrap();
+            println!("tuple: {:?}", tuple_bytes);
+            let string = table.fetch_string(tuple_bytes.str_addr());
             assert_eq!(
                 string,
                 if counter == 0 {
@@ -478,9 +525,9 @@ mod tests {
 
         let tuple = Tuple::new(
             vec![
-                Str(s1.to_string()).into(),
-                U8(100).into(),
-                Str(s2.to_string()).into(),
+                ValueFactory::from_string(&Types::Str, s1),
+                ValueFactory::from_string(&Types::U8, "100"),
+                ValueFactory::from_string(&Types::Str, s2),
             ],
             &schema,
         );
@@ -488,11 +535,11 @@ mod tests {
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
-            let read_s1 = table.fetch_string(&*values[0]);
+            let read_s1 = table.fetch_string(values[0].str_addr());
 
             let a = U8::from_bytes(&values[1].to_bytes()).0;
 
-            let read_s2 = table.fetch_string(&*values[2]);
+            let read_s2 = table.fetch_string(values[2].str_addr());
 
             assert_eq!(read_s1.0, s1);
             assert_eq!(a, 100);
@@ -517,22 +564,30 @@ mod tests {
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
-            vec![U128(10).into(), F64(10.0).into(), I8(10).into()],
+            vec![
+                ValueFactory::from_string(&Types::U128, "10"),
+                ValueFactory::from_string(&Types::F64, "10.0"),
+                ValueFactory::from_string(&Types::I8, "10"),
+            ],
             &schema,
         );
         let t1_id = table.insert(tuple)?;
 
-        let tuple_data = vec![U128(20).into(), F64(20.0).into(), I8(20).into()];
-        let tuple = Tuple::new(tuple_data, &schema);
+        let tuple_data = vec![
+            ValueFactory::from_string(&Types::U128, "20"),
+            ValueFactory::from_string(&Types::F64, "20.0"),
+            ValueFactory::from_string(&Types::I8, "20"),
+        ];
+        let tuple = Tuple::new(tuple_data.clone(), &schema);
         let t2_id = table.insert(tuple)?;
 
         table.delete(t1_id)?;
 
         let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
-            assert_eq!(values[0].to_bytes(), U128(20).to_bytes());
-            assert_eq!(values[1].to_bytes(), F64(20.0).to_bytes());
-            assert_eq!(values[2].to_bytes(), I8(20).to_bytes());
+            assert_eq!(values[0].to_bytes(), tuple_data[0].to_bytes());
+            assert_eq!(values[1].to_bytes(), tuple_data[1].to_bytes());
+            assert_eq!(values[2].to_bytes(), tuple_data[2].to_bytes());
 
             Ok(())
         };
@@ -558,7 +613,7 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(vec![Null().into(), Null().into(), Null().into()], &schema);
+        let tuple = Tuple::new(vec![Value::Null, Value::Null, Value::Null], &schema);
         table.insert(tuple)?;
 
         let validator = |(_, (meta, tuple)): &(TupleId, Entry)| {

@@ -7,9 +7,12 @@ use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{self, AsBytes, Null, StrAddr, TypeFactory, Types};
+use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{anyhow, Result};
-use sqlparser::ast::*;
+use sqlparser::ast::{
+    Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable, Expr, Insert, Query,
+    SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value as SqlValue, Values,
+};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
@@ -87,8 +90,8 @@ impl Context {
             .iter()
             .zip(schema.fields.iter().map(|f| f.ty.clone()))
             .map(|(v, ty)| match v {
-                None => types::Null().into(),
-                Some(v) => TypeFactory::from_string(&ty, v),
+                None => Value::Null,
+                Some(v) => ValueFactory::from_string(&ty, v),
             })
             .collect();
 
@@ -118,9 +121,9 @@ impl Context {
                         .iter()
                         .flatten()
                         .map(|e| match e {
-                            Expr::Value(Value::Number(v, _)) => Some(v.clone()),
-                            Expr::Value(Value::SingleQuotedString(v)) => Some(v.clone()),
-                            Expr::Value(Value::Null) => None,
+                            Expr::Value(SqlValue::Number(v, _)) => Some(v.clone()),
+                            Expr::Value(SqlValue::SingleQuotedString(v)) => Some(v.clone()),
+                            Expr::Value(SqlValue::Null) => None,
                             _ => todo!(),
                         })
                         .collect(),
@@ -164,9 +167,9 @@ impl Context {
                         };
 
                         let value = match *right {
-                            Expr::Value(Value::Number(v, _)) => Some(v),
-                            Expr::Value(Value::Null) => None,
-                            Expr::Value(Value::SingleQuotedString(v)) => Some(v),
+                            Expr::Value(SqlValue::Number(v, _)) => Some(v),
+                            Expr::Value(SqlValue::Null) => None,
+                            Expr::Value(SqlValue::SingleQuotedString(v)) => Some(v),
                             _ => todo!(),
                         };
 
@@ -183,10 +186,8 @@ impl Context {
                                     tuples.push((*id, tuple.clone()));
                                 }
                                 Some(v) if ty == Types::Str => {
-                                    if let Some(d) =
-                                        tuple.get_value_at::<StrAddr>(col_index as u8, &schema)?
-                                    {
-                                        let string = table.fetch_string(&d).0.clone();
+                                    if let Some(d) = tuple.get_value_at(col_index as u8, &schema)? {
+                                        let string = table.fetch_string(d.str_addr()).0.clone();
                                         if string == *v {
                                             tuples.push((*id, tuple.clone()));
                                         }
@@ -194,7 +195,7 @@ impl Context {
                                 }
                                 Some(v)
                                     if tuple.get_values(&schema)?[col_index].to_bytes()
-                                        == TypeFactory::from_string(&ty, v).to_bytes() =>
+                                        == ValueFactory::from_string(&ty, v).to_bytes() =>
                                 {
                                     tuples.push((*id, tuple.clone()));
                                 }
@@ -224,8 +225,8 @@ impl Context {
             let ty = schema.fields[field].ty.clone();
 
             let v = match value {
-                Expr::Value(Value::Number(v, _)) => TypeFactory::from_string(&ty, &v.clone()),
-                Expr::Value(Value::SingleQuotedString(v)) => TypeFactory::from_string(&ty, v),
+                Expr::Value(SqlValue::Number(v, _)) => ValueFactory::from_string(&ty, &v.clone()),
+                Expr::Value(SqlValue::SingleQuotedString(v)) => ValueFactory::from_string(&ty, v),
                 _ => todo!(),
             };
 
@@ -240,19 +241,17 @@ impl Context {
                 tuple_values.push({
                     if i != col_id {
                         if matches!(schema.fields[i].ty, Types::Str) {
-                            if let Some(s) =
-                                tuple.get_value_at::<StrAddr>(i as u8, &schema).unwrap()
-                            {
-                                let string = table.fetch_string(&s).0.clone();
-                                TypeFactory::from_string(&Types::Str, &string)
+                            if let Some(s) = tuple.get_value_at(i as u8, &schema).unwrap() {
+                                let string = table.fetch_string(s.str_addr()).0.clone();
+                                ValueFactory::from_string(&Types::Str, &string)
                             } else {
-                                Box::new(Null())
+                                ValueFactory::null()
                             }
                         } else {
-                            TypeFactory::from_bytes(&schema.fields[i].ty, &field.to_bytes())
+                            ValueFactory::from_bytes(&schema.fields[i].ty, &field.to_bytes())
                         }
                     } else {
-                        TypeFactory::from_bytes(&schema.fields[i].ty, &value.to_bytes())
+                        ValueFactory::from_bytes(&schema.fields[i].ty, &value.to_bytes())
                     }
                 });
             }
@@ -311,13 +310,13 @@ impl Context {
                 .map(|field| schema.fields.iter().position(|f| &f.name == field).unwrap())
                 .try_for_each(|field| -> Result<()> {
                     let v = match &types[field] {
-                        _ if values[field].is_null() => Box::new(Null()) as Box<dyn AsBytes>,
-                        Types::Str => Box::new(table.fetch_string(&*values[field])),
+                        _ if values[field].is_null() => Value::Null,
+                        Types::Str => Value::Str(table.fetch_string(values[field].str_addr())),
                         ty => {
                             // a small trick to clone the underlying value
                             // dyn traits can't extend clone or copy
                             let bytes = values[field].to_bytes();
-                            TypeFactory::from_bytes(ty, &bytes)
+                            ValueFactory::from_bytes(ty, &bytes)
                         }
                     };
 

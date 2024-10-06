@@ -1,14 +1,14 @@
-use crate::types::{AsBytes, Types};
+use crate::types::{Types, Value};
 
 #[derive(Default)]
 pub struct ResultSet {
     cols: Vec<String>,
     types: Vec<Types>,
-    data: Vec<Vec<Box<dyn AsBytes>>>,
+    data: Vec<Vec<Value>>,
 }
 
 impl ResultSet {
-    pub fn new(cols: Vec<String>, types: Vec<Types>, data: Vec<Vec<Box<dyn AsBytes>>>) -> Self {
+    pub fn new(cols: Vec<String>, types: Vec<Types>, data: Vec<Vec<Value>>) -> Self {
         Self { cols, types, data }
     }
 
