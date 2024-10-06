@@ -3,6 +3,7 @@ mod catalog;
 pub mod context;
 mod disk_manager;
 mod pages;
+mod sql;
 mod table;
 pub mod tuple;
 mod txn_manager;

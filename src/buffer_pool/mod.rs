@@ -280,13 +280,14 @@ impl BufferPoolManager {
             let frame_id = self.page_table.get(&id).unwrap();
             let page = self.frames[*frame_id].writer();
             self.disk_manager.write_to_file(page, None)?;
+            return Ok(());
         }
 
         self.frames
             .iter_mut()
             .filter(|f| f.reader().get_page_id() != INVALID_PAGE && f.reader().is_dirty())
             .inspect(|f| {
-                printdbg!("frame {}", f.get_page_id());
+                printdbg!("frame {} pin count: {}", f.get_page_id(), f.get_pin_count());
                 assert!(f.get_pin_count() == 0)
             })
             .map(|f| f.writer())
