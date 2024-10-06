@@ -2,7 +2,7 @@ use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
-use crate::types::{AsBytes, Str, StrAddr, Types, I64};
+use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{anyhow, Result};
 
 // preserve page_id 1 for catalog, bpm starts assigning at 2
@@ -35,10 +35,10 @@ impl Catalog {
         let mut tables = vec![];
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
-            let name = table.fetch_string(&*values[0]);
-            let first_page_id = I64::from_bytes(&values[1].to_bytes()).0;
-            let last_page_id = I64::from_bytes(&values[2].to_bytes()).0;
-            let schema = table.fetch_string(&*values[3]);
+            let name = table.fetch_string(values[0].str_addr());
+            let first_page_id = ValueFactory::from_bytes(&Types::I64, &values[1].to_bytes()).i64();
+            let last_page_id = ValueFactory::from_bytes(&Types::I64, &values[2].to_bytes()).i64();
+            let schema = table.fetch_string(values[3].str_addr());
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
             tables.push((
@@ -73,11 +73,11 @@ impl Catalog {
 
         let table = Table::new(table_name.to_string(), schema)?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
-        let tuple_data: Vec<Box<dyn AsBytes>> = vec![
-            Str(table_name.to_string()).into(),
-            I64(table.get_first_page_id()).into(),
-            I64(table.get_last_page_id()).into(),
-            Str(serialized_schema).into(),
+        let tuple_data: Vec<Value> = vec![
+            ValueFactory::from_string(&Types::Str, table_name),
+            ValueFactory::from_string(&Types::I64, &table.get_first_page_id().to_string()),
+            ValueFactory::from_string(&Types::I64, &table.get_last_page_id().to_string()),
+            ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
         let tuple = Tuple::new(tuple_data, schema);
         let tuple_id = self.table.insert(tuple)?;
@@ -99,10 +99,8 @@ impl Catalog {
         let mut tuple_id = None;
         self.table
             .scan(|(id, (_, tuple))| {
-                let name_bytes = tuple
-                    .get_value_of::<StrAddr>("table_name", &self.schema)?
-                    .unwrap();
-                let name = self.table.fetch_string(&name_bytes).0;
+                let name_bytes = tuple.get_value_of("table_name", &self.schema)?.unwrap();
+                let name = self.table.fetch_string(name_bytes.str_addr()).0;
 
                 if name == table_name {
                     tuple_id = Some(*id);

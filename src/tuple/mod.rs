@@ -2,8 +2,8 @@ pub mod schema;
 
 use crate::pages::PageId;
 use crate::tuple::schema::Schema;
-use crate::types::{AsBytes, Null, Types};
-use crate::{pages::traits::Serialize, types::TypeFactory};
+use crate::types::{AsBytes, Types, Value};
+use crate::{pages::traits::Serialize, types::ValueFactory};
 use anyhow::{anyhow, Result};
 use std::{mem, slice};
 
@@ -23,7 +23,7 @@ pub struct Tuple {
 }
 
 impl Tuple {
-    pub fn new(mut values: Vec<Box<dyn AsBytes>>, schema: &Schema) -> Self {
+    pub fn new(mut values: Vec<Value>, schema: &Schema) -> Self {
         let mut nulls = 0;
         if values.iter().any(|t| t.is_null()) {
             values = values
@@ -33,7 +33,7 @@ impl Tuple {
                 .map(|(i, (value, type_))| {
                     if value.is_null() {
                         nulls |= 1 << i;
-                        TypeFactory::default(&type_)
+                        ValueFactory::default(&type_)
                     } else {
                         value
                     }
@@ -55,29 +55,29 @@ impl Tuple {
         self.data.len()
     }
 
-    pub fn get_value_of<T: AsBytes>(&self, field: &str, schema: &Schema) -> Result<Option<T>> {
+    pub fn get_value_of(&self, field: &str, schema: &Schema) -> Result<Option<Value>> {
         let field_id = schema
             .fields
             .iter()
             .position(|f| f.name == field)
             .ok_or(anyhow!("field not found"))?;
 
-        self.get_value_at::<T>(field_id as u8, schema)
+        self.get_value_at(field_id as u8, schema)
     }
 
-    pub fn get_values(&self, schema: &Schema) -> Result<Vec<Box<dyn AsBytes>>> {
+    pub fn get_values(&self, schema: &Schema) -> Result<Vec<Value>> {
         let mut values = vec![];
 
         let mut offset = 0;
         for (i, mut type_) in schema.fields.iter().map(|f| &f.ty).enumerate() {
             if matches!(type_, Types::Str) {
-                type_ = &Types::I128; // size of tuple_id
+                type_ = &Types::StrAddr; // size of tuple_id
             }
             let size = type_.size();
-            let value = TypeFactory::from_bytes(type_, &self.get_data()[offset..offset + size]);
+            let value = ValueFactory::from_bytes(type_, &self.get_data()[offset..offset + size]);
             offset += size;
             if (self._null_bitmap >> i) & 1 == 1 {
-                values.push(Null().into());
+                values.push(Value::Null);
             } else {
                 values.push(value);
             }
@@ -86,7 +86,7 @@ impl Tuple {
         Ok(values)
     }
 
-    pub fn get_value_at<T: AsBytes>(&self, id: u8, schema: &Schema) -> Result<Option<T>> {
+    pub fn get_value_at(&self, id: u8, schema: &Schema) -> Result<Option<Value>> {
         if (self._null_bitmap >> id) & 1 == 1 {
             return Ok(None);
         }
@@ -97,7 +97,10 @@ impl Tuple {
             return Err(anyhow!("field id out of bounds"));
         }
 
-        let dtype = types[id as usize];
+        let dtype = match types[id as usize] {
+            Types::Str => &Types::StrAddr,
+            e => e,
+        };
 
         let offset = types
             .iter()
@@ -105,7 +108,7 @@ impl Tuple {
             .fold(0, |acc, t| acc + t.size());
 
         let slice = &self.data[offset..offset + dtype.size()];
-        let value = T::from_bytes(slice);
+        let value = ValueFactory::from_bytes(dtype, slice);
         Ok(Some(value))
     }
 

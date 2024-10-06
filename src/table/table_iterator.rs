@@ -91,7 +91,7 @@ mod tests {
     use crate::table::tests::test_table;
     use crate::tuple::schema::{Field, Schema};
     use crate::tuple::{Entry, Tuple, TupleId};
-    use crate::types::{Null, Types, U128, U16, U8};
+    use crate::types::{Types, Value, ValueFactory};
 
     use super::TableIterator;
 
@@ -103,15 +103,33 @@ mod tests {
         ]);
         let mut table = test_table(3, &schema)?;
 
-        let t1 = Tuple::new(vec![U8(2).into(), U16(3).into()], &schema);
+        let t1 = Tuple::new(
+            vec![
+                ValueFactory::from_string(&Types::U8, "2"),
+                ValueFactory::from_string(&Types::U16, "3"),
+            ],
+            &schema,
+        );
         table.insert(t1)?;
 
-        let t2 = Tuple::new(vec![U8(4).into(), U16(5).into()], &schema);
+        let t2 = Tuple::new(
+            vec![
+                ValueFactory::from_string(&Types::U8, "4"),
+                ValueFactory::from_string(&Types::U16, "5"),
+            ],
+            &schema,
+        );
         let t2_id = table.insert(t2)?;
 
         table.delete(t2_id)?;
 
-        let t3 = Tuple::new(vec![U8(6).into(), U16(7).into()], &schema);
+        let t3 = Tuple::new(
+            vec![
+                ValueFactory::from_string(&Types::U8, "6"),
+                ValueFactory::from_string(&Types::U16, "7"),
+            ],
+            &schema,
+        );
         table.insert(t3)?;
 
         let mut counter = 0;
@@ -140,7 +158,13 @@ mod tests {
         let mut table = test_table(3, &schema)?;
 
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(vec![U128(i).into(), U128(i).into()], &schema);
+            let tuple = Tuple::new(
+                vec![
+                    ValueFactory::from_string(&Types::U128, &i.to_string()),
+                    ValueFactory::from_string(&Types::U128, &i.to_string()),
+                ],
+                &schema,
+            );
             table.insert(tuple)?;
         }
 
@@ -155,7 +179,7 @@ mod tests {
 
         assert!(first_page.header().is_dirty());
 
-        let tuple = Tuple::new(vec![Null().into(), Null().into()], &schema);
+        let tuple = Tuple::new(vec![Value::Null, Value::Null], &schema);
         table.insert(tuple)?;
 
         assert_ne!(table.first_page, table.last_page);

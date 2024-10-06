@@ -17,7 +17,7 @@ pub const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 /// all other fields are helpers (pointers and flags)
 /// that are computed on the fly
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct TablePageData {
     header: TablePageHeader,
     bytes: [u8; PAGE_END],
@@ -335,7 +335,7 @@ impl TablePageSlot {
 mod tests {
     use crate::{
         tuple::schema::{Field, Schema},
-        types::{Types, U16},
+        types::{Types, ValueFactory},
     };
 
     use super::*;
@@ -372,7 +372,7 @@ mod tests {
         let table_page_2: TablePage = page.into();
 
         let tuple = Tuple::new(
-            vec![U16(300).into()],
+            vec![ValueFactory::from_string(&Types::U16, "300")],
             &Schema::new(vec![Field::new("a", Types::U16, false)]),
         );
 

@@ -120,8 +120,8 @@ impl DiskManager {
 
         let mut file = OpenOptions::new()
             .read(true)
-            .open(path)
-            .context("file opened for reading")?;
+            .open(path.clone())
+            .context(format!("file {} can't open for reading", path.display()))?;
 
         let mut buffer = vec![0u8; T::size()];
         file.read_exact(&mut buffer)
@@ -207,8 +207,8 @@ mod tests {
     use super::*;
     use crate::pages::Page;
     use crate::tuple::schema::{Field, Schema};
-    use crate::types::Types;
-    use crate::{pages::table_page::TablePage, tuple::Tuple, types::Str};
+    use crate::types::{Types, ValueFactory};
+    use crate::{pages::table_page::TablePage, tuple::Tuple};
     use std::fs::remove_dir_all;
 
     #[test]
@@ -248,7 +248,10 @@ mod tests {
         // let dummy_schema = Schema::new(vec!["str"], vec![Types::Str]);
         let dummy_schema = Schema::new(vec![Field::new("str", Types::Str, false)]);
 
-        let tuple = Tuple::new(vec![Str("Hello!".to_string()).into()], &dummy_schema);
+        let tuple = Tuple::new(
+            vec![ValueFactory::from_string(&Types::Str, "Hello!")],
+            &dummy_schema,
+        );
         let (write_page_id, write_slot_id) = table_page.insert_raw(&tuple)?;
 
         assert_eq!(page_id, write_page_id);
