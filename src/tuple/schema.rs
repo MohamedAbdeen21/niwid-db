@@ -81,6 +81,21 @@ impl Schema {
 
         Schema::new(fields)
     }
+
+    pub fn subset(&self, fields: &Vec<String>) -> Self {
+        let subset = fields
+            .iter()
+            .map(|field| {
+                self.fields
+                    .iter()
+                    .find(|f| f.name == *field)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+
+        Schema::new(subset)
+    }
 }
 
 impl Schema {

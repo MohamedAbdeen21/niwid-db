@@ -3,91 +3,179 @@ use crate::tuple::schema::Schema;
 use super::expr::BooleanBinaryExpr;
 
 #[allow(dead_code)]
+pub fn build_initial_plan() -> LogicalPlan {
+    todo!()
+}
+
+#[allow(dead_code)]
 pub enum LogicalPlan {
-    Projection(Projection),
+    Projection(Box<Projection>),
     Scan(Scan),
-    Filter(Filter),
+    Filter(Box<Filter>),
 }
 
 #[allow(dead_code)]
 impl LogicalPlan {
-    pub fn print(&self, indent: usize) -> String {
+    pub fn print(&self) -> String {
+        self.print_indent(0)
+    }
+
+    fn print_indent(&self, indent: usize) -> String {
         match self {
-            LogicalPlan::Projection(p) => p.print(indent),
             LogicalPlan::Scan(s) => s.print(indent),
             LogicalPlan::Filter(f) => f.print(indent),
+            LogicalPlan::Projection(p) => p.print(indent),
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        match self {
+            LogicalPlan::Scan(s) => s.schema(),
+            LogicalPlan::Filter(f) => f.schema(),
+            LogicalPlan::Projection(p) => p.schema(),
         }
     }
 }
 
-macro_rules! impl_logical_plan_node {
-    ($struct: ident) => {
-        #[allow(dead_code)]
-        impl $struct {
-            fn name(&self) -> String {
-                String::from(stringify!($struct))
-            }
-            fn schema(&self) -> Schema {
-                self.schema.clone()
-            }
-
-            pub fn print(&self, indent: usize) -> String {
-                let mut s = String::new();
-                for _ in 0..indent {
-                    s.push(' ');
-                }
-                s.push_str(&self.name());
-                s.push_str(": ");
-                for field in self.schema().fields {
-                    s.push_str(&format!("#{}, ", field.name));
-                }
-                s.push('\n');
-                for child in &self.children {
-                    s.push_str(&child.print(indent + 2));
-                }
-                s
-            }
-        }
-    };
+pub struct Scan {
+    table_name: String,
+    schema: Schema,
 }
 
-pub struct Scan {
-    schema: Schema,
-    children: Vec<LogicalPlan>,
+impl Scan {
+    fn name(&self) -> String {
+        "Scan".to_string()
+    }
+
+    #[allow(unused)]
+    fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    fn print(&self, indent: usize) -> String {
+        let mut s = String::new();
+        for _ in 0..indent * 2 {
+            s.push(' ');
+        }
+        s.push_str(&self.name());
+        s.push_str(": ");
+        s.push_str(&self.table_name);
+        s.push_str(" [");
+        s.push_str(
+            &self
+                .schema
+                .fields
+                .iter()
+                .map(|f| format!("#{}", f.name.clone()))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        s.push(']');
+        s.push('\n');
+        s
+    }
 }
 
 pub struct Filter {
-    schema: Schema,
-    children: Vec<LogicalPlan>,
+    input: LogicalPlan,
     expr: BooleanBinaryExpr,
 }
 
-pub struct Projection {
-    schema: Schema,
-    children: Vec<LogicalPlan>,
+impl Filter {
+    fn name(&self) -> String {
+        "Filter".to_string()
+    }
+
+    #[allow(unused)]
+    fn schema(&self) -> Schema {
+        match &self.input {
+            LogicalPlan::Scan(s) => s.schema(),
+            LogicalPlan::Filter(f) => f.schema(),
+            _ => Schema::new(vec![]),
+        }
+    }
+
+    fn print(&self, indent: usize) -> String {
+        let mut s = String::new();
+        for _ in 0..indent {
+            s.push(' ');
+        }
+        s.push_str(&self.name());
+        s.push_str(": ");
+        s.push_str(&self.expr.print());
+        s.push('\n');
+        s.push_str(&self.input.print_indent(indent + 1));
+        s
+    }
 }
 
-impl_logical_plan_node!(Projection);
-impl_logical_plan_node!(Filter);
-impl_logical_plan_node!(Scan);
+#[allow(dead_code)]
+pub struct Projection {
+    input: LogicalPlan,
+    projections: Vec<String>,
+}
+
+#[allow(dead_code)]
+impl Projection {
+    pub fn name(&self) -> String {
+        "Projection".to_string()
+    }
+
+    pub fn schema(&self) -> Schema {
+        let schema = self.input.schema();
+        if self.projections.is_empty() {
+            schema
+        } else {
+            schema.subset(&self.projections)
+        }
+    }
+
+    fn print(&self, indent: usize) -> String {
+        let mut s = String::new();
+        for _ in 0..indent * 2 {
+            s.push(' ');
+        }
+        s.push_str(&self.name());
+        // TODO:
+
+        s
+    }
+}
 
 #[cfg(test)]
 mod tests {
-    use crate::{tuple::schema::Field, types::Types};
+    use crate::{
+        sql::logical_plan::expr::LogicalExpr,
+        tuple::schema::Field,
+        types::{Types, ValueFactory},
+    };
 
     use super::*;
     use anyhow::Result;
+    use sqlparser::ast::BinaryOperator;
 
     #[test]
     fn test_print() -> Result<()> {
-        let scan = Scan {
+        let scan = LogicalPlan::Scan(Scan {
+            table_name: "test".to_string(),
             schema: Schema::new(vec![Field::new("a", Types::I64, false)]),
-            children: vec![],
-        };
+        });
 
-        let string = scan.print(0);
+        let string = scan.print();
 
-        assert_eq!(string, "Scan: #a, \n");
+        assert_eq!(string, "Scan: test [#a]\n");
+
+        let filter = LogicalPlan::Filter(Box::new(Filter {
+            expr: BooleanBinaryExpr::new(
+                LogicalExpr::Column("a".to_string()),
+                BinaryOperator::Gt,
+                LogicalExpr::Literal(ValueFactory::from_string(&Types::I64, "10")),
+            ),
+            input: scan,
+        }));
+
+        assert_eq!(filter.print(), "Filter: #a > 10\n  Scan: test [#a]\n");
+
         Ok(())
     }
 }
