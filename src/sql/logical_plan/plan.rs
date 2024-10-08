@@ -7,14 +7,13 @@ pub fn build_initial_plan() -> LogicalPlan {
     todo!()
 }
 
-#[allow(dead_code)]
 pub enum LogicalPlan {
     Projection(Box<Projection>),
     Scan(Scan),
+    #[allow(unused)]
     Filter(Box<Filter>),
 }
 
-#[allow(dead_code)]
 impl LogicalPlan {
     pub fn print(&self) -> String {
         self.print_indent(0)
@@ -43,11 +42,14 @@ pub struct Scan {
 }
 
 impl Scan {
+    pub fn new(table_name: String, schema: Schema) -> Self {
+        Self { table_name, schema }
+    }
+
     fn name(&self) -> String {
         "Scan".to_string()
     }
 
-    #[allow(unused)]
     fn schema(&self) -> Schema {
         self.schema.clone()
     }
@@ -82,11 +84,15 @@ pub struct Filter {
 }
 
 impl Filter {
+    #[allow(unused)]
+    pub fn new(input: LogicalPlan, expr: BooleanBinaryExpr) -> Self {
+        Self { input, expr }
+    }
+
     fn name(&self) -> String {
         "Filter".to_string()
     }
 
-    #[allow(unused)]
     fn schema(&self) -> Schema {
         match &self.input {
             LogicalPlan::Scan(s) => s.schema(),
@@ -117,6 +123,10 @@ pub struct Projection {
 
 #[allow(dead_code)]
 impl Projection {
+    pub fn new(input: LogicalPlan, projections: Vec<String>) -> Self {
+        Self { input, projections }
+    }
+
     pub fn name(&self) -> String {
         "Projection".to_string()
     }
@@ -136,8 +146,18 @@ impl Projection {
             s.push(' ');
         }
         s.push_str(&self.name());
-        // TODO:
-
+        s.push_str(": [");
+        s.push_str(
+            &self
+                .projections
+                .iter()
+                .map(|s| format!("#{}", s))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        s.push(']');
+        s.push('\n');
+        s.push_str(&self.input.print_indent(indent + 1));
         s
     }
 }

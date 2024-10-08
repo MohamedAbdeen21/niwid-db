@@ -3,6 +3,7 @@ mod result_set;
 use crate::buffer_pool::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::context::result_set::ResultSet;
+use crate::sql::parser::parse;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
@@ -10,11 +11,9 @@ use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{anyhow, Result};
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable, Expr, Insert, Query,
-    SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value as SqlValue, Values,
+    Assignment, AssignmentTarget, BinaryOperator, ColumnDef, Expr, Query, SelectItem, SetExpr,
+    TableFactor, TableWithJoins, Value as SqlValue, Values,
 };
-use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser;
 
 pub struct Context {
     pub catalog: Catalog,
@@ -24,7 +23,6 @@ pub struct Context {
     catalog_changed: bool,
 }
 
-#[allow(dead_code)]
 impl Context {
     pub fn new() -> Result<Self> {
         Ok(Self {
@@ -352,37 +350,9 @@ impl Context {
     }
 
     pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
-        let statment = Parser::new(&GenericDialect)
-            .try_with_sql(&sql.into())?
-            .parse_statement()?;
+        let _plan = parse(&sql.into());
 
-        match statment {
-            Statement::Insert(Insert {
-                table_name, source, ..
-            }) => self.handle_insert(&table_name.0.first().unwrap().value, source),
-            Statement::Query(query) => {
-                let Query { body, limit, .. } = *query;
-                self.handle_select(*body, limit)
-            }
-            Statement::Update {
-                table,
-                assignments,
-                from,
-                selection,
-                ..
-            } => self.handle_update(table, assignments, from, selection),
-            Statement::CreateTable(CreateTable {
-                name,
-                columns,
-                if_not_exists,
-                ..
-            }) => self.handle_create(
-                name.0.first().unwrap().value.clone(),
-                columns,
-                if_not_exists,
-            ),
-            _ => unimplemented!(),
-        }
+        Ok(ResultSet::default())
     }
 }
 

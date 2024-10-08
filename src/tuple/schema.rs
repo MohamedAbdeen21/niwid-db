@@ -82,7 +82,7 @@ impl Schema {
         Schema::new(fields)
     }
 
-    pub fn subset(&self, fields: &Vec<String>) -> Self {
+    pub fn subset(&self, fields: &[String]) -> Self {
         let subset = fields
             .iter()
             .map(|field| {

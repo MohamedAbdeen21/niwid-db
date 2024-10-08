@@ -104,11 +104,9 @@ macro_rules! impl_value_methods {
 impl Value {
     pub fn str_addr(&self) -> StrAddr {
         if let Value::Str(v) = self {
-            println!("str_addr str: {:?}", v);
             U128(ValueFactory::from_bytes(&Types::U128, &v.to_bytes()).u128())
         } else if let Value::StrAddr(v) = self {
-            println!("str_addr addr: {:?}", v);
-            v.clone()
+            *v
         } else {
             panic!("forced conversion error: {:?} => StrAddr", self)
         }
@@ -216,10 +214,7 @@ impl Display for Value {
 
 impl Value {
     pub fn is_null(&self) -> bool {
-        match self {
-            Value::Null => true,
-            _ => false,
-        }
+        matches!(self, Value::Null)
     }
 }
 

@@ -188,7 +188,6 @@ impl Table {
                 Types::Str => {
                     let str_bytes = &tuple.get_data()[offset..size];
                     let addr = &self.insert_string(str_bytes).unwrap().to_bytes();
-                    println!("inserted at addr: {:?}", addr);
                     ValueFactory::from_bytes(&Types::StrAddr, addr)
                 }
                 _ => ValueFactory::from_bytes(&ty, &tuple.get_data()[offset..size]),
@@ -259,9 +258,7 @@ impl Table {
             return Err(anyhow!("Tuple is too long"));
         }
 
-        println!("inserting tuple: {:?}", tuple);
         let tuple = self.insert_strings(tuple)?;
-        println!("inserted tuple: {:?}", tuple);
 
         if let Some(id) = self.active_txn {
             self.txn_manager.lock().touch_page(id, self.last_page)?;
@@ -492,7 +489,6 @@ mod tests {
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple_bytes = tuple.get_value_of("str", &schema)?.unwrap();
-            println!("tuple: {:?}", tuple_bytes);
             let string = table.fetch_string(tuple_bytes.str_addr());
             assert_eq!(
                 string,
