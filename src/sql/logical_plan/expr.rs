@@ -1,8 +1,6 @@
-// just use sqlparser operators instead of writing our own
-use sqlparser::ast::Value as SqlValue;
-use sqlparser::ast::{BinaryOperator, Expr};
+use sqlparser::ast::BinaryOperator; // just use sqlparser operators instead of writing our own
 
-use crate::types::{Types, Value, ValueFactory};
+use crate::types::Value;
 
 #[allow(unused)]
 pub enum LogicalExpr {
@@ -27,6 +25,7 @@ pub struct BinaryExpr {
 }
 
 impl BinaryExpr {
+    #[allow(unused)]
     pub fn new(left: LogicalExpr, op: BinaryOperator, right: LogicalExpr) -> Self {
         Self { left, op, right }
     }

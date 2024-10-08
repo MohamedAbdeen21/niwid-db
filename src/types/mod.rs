@@ -35,8 +35,8 @@ impl Types {
             Types::U16 | Types::I16 => 2,
             Types::U32 | Types::I32 | Types::F32 => 4,
             Types::U64 | Types::I64 | Types::F64 => 8,
-            Types::U128 | Types::I128 | Types::StrAddr => 16,
-            Types::Str => std::mem::size_of::<TupleId>(),
+            Types::U128 | Types::I128 => 16,
+            Types::Str | Types::StrAddr => std::mem::size_of::<TupleId>(),
         }
     }
 

@@ -23,8 +23,7 @@ fn main() -> Result<()> {
     //     schema.to_sql(),
     // ))?;
 
-    ctx.execute_sql("SELECT *, id FROM users WHERE id = 2")?
-        .show();
+    ctx.execute_sql("SELECT *, id FROM users WHERE id = 'hello'")?;
 
     ctx.commit_txn()?;
 

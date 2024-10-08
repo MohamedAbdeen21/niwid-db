@@ -3,7 +3,7 @@ mod result_set;
 use crate::buffer_pool::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::context::result_set::ResultSet;
-use crate::sql::parser::parse;
+use crate::sql::logical_plan::build_initial_plan;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
@@ -14,6 +14,8 @@ use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, ColumnDef, Expr, Query, SelectItem, SetExpr,
     TableFactor, TableWithJoins, Value as SqlValue, Values,
 };
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
 
 pub struct Context {
     pub catalog: Catalog,
@@ -350,7 +352,11 @@ impl Context {
     }
 
     pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
-        let _plan = parse(&sql.into());
+        let statment = Parser::new(&GenericDialect)
+            .try_with_sql(&sql.into())?
+            .parse_statement()?;
+
+        let _plan = build_initial_plan(statment);
 
         Ok(ResultSet::default())
     }
