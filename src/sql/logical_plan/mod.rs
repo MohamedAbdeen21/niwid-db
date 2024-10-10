@@ -3,16 +3,17 @@ pub mod optimizer;
 pub mod plan;
 
 use expr::{BooleanBinaryExpr, LogicalExpr};
-use plan::{Filter, LogicalPlan, Projection, Scan};
+use plan::{CreateTable, Filter, LogicalPlan, Projection, Scan};
 use sqlparser::ast::{
-    BinaryOperator, CreateTable, Expr, Insert, Query, SelectItem, SetExpr, Statement, TableFactor,
-    Value as SqlValue,
+    BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr, Insert, ObjectName, Query,
+    SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value as SqlValue,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::{
     catalog::Catalog,
+    tuple::schema::Schema,
     types::{Types, ValueFactory},
 };
 
@@ -33,16 +34,17 @@ pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
             selection,
             ..
         } => build_update(),
-        Statement::CreateTable(CreateTable {
+        Statement::CreateTable(SqlCreateTable {
             name,
             columns,
             if_not_exists,
             ..
-        }) => build_create(),
+        }) => build_create(name, columns, if_not_exists),
         _ => unimplemented!(),
     }
 }
 
+#[allow(unused)]
 fn build_query(_query: Option<Box<Query>>) -> Result<Option<LogicalPlan>> {
     todo!()
 }
@@ -52,31 +54,63 @@ fn build_insert() -> Result<LogicalPlan> {
 fn build_update() -> Result<LogicalPlan> {
     todo!()
 }
-fn build_create() -> Result<LogicalPlan> {
-    todo!()
+fn build_create(
+    name: ObjectName,
+    columns: Vec<ColumnDef>,
+    if_not_exists: bool,
+) -> Result<LogicalPlan> {
+    let root = LogicalPlan::default();
+
+    let create = CreateTable::new(
+        root,
+        name.to_string(),
+        Schema::from_sql(columns),
+        if_not_exists,
+    );
+
+    Ok(LogicalPlan::CreateTable(Box::new(create)))
 }
+
 fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan> {
     let select = match *body {
         SetExpr::Select(ref select) => select,
         _ => unimplemented!(),
     };
 
-    let table_name = match &select.from.first().unwrap().relation {
-        TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-        _ => todo!(),
+    let mut root = match &select.from.first() {
+        None => LogicalPlan::Empty,
+        Some(TableWithJoins { relation, .. }) => {
+            let name = match relation {
+                TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
+                _ => todo!(),
+            };
+
+            // TODO: Singleton catalog to avoid re-building whole catalog
+            let schema = Catalog::new()?.get_table(&name).unwrap().get_schema();
+
+            LogicalPlan::Scan(Scan::new(name, schema.clone()))
+        }
     };
 
-    // TODO: Singleton catalog to avoid re-building whole catalog
-    let schema = Catalog::new()?.get_table(&table_name).unwrap().get_schema();
-
-    let mut root = LogicalPlan::Scan(Scan::new(table_name, schema.clone()));
+    for projection in select.projection.iter() {
+        if matches!(root, LogicalPlan::Empty)
+            && !matches!(projection, SelectItem::UnnamedExpr(Expr::Value(_)))
+        {
+            return Err(anyhow!("Can't select all without a table"));
+        }
+    }
 
     let columns = &select
         .projection
         .iter()
         .flat_map(|e| match e {
             SelectItem::UnnamedExpr(Expr::Identifier(ident)) => vec![ident.value.clone()],
-            SelectItem::Wildcard(_) => schema.fields.iter().map(|f| f.name.clone()).collect(),
+            SelectItem::Wildcard(_) => root
+                .schema()
+                .fields
+                .iter()
+                .map(|f| f.name.clone())
+                .collect(),
             _ => todo!(),
         })
         .collect::<Vec<_>>();

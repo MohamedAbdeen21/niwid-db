@@ -2,16 +2,18 @@ use crate::tuple::schema::Schema;
 
 use super::expr::BooleanBinaryExpr;
 
-#[allow(dead_code)]
-pub fn build_initial_plan() -> LogicalPlan {
-    todo!()
-}
-
 pub enum LogicalPlan {
     Projection(Box<Projection>),
     Scan(Scan),
-    #[allow(unused)]
     Filter(Box<Filter>),
+    CreateTable(Box<CreateTable>),
+    Empty,
+}
+
+impl Default for LogicalPlan {
+    fn default() -> Self {
+        Self::Empty
+    }
 }
 
 impl LogicalPlan {
@@ -24,6 +26,8 @@ impl LogicalPlan {
             LogicalPlan::Scan(s) => s.print(indent),
             LogicalPlan::Filter(f) => f.print(indent),
             LogicalPlan::Projection(p) => p.print(indent),
+            LogicalPlan::CreateTable(c) => c.print(indent),
+            LogicalPlan::Empty => "Empty".to_string(),
         }
     }
 
@@ -32,7 +36,51 @@ impl LogicalPlan {
             LogicalPlan::Scan(s) => s.schema(),
             LogicalPlan::Filter(f) => f.schema(),
             LogicalPlan::Projection(p) => p.schema(),
+            LogicalPlan::CreateTable(c) => c.schema(),
+            LogicalPlan::Empty => Schema::new(vec![]),
         }
+    }
+}
+
+pub struct CreateTable {
+    table_name: String,
+    input: LogicalPlan,
+    schema: Schema,
+    if_not_exists: bool,
+}
+
+impl CreateTable {
+    pub fn new(
+        input: LogicalPlan,
+        table_name: String,
+        schema: Schema,
+        if_not_exists: bool,
+    ) -> Self {
+        Self {
+            table_name,
+            input,
+            schema,
+            if_not_exists,
+        }
+    }
+
+    fn name(&self) -> String {
+        "CreateTable".to_string()
+    }
+
+    fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    fn print(&self, indent: usize) -> String {
+        format!(
+            "{}{}: {} [skip if exists: {}]\n{}",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.table_name,
+            self.if_not_exists,
+            self.input.print_indent(indent + 1)
+        )
     }
 }
 
@@ -55,26 +103,18 @@ impl Scan {
     }
 
     fn print(&self, indent: usize) -> String {
-        let mut s = String::new();
-        for _ in 0..indent * 2 {
-            s.push(' ');
-        }
-        s.push_str(&self.name());
-        s.push_str(": ");
-        s.push_str(&self.table_name);
-        s.push_str(" [");
-        s.push_str(
-            &self
-                .schema
+        format!(
+            "{}{}: {} [{}]\n",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.table_name,
+            self.schema
                 .fields
                 .iter()
-                .map(|f| format!("#{}", f.name.clone()))
+                .map(|f| format!("#{}", f.name))
                 .collect::<Vec<_>>()
-                .join(","),
-        );
-        s.push(']');
-        s.push('\n');
-        s
+                .join(",")
+        )
     }
 }
 
@@ -102,26 +142,21 @@ impl Filter {
     }
 
     fn print(&self, indent: usize) -> String {
-        let mut s = String::new();
-        for _ in 0..indent {
-            s.push(' ');
-        }
-        s.push_str(&self.name());
-        s.push_str(": ");
-        s.push_str(&self.expr.print());
-        s.push('\n');
-        s.push_str(&self.input.print_indent(indent + 1));
-        s
+        format!(
+            "{}{}: {}\n{}",
+            " ".repeat(indent),
+            self.name(),
+            self.expr.print(),
+            self.input.print_indent(indent + 1)
+        )
     }
 }
 
-#[allow(dead_code)]
 pub struct Projection {
     input: LogicalPlan,
     projections: Vec<String>,
 }
 
-#[allow(dead_code)]
 impl Projection {
     pub fn new(input: LogicalPlan, projections: Vec<String>) -> Self {
         Self { input, projections }
@@ -141,24 +176,17 @@ impl Projection {
     }
 
     fn print(&self, indent: usize) -> String {
-        let mut s = String::new();
-        for _ in 0..indent * 2 {
-            s.push(' ');
-        }
-        s.push_str(&self.name());
-        s.push_str(": [");
-        s.push_str(
-            &self
-                .projections
+        format!(
+            "{}{}: [{}]\n{}",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.projections
                 .iter()
                 .map(|s| format!("#{}", s))
                 .collect::<Vec<_>>()
                 .join(","),
-        );
-        s.push(']');
-        s.push('\n');
-        s.push_str(&self.input.print_indent(indent + 1));
-        s
+            self.input.print_indent(indent + 1)
+        )
     }
 }
 
@@ -194,7 +222,7 @@ mod tests {
             input: scan,
         }));
 
-        assert_eq!(filter.print(), "Filter: #a > 10\n  Scan: test [#a]\n");
+        assert_eq!(filter.print(), "Filter: #a > 10\n--Scan: test [#a]\n");
 
         Ok(())
     }

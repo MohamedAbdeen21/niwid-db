@@ -4,6 +4,7 @@ use crate::buffer_pool::BufferPoolManager;
 use crate::catalog::Catalog;
 use crate::context::result_set::ResultSet;
 use crate::sql::logical_plan::build_initial_plan;
+use crate::sql::parser::parse;
 use crate::table::Table;
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
@@ -14,8 +15,6 @@ use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, ColumnDef, Expr, Query, SelectItem, SetExpr,
     TableFactor, TableWithJoins, Value as SqlValue, Values,
 };
-use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser;
 
 pub struct Context {
     pub catalog: Catalog,
@@ -85,19 +84,7 @@ impl Context {
         Ok(())
     }
 
-    fn sql_expr_to_tuple(ident: Vec<Option<String>>, schema: Schema) -> Tuple {
-        let values = ident
-            .iter()
-            .zip(schema.fields.iter().map(|f| f.ty.clone()))
-            .map(|(v, ty)| match v {
-                None => Value::Null,
-                Some(v) => ValueFactory::from_string(&ty, v),
-            })
-            .collect();
-
-        Tuple::new(values, &schema)
-    }
-
+    #[allow(unused)]
     fn handle_insert(&mut self, table_name: &str, source: Option<Box<Query>>) -> Result<ResultSet> {
         let table = self.catalog.get_table(table_name).unwrap();
         let schema = table.get_schema();
@@ -116,7 +103,7 @@ impl Context {
                     _ => todo!(),
                 };
 
-                Self::sql_expr_to_tuple(
+                Tuple::from_sql(
                     values
                         .iter()
                         .flatten()
@@ -140,6 +127,7 @@ impl Context {
         ))
     }
 
+    #[allow(unused)]
     fn handle_update(
         &mut self,
         table: TableWithJoins,
@@ -266,6 +254,7 @@ impl Context {
         Ok(ResultSet::new(vec![], vec![], vec![]))
     }
 
+    #[allow(unused)]
     fn handle_select(&mut self, body: SetExpr, _limit: Option<Expr>) -> Result<ResultSet> {
         let table_name = match body {
             SetExpr::Select(ref select) => match &select.from.first().unwrap().relation {
@@ -340,6 +329,7 @@ impl Context {
         Ok(ResultSet::new(columns, output_types, results))
     }
 
+    #[allow(unused)]
     fn handle_create(
         &mut self,
         table: String,
@@ -352,9 +342,7 @@ impl Context {
     }
 
     pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
-        let statment = Parser::new(&GenericDialect)
-            .try_with_sql(&sql.into())?
-            .parse_statement()?;
+        let statment = parse(sql)?;
 
         let _plan = build_initial_plan(statment);
 

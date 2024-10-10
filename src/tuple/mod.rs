@@ -51,6 +51,20 @@ impl Tuple {
         tuple
     }
 
+    #[allow(unused)]
+    pub fn from_sql(ident: Vec<Option<String>>, schema: Schema) -> Self {
+        let values = ident
+            .iter()
+            .zip(schema.fields.iter().map(|f| f.ty.clone()))
+            .map(|(v, ty)| match v {
+                None => ValueFactory::null(),
+                Some(v) => ValueFactory::from_string(&ty, v),
+            })
+            .collect();
+
+        Tuple::new(values, &schema)
+    }
+
     pub fn len(&self) -> usize {
         self.data.len()
     }
