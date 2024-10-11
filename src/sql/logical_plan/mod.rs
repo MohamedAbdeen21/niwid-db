@@ -3,7 +3,7 @@ pub mod optimizer;
 pub mod plan;
 
 use expr::{BooleanBinaryExpr, LogicalExpr};
-use plan::{CreateTable, Filter, LogicalPlan, Projection, Scan};
+use plan::{CreateTable, Explain, Filter, LogicalPlan, Projection, Scan};
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr, Insert, ObjectName, Query,
     SelectItem, SetExpr, Statement, TableFactor, TableWithJoins, Value as SqlValue,
@@ -17,9 +17,9 @@ use crate::{
     types::{Types, ValueFactory},
 };
 
-#[allow(unused)]
 pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
     match statement {
+        Statement::Explain { statement, .. } => build_explain(*statement),
         Statement::Insert(Insert {
             table_name, source, ..
         }) => build_insert(),
@@ -42,6 +42,12 @@ pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
         }) => build_create(name, columns, if_not_exists),
         _ => unimplemented!(),
     }
+}
+
+fn build_explain(statement: Statement) -> Result<LogicalPlan> {
+    let root = build_initial_plan(statement)?;
+
+    Ok(LogicalPlan::Explain(Box::new(Explain::new(root))))
 }
 
 #[allow(unused)]
@@ -92,6 +98,20 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
         }
     };
 
+    let filters = select.selection.clone().map(|e| match e {
+        Expr::BinaryOp { left, right, op } => parse_boolean_expr(*left, op, *right),
+        Expr::Value(SqlValue::Boolean(b)) => Ok(BooleanBinaryExpr::new(
+            b.into(),
+            BinaryOperator::Eq,
+            true.into(),
+        )),
+        _ => todo!(),
+    });
+
+    if let Some(filter) = filters {
+        root = LogicalPlan::Filter(Box::new(Filter::new(root, filter?)));
+    }
+
     for projection in select.projection.iter() {
         if matches!(root, LogicalPlan::Empty)
             && !matches!(projection, SelectItem::UnnamedExpr(Expr::Value(_)))
@@ -116,20 +136,6 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
         .collect::<Vec<_>>();
 
     root = LogicalPlan::Projection(Box::new(Projection::new(root, columns.clone())));
-
-    let filters = select.selection.clone().map(|e| match e {
-        Expr::BinaryOp { left, right, op } => parse_boolean_expr(*left, op, *right),
-        Expr::Value(SqlValue::Boolean(b)) => Ok(BooleanBinaryExpr::new(
-            b.into(),
-            BinaryOperator::Eq,
-            true.into(),
-        )),
-        _ => todo!(),
-    });
-
-    if let Some(filter) = filters {
-        root = LogicalPlan::Filter(Box::new(Filter::new(root, filter?)));
-    }
 
     print!("{}", root.print());
 

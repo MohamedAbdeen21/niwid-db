@@ -4,8 +4,8 @@ mod replacer;
 use crate::catalog::CATALOG_PAGE;
 use crate::disk_manager::{DiskManager, DISK_STORAGE};
 use crate::pages::{Page, PageId, INVALID_PAGE};
-use crate::printdbg;
 use crate::txn_manager::TxnId;
+use crate::{get_caller_name, printdbg};
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;
@@ -131,7 +131,8 @@ impl BufferPoolManager {
         self.replacer.record_access(frame_id);
 
         printdbg!(
-            "Fetched frame {} with pin count {}",
+            "{} Fetched page {} with pin count {}",
+            get_caller_name!(),
             page_id,
             frame.get_pin_count()
         );
@@ -194,7 +195,8 @@ impl BufferPoolManager {
         frame.unpin();
 
         printdbg!(
-            "frame {} unpinned, pin count: {}",
+            "{} frame {} unpinned, pin count: {}",
+            get_caller_name!(),
             frame_id,
             frame.get_pin_count()
         );
@@ -286,10 +288,7 @@ impl BufferPoolManager {
         self.frames
             .iter_mut()
             .filter(|f| f.reader().get_page_id() != INVALID_PAGE && f.reader().is_dirty())
-            .inspect(|f| {
-                printdbg!("frame {} pin count: {}", f.get_page_id(), f.get_pin_count());
-                assert!(f.get_pin_count() == 0)
-            })
+            .inspect(|f| assert!(f.get_pin_count() == 0))
             .map(|f| f.writer())
             .try_for_each(|p| self.disk_manager.write_to_file(p, None))
     }

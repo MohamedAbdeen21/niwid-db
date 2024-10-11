@@ -1,15 +1,14 @@
-use crate::types::{Types, Value};
+use crate::{tuple::schema::Field, types::Value};
 
 #[derive(Default)]
 pub struct ResultSet {
-    cols: Vec<String>,
-    types: Vec<Types>,
-    data: Vec<Vec<Value>>,
+    pub cols: Vec<Field>,
+    pub data: Vec<Vec<Value>>,
 }
 
 impl ResultSet {
-    pub fn new(cols: Vec<String>, types: Vec<Types>, data: Vec<Vec<Value>>) -> Self {
-        Self { cols, types, data }
+    pub fn new(cols: Vec<Field>, data: Vec<Vec<Value>>) -> Self {
+        Self { cols, data }
     }
 
     pub fn show(&self) {
@@ -18,7 +17,7 @@ impl ResultSet {
             .iter()
             .enumerate()
             .map(|(i, col)| {
-                let header_len = format!("{} ({:?})", col, self.types[i]).len();
+                let header_len = format!("{:?}", col).len();
                 let max_data_len = self
                     .data
                     .iter()
@@ -31,12 +30,8 @@ impl ResultSet {
 
         print_row_divider(&col_widths);
 
-        for (i, (col, t)) in self.cols.iter().zip(self.types.iter()).enumerate() {
-            print!(
-                "| {:^width$} ",
-                format!("{} ({:?})", col, t),
-                width = col_widths[i]
-            );
+        for (i, col) in self.cols.iter().enumerate() {
+            print!("| {:^width$} ", format!("{:?}", col), width = col_widths[i]);
         }
         println!("|");
 

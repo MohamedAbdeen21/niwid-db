@@ -7,6 +7,7 @@ pub enum LogicalPlan {
     Scan(Scan),
     Filter(Box<Filter>),
     CreateTable(Box<CreateTable>),
+    Explain(Box<Explain>),
     Empty,
 }
 
@@ -27,6 +28,7 @@ impl LogicalPlan {
             LogicalPlan::Filter(f) => f.print(indent),
             LogicalPlan::Projection(p) => p.print(indent),
             LogicalPlan::CreateTable(c) => c.print(indent),
+            LogicalPlan::Explain(e) => e.print(indent),
             LogicalPlan::Empty => "Empty".to_string(),
         }
     }
@@ -37,8 +39,36 @@ impl LogicalPlan {
             LogicalPlan::Filter(f) => f.schema(),
             LogicalPlan::Projection(p) => p.schema(),
             LogicalPlan::CreateTable(c) => c.schema(),
+            LogicalPlan::Explain(e) => e.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
         }
+    }
+}
+
+pub struct Explain {
+    pub input: LogicalPlan,
+}
+
+impl Explain {
+    pub fn new(input: LogicalPlan) -> Self {
+        Self { input }
+    }
+
+    fn name(&self) -> String {
+        "Explain".to_string()
+    }
+
+    fn schema(&self) -> Schema {
+        self.input.schema()
+    }
+
+    fn print(&self, indent: usize) -> String {
+        format!(
+            "{}{}:\n{}",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.input.print_indent(indent + 1)
+        )
     }
 }
 
@@ -85,8 +115,8 @@ impl CreateTable {
 }
 
 pub struct Scan {
-    table_name: String,
-    schema: Schema,
+    pub table_name: String,
+    pub schema: Schema,
 }
 
 impl Scan {
@@ -119,8 +149,8 @@ impl Scan {
 }
 
 pub struct Filter {
-    input: LogicalPlan,
-    expr: BooleanBinaryExpr,
+    pub input: LogicalPlan,
+    pub expr: BooleanBinaryExpr,
 }
 
 impl Filter {
@@ -144,7 +174,7 @@ impl Filter {
     fn print(&self, indent: usize) -> String {
         format!(
             "{}{}: {}\n{}",
-            " ".repeat(indent),
+            "-".repeat(indent * 2),
             self.name(),
             self.expr.print(),
             self.input.print_indent(indent + 1)
@@ -153,8 +183,8 @@ impl Filter {
 }
 
 pub struct Projection {
-    input: LogicalPlan,
-    projections: Vec<String>,
+    pub input: LogicalPlan,
+    pub projections: Vec<String>,
 }
 
 impl Projection {

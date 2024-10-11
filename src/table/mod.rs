@@ -199,15 +199,6 @@ impl Table {
         Ok(new_tuple)
     }
 
-    pub fn try_start_txn(&mut self, txn_id: TxnId) -> bool {
-        if self.active_txn.is_some() {
-            false
-        } else {
-            self.start_txn(txn_id).unwrap();
-            true
-        }
-    }
-
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
         if self.active_txn.is_some() {
             Err(anyhow!("Another transaction is active"))
@@ -226,7 +217,6 @@ impl Table {
         }
     }
 
-    #[allow(unused)]
     pub fn abort_txn(&self, txn_id: TxnId) -> Result<()> {
         self.txn_manager.lock().abort(txn_id)
     }

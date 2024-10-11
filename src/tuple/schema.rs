@@ -132,13 +132,9 @@ mod tests {
             schema.to_sql()
         );
 
-        println!("{:#?}", sql);
-
         let statment = Parser::new(&GenericDialect)
             .try_with_sql(&sql)?
             .parse_statement()?;
-
-        println!("{:#?}", statment);
 
         match statment {
             Statement::CreateTable(CreateTable { columns, .. }) => {

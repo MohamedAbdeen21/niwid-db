@@ -11,6 +11,7 @@ fn main() -> Result<()> {
     // TODO: Use fields for handling nullability
     let schema = Schema::new(vec![
         Field::new("id", Types::U8, true),
+        Field::new("num", Types::U8, true),
         Field::new("msg", Types::Str, false),
     ]);
 
@@ -23,7 +24,7 @@ fn main() -> Result<()> {
     //     schema.to_sql(),
     // ))?;
 
-    ctx.execute_sql("SELECT *, id FROM users WHERE id = 'hello'")?;
+    ctx.execute_sql("SELECT msg, id FROM users WHERE num > 10")?;
 
     ctx.commit_txn()?;
 

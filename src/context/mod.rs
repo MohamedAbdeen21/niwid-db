@@ -1,4 +1,4 @@
-mod result_set;
+pub mod result_set;
 
 use crate::buffer_pool::BufferPoolManager;
 use crate::catalog::Catalog;
@@ -41,8 +41,8 @@ impl Context {
         schema: &Schema,
         ignore_if_exists: bool,
     ) -> Result<&mut Table> {
-        if self.active_txn.is_some() && !self.catalog_changed {
-            self.catalog.table.start_txn(self.active_txn.unwrap())?;
+        if let Some(txn_id) = self.active_txn {
+            self.catalog.table.start_txn(txn_id)?;
             self.catalog_changed = true;
         }
 

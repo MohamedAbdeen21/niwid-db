@@ -111,6 +111,7 @@ name = "idk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "backtrace",
  "bincode",
  "lazy_static",
  "parking_lot",
