@@ -6,7 +6,6 @@ fn main() -> Result<()> {
 
     ctx.start_txn()?;
 
-    // // TODO: Use fields for handling nullability
     // let schema = Schema::new(vec![
     //     Field::new("id", Types::U8, true),
     //     Field::new("num", Types::U8, true),

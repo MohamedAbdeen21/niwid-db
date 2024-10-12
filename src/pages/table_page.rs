@@ -1,4 +1,4 @@
-use super::{latch::Latch, traits::Serialize, PageId, INVALID_PAGE};
+use super::{latch::Latch, traits::Serialize, PageId};
 use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
 
 use super::{Page, PAGE_SIZE};
@@ -242,35 +242,24 @@ impl TablePage {
 impl<'a> From<&'a mut Page> for TablePage {
     fn from(page: &'a mut Page) -> TablePage {
         let data = page.data.as_mut_ptr() as *mut TablePageData;
-        let mut p = TablePage {
+        TablePage {
             data,
             page_id: page.get_page_id(),
             latch: page.latch.clone(),
             read_only: false,
-        };
-        if p.header().get_next_page() == 0 {
-            p.header_mut().set_next_page_id(INVALID_PAGE);
         }
-        p
     }
 }
 
 impl<'a> From<&'a Page> for TablePage {
     fn from(page: &'a Page) -> TablePage {
         let data = page.data.as_ptr() as *mut TablePageData;
-        let mut p = TablePage {
+        TablePage {
             data,
             page_id: page.get_page_id(),
             latch: page.latch.clone(),
-            read_only: false,
-        };
-        // FIXME: this doesn't set the page correctly because we took
-        // a non-mut ref to page. even when casted as *mut
-        if p.header().get_next_page() == 0 {
-            p.header_mut().set_next_page_id(INVALID_PAGE);
+            read_only: true,
         }
-        p.read_only = true;
-        p
     }
 }
 
@@ -285,9 +274,7 @@ pub struct TablePageHeader {
 
 impl TablePageHeader {
     pub fn set_next_page_id(&mut self, page: PageId) {
-        println!("Before setting to {}: {:?}", page, self.next_page);
         self.next_page = page;
-        println!("After setting to {}: {:?}", page, self.next_page);
     }
 
     pub fn get_next_page(&self) -> PageId {

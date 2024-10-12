@@ -15,7 +15,9 @@ use std::mem::take;
 use std::sync::Arc;
 
 const BUFFER_POOL_SIZE: usize = 10_000;
-const BUFFER_POOL_PAGE: PageId = 0;
+const BUFFER_POOL_PAGE: PageId = 1;
+// 0 is the invalid page, 1 is for bpm, 2 is for catalog
+const STARTING_PAGE_ID: PageId = 3;
 
 type FrameId = usize;
 pub type ArcBufferPool = Arc<FairMutex<BufferPoolManager>>;
@@ -64,7 +66,7 @@ impl BufferPoolManager {
             Err(_) => {
                 let mut page = Page::new();
                 page.set_page_id(BUFFER_POOL_PAGE);
-                page.write_bytes(2, 10, &2_i64.to_ne_bytes());
+                page.write_bytes(2, 10, &STARTING_PAGE_ID.to_ne_bytes());
                 page
             }
         };
@@ -75,7 +77,6 @@ impl BufferPoolManager {
             page_table: HashMap::new(),
             replacer: Box::new(replacer::LRU::new(size)),
             disk_manager,
-            // page_id 0 is preserved for bp [`BUFFER_POOL_PAGE`], and 1 for catalog [`CATALOG_PAGE`]
             next_page_id,
             txn_table: HashMap::new(),
         }
@@ -110,8 +111,8 @@ impl BufferPoolManager {
                 .find(|f| self.frames[**f].get_page_id() == page_id)
             {
                 // default to the original page if the page was not touched/shadowed
-                None => return self.fetch_frame(page_id, None),
-                // None => unreachable!(),
+                // None => return self.fetch_frame(page_id, None),
+                None => unreachable!(),
                 Some(frame) => frame,
             }
         } else if let Some(frame_id) = self.page_table.get(&page_id) {
@@ -269,7 +270,7 @@ impl BufferPoolManager {
             let old_frame_id = self.page_table[&shadow_page_id];
             let old_frame = &mut self.frames[old_frame_id];
 
-            old_frame.move_page(shadow_frame);
+            old_frame.take_page(shadow_frame);
 
             self.unpin(&shadow_page_id, None);
 

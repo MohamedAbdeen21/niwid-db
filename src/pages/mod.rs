@@ -10,7 +10,7 @@ use traits::Serialize;
 use crate::disk_manager::DiskWritable;
 
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
-pub const INVALID_PAGE: PageId = -1;
+pub const INVALID_PAGE: PageId = 0;
 
 pub type PageId = i64;
 

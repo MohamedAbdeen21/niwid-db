@@ -39,9 +39,7 @@ impl Context {
             self.catalog_changed = true;
         }
 
-        let table = self.catalog.add_table(name, schema, ignore_if_exists)?;
-
-        Ok(table)
+        self.catalog.add_table(name, schema, ignore_if_exists)
     }
 
     pub fn start_txn(&mut self) -> Result<()> {

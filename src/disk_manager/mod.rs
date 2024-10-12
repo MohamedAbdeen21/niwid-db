@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn test_shadow_page() -> Result<()> {
         let path = test_path();
-        let page_id = 1;
+        let page_id = 777;
         let txn_id = 2;
 
         let disk = DiskManager::new(&path);

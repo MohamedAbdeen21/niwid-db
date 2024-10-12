@@ -18,6 +18,7 @@ impl Default for LogicalPlan {
 }
 
 impl LogicalPlan {
+    #[allow(unused)]
     pub fn print(&self) -> String {
         self.print_indent(0)
     }
