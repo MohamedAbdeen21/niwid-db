@@ -32,8 +32,9 @@ impl Executable for Explain {
 
 impl Executable for CreateTable {
     fn execute(&self) -> Result<ResultSet> {
-        let mut catalog = Catalog::new()?;
+        let catalog = Catalog::get();
         catalog
+            .lock()
             .add_table(&self.table_name, &self.schema, self.if_not_exists)
             .unwrap();
         Ok(ResultSet::default())
@@ -68,7 +69,8 @@ impl Executable for Projection {
 
 impl Executable for Scan {
     fn execute(&self) -> Result<ResultSet> {
-        let mut catalog = Catalog::new()?;
+        let arc_catalog = Catalog::get();
+        let mut catalog = arc_catalog.lock();
         let table = catalog.get_table(&self.table_name).unwrap();
 
         let schema = table.get_schema();

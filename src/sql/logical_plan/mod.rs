@@ -92,7 +92,7 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
             };
 
             // TODO: Singleton catalog to avoid re-building whole catalog
-            let schema = Catalog::new()?.get_table(&name).unwrap().get_schema();
+            let schema = Catalog::get().lock().get_table(&name).unwrap().get_schema();
 
             LogicalPlan::Scan(Scan::new(name, schema.clone()))
         }

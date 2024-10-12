@@ -1,13 +1,23 @@
+use std::sync::Arc;
+
 use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
 use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{anyhow, Result};
+use lazy_static::lazy_static;
+use parking_lot::Mutex;
 
 // preserve page_id 1 for catalog, bpm starts assigning at 2
 pub const CATALOG_PAGE: PageId = 2;
 pub const CATALOG_NAME: &str = "__CATALOG__";
+
+pub type ArcCatalog = Arc<Mutex<Catalog>>;
+
+lazy_static! {
+    static ref CATALOG: ArcCatalog = Arc::new(Mutex::new(Catalog::new()));
+}
 
 pub struct Catalog {
     pub table: Table,
@@ -17,7 +27,10 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    pub fn new() -> Result<Self> {
+    pub fn get() -> ArcCatalog {
+        CATALOG.clone()
+    }
+    fn table() -> (Table, Schema) {
         let schema = Schema::new(vec![
             Field::new("table_name", Types::Str, false),
             Field::new("first_page", Types::I64, false),
@@ -30,7 +43,13 @@ impl Catalog {
             &schema,
             CATALOG_PAGE,
             CATALOG_PAGE,
-        )?;
+        )
+        .expect("Catalog fetch failed");
+
+        (table, schema)
+    }
+    fn build_catalog() -> Vec<(TupleId, Table)> {
+        let (table, schema) = Self::table();
 
         let mut tables = vec![];
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
@@ -49,13 +68,20 @@ impl Catalog {
             Ok(())
         };
 
-        table.scan(table_builder)?;
+        table.scan(table_builder).expect("Catalog scan failed");
 
-        Ok(Catalog {
+        tables
+    }
+
+    pub fn new() -> Self {
+        let (table, schema) = Self::table();
+        let tables = Self::build_catalog();
+
+        Catalog {
             table,
             tables,
             schema,
-        })
+        }
     }
 
     pub fn add_table(
@@ -63,10 +89,10 @@ impl Catalog {
         table_name: &str,
         schema: &Schema,
         ignore_if_exists: bool,
-    ) -> Result<&mut Table> {
+    ) -> Result<()> {
         if self.get_table(table_name).is_some() {
             if ignore_if_exists {
-                return Ok(self.get_table(table_name).unwrap());
+                return Ok(());
             }
             return Err(anyhow!("Table {} already exists", table_name));
         }
@@ -84,10 +110,13 @@ impl Catalog {
 
         self.tables.push((tuple_id, table));
 
-        Ok(&mut self.tables.last_mut().unwrap().1)
+        Ok(())
     }
 
-    pub fn get_table(&mut self, table_name: &str) -> Option<&mut Table> {
+    pub fn get_table<'a, 'b>(&'a mut self, table_name: &str) -> Option<&'b mut Table>
+    where
+        'a: 'b,
+    {
         self.tables
             .iter_mut()
             .find(|(_, table)| table.get_name() == table_name)
