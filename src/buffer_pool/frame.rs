@@ -61,7 +61,7 @@ impl Frame {
         &mut self.page
     }
 
-    pub fn reader(&self) -> &Page {
+    pub fn reader(&mut self) -> &Page {
         &self.page
     }
 }

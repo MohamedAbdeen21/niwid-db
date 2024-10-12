@@ -190,7 +190,7 @@ impl Serialize for TupleMetaData {
 
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), mem::size_of::<TupleMetaData>());
-        unsafe { *(bytes.as_ptr() as *const TupleMetaData) }
+        unsafe { *(bytes.as_ptr() as *mut TupleMetaData) }
     }
 }
 

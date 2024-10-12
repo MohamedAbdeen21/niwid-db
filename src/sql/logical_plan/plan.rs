@@ -73,10 +73,10 @@ impl Explain {
 }
 
 pub struct CreateTable {
-    table_name: String,
-    input: LogicalPlan,
-    schema: Schema,
-    if_not_exists: bool,
+    pub table_name: String,
+    pub input: LogicalPlan,
+    pub schema: Schema,
+    pub if_not_exists: bool,
 }
 
 impl CreateTable {

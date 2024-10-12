@@ -50,7 +50,9 @@ impl Iterator for TableIterator {
             self.bpm.lock().unpin(&page_id, self.active_txn);
         }
 
-        if self.current_slot >= self.num_tuples && self.next_page == INVALID_PAGE {
+        if self.current_slot >= self.num_tuples
+            && (self.next_page == INVALID_PAGE || self.next_page == 0)
+        {
             return None;
         }
 

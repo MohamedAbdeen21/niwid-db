@@ -17,7 +17,7 @@ impl ResultSet {
             .iter()
             .enumerate()
             .map(|(i, col)| {
-                let header_len = format!("{:?}", col).len();
+                let header_len = format!("{} ({})", col.name, col.ty.to_sql()).len();
                 let max_data_len = self
                     .data
                     .iter()
@@ -31,7 +31,11 @@ impl ResultSet {
         print_row_divider(&col_widths);
 
         for (i, col) in self.cols.iter().enumerate() {
-            print!("| {:^width$} ", format!("{:?}", col), width = col_widths[i]);
+            print!(
+                "| {:^width$} ",
+                format!("{} ({})", col.name, col.ty.to_sql()),
+                width = col_widths[i]
+            );
         }
         println!("|");
 

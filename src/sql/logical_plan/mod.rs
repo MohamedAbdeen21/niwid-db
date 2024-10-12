@@ -137,8 +137,6 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
 
     root = LogicalPlan::Projection(Box::new(Projection::new(root, columns.clone())));
 
-    print!("{}", root.print());
-
     Ok(root)
 }
 

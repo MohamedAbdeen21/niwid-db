@@ -186,10 +186,17 @@ impl BufferPoolManager {
 
     pub fn unpin(&mut self, page_id: &PageId, txn_id: Option<TxnId>) {
         // TODO: we expect all shadow frames to be dropped when txn ends, right? ...
-        if txn_id.is_some() && self.txn_table.contains_key(&txn_id.unwrap()) {
-            return;
-        }
-        let frame_id = *self.page_table.get(page_id).unwrap();
+        let frame_id = if txn_id.is_some() && self.txn_table.contains_key(&txn_id.unwrap()) {
+            *self
+                .txn_table
+                .get(&txn_id.unwrap())
+                .unwrap()
+                .iter()
+                .find(|f| self.frames[**f].get_page_id() == *page_id)
+                .unwrap()
+        } else {
+            *self.page_table.get(page_id).unwrap()
+        };
         let frame = &mut self.frames[frame_id];
         assert!(frame.get_pin_count() > 0);
         frame.unpin();
@@ -288,7 +295,12 @@ impl BufferPoolManager {
         self.frames
             .iter_mut()
             .filter(|f| f.reader().get_page_id() != INVALID_PAGE && f.reader().is_dirty())
-            .inspect(|f| assert!(f.get_pin_count() == 0))
+            .inspect(|f| {
+                let pins = f.get_pin_count();
+                if pins != 0 {
+                    panic!("Frame {} has pin count {}", f.get_page_id(), pins);
+                }
+            })
             .map(|f| f.writer())
             .try_for_each(|p| self.disk_manager.write_to_file(p, None))
     }

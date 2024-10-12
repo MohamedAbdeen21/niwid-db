@@ -1,8 +1,14 @@
+pub mod result_set;
+
 use crate::catalog::Catalog;
-use crate::context::result_set::ResultSet;
-use crate::sql::logical_plan::plan::Projection;
-use crate::sql::logical_plan::plan::{Filter, LogicalPlan, Scan};
+use crate::sql::logical_plan::plan::{CreateTable, Filter, LogicalPlan, Scan};
+use crate::sql::logical_plan::plan::{Explain, Projection};
 use anyhow::Result;
+use result_set::ResultSet;
+
+pub trait Executable {
+    fn execute(&self) -> Result<ResultSet>;
+}
 
 impl LogicalPlan {
     pub fn execute(&self) -> Result<ResultSet> {
@@ -10,12 +16,31 @@ impl LogicalPlan {
             LogicalPlan::Projection(plan) => plan.execute(),
             LogicalPlan::Scan(scan) => scan.execute(),
             LogicalPlan::Filter(filter) => filter.execute(),
-            _ => todo!(),
+            LogicalPlan::CreateTable(create) => create.execute(),
+            LogicalPlan::Explain(explain) => explain.execute(),
+            LogicalPlan::Empty => Ok(ResultSet::default()),
         }
     }
 }
 
-impl Projection {
+impl Executable for Explain {
+    fn execute(&self) -> Result<ResultSet> {
+        self.input.execute()?.show();
+        Ok(ResultSet::default())
+    }
+}
+
+impl Executable for CreateTable {
+    fn execute(&self) -> Result<ResultSet> {
+        let mut catalog = Catalog::new()?;
+        catalog
+            .add_table(&self.table_name, &self.schema, self.if_not_exists)
+            .unwrap();
+        Ok(ResultSet::default())
+    }
+}
+
+impl Executable for Projection {
     fn execute(&self) -> Result<ResultSet> {
         let input = self.input.execute()?;
         let cols = input
@@ -41,7 +66,7 @@ impl Projection {
     }
 }
 
-impl Scan {
+impl Executable for Scan {
     fn execute(&self) -> Result<ResultSet> {
         let mut catalog = Catalog::new()?;
         let table = catalog.get_table(&self.table_name).unwrap();
@@ -52,13 +77,13 @@ impl Scan {
         table.scan(|(_, (_, tuple))| {
             values.push(tuple.get_values(&schema)?);
             Ok(())
-        });
+        })?;
 
         Ok(ResultSet::new(schema.fields.clone(), values))
     }
 }
 
-impl Filter {
+impl Executable for Filter {
     fn execute(&self) -> Result<ResultSet> {
         let input = self.input.execute()?;
 

@@ -264,6 +264,8 @@ impl<'a> From<&'a Page> for TablePage {
             latch: page.latch.clone(),
             read_only: false,
         };
+        // FIXME: this doesn't set the page correctly because we took
+        // a non-mut ref to page. even when casted as *mut
         if p.header().get_next_page() == 0 {
             p.header_mut().set_next_page_id(INVALID_PAGE);
         }
@@ -272,18 +274,20 @@ impl<'a> From<&'a Page> for TablePage {
     }
 }
 
-#[repr(C, align(2))]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct TablePageHeader {
     is_dirty: bool,
-    /// INVALID_PAGE (-1) if there are no more pages
     num_tuples: u16,
+    /// INVALID_PAGE (-1) if there are no more pages
     next_page: PageId,
 }
 
 impl TablePageHeader {
-    pub fn set_next_page_id(&mut self, next_page: PageId) {
-        self.next_page = next_page;
+    pub fn set_next_page_id(&mut self, page: PageId) {
+        println!("Before setting to {}: {:?}", page, self.next_page);
+        self.next_page = page;
+        println!("After setting to {}: {:?}", page, self.next_page);
     }
 
     pub fn get_next_page(&self) -> PageId {
@@ -318,7 +322,8 @@ impl Serialize for TablePageSlot {
 
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), SLOT_SIZE);
-        unsafe { *(bytes.as_ptr() as *const TablePageSlot) }
+        let bytes: [u8; SLOT_SIZE] = bytes.try_into().unwrap();
+        unsafe { std::mem::transmute::<[u8; SLOT_SIZE], TablePageSlot>(bytes) }
     }
 }
 
