@@ -1,6 +1,6 @@
 use crate::tuple::schema::Schema;
 
-use super::expr::BooleanBinaryExpr;
+use super::expr::{BooleanBinaryExpr, LogicalExpr};
 
 pub enum LogicalPlan {
     Projection(Box<Projection>),
@@ -8,6 +8,7 @@ pub enum LogicalPlan {
     Filter(Box<Filter>),
     CreateTable(Box<CreateTable>),
     Explain(Box<Explain>),
+    Insert(Box<Insert>),
     Empty,
 }
 
@@ -30,7 +31,8 @@ impl LogicalPlan {
             LogicalPlan::Projection(p) => p.print(indent),
             LogicalPlan::CreateTable(c) => c.print(indent),
             LogicalPlan::Explain(e) => e.print(indent),
-            LogicalPlan::Empty => "Empty".to_string(),
+            LogicalPlan::Insert(i) => i.print(indent),
+            LogicalPlan::Empty => format!("{}Empty", "-".repeat(indent * 2)),
         }
     }
 
@@ -41,8 +43,43 @@ impl LogicalPlan {
             LogicalPlan::Projection(p) => p.schema(),
             LogicalPlan::CreateTable(c) => c.schema(),
             LogicalPlan::Explain(e) => e.schema(),
+            LogicalPlan::Insert(i) => i.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
         }
+    }
+}
+
+pub struct Insert {
+    pub input: LogicalPlan,
+    pub table_name: String,
+    pub schema: Schema, // RETURNING statement
+}
+
+impl Insert {
+    pub fn new(input: LogicalPlan, table_name: String, schema: Schema) -> Self {
+        Self {
+            input,
+            table_name,
+            schema,
+        }
+    }
+
+    fn name(&self) -> String {
+        "Insert".to_string()
+    }
+
+    fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    fn print(&self, indent: usize) -> String {
+        format!(
+            "{}{}: {}\n{}",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.table_name,
+            self.input.print_indent(indent + 1)
+        )
     }
 }
 
@@ -185,11 +222,11 @@ impl Filter {
 
 pub struct Projection {
     pub input: LogicalPlan,
-    pub projections: Vec<String>,
+    pub projections: Vec<LogicalExpr>,
 }
 
 impl Projection {
-    pub fn new(input: LogicalPlan, projections: Vec<String>) -> Self {
+    pub fn new(input: LogicalPlan, projections: Vec<LogicalExpr>) -> Self {
         Self { input, projections }
     }
 
@@ -198,12 +235,13 @@ impl Projection {
     }
 
     pub fn schema(&self) -> Schema {
-        let schema = self.input.schema();
-        if self.projections.is_empty() {
-            schema
-        } else {
-            schema.subset(&self.projections)
-        }
+        let fields = self
+            .projections
+            .iter()
+            .map(|p| p.to_field(&self.input.schema()))
+            .collect();
+
+        Schema::new(fields)
     }
 
     fn print(&self, indent: usize) -> String {
@@ -213,7 +251,12 @@ impl Projection {
             self.name(),
             self.projections
                 .iter()
-                .map(|s| format!("#{}", s))
+                .map(|s| {
+                    match s {
+                        LogicalExpr::Column(c) => format!("#{}", c),
+                        LogicalExpr::Literal(l) => format!("{}", l),
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(","),
             self.input.print_indent(indent + 1)

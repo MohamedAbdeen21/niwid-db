@@ -157,6 +157,30 @@ pub enum Value {
     Null,
 }
 
+impl Value {
+    pub fn get_type(&self) -> Types {
+        match self {
+            Value::U8(_) => Types::U8,
+            Value::U16(_) => Types::U16,
+            Value::U32(_) => Types::U32,
+            Value::U64(_) => Types::U64,
+            Value::U128(_) => Types::U128,
+            Value::I8(_) => Types::I8,
+            Value::I16(_) => Types::I16,
+            Value::I32(_) => Types::I32,
+            Value::I64(_) => Types::I64,
+            Value::I128(_) => Types::I128,
+            Value::F32(_) => Types::F32,
+            Value::F64(_) => Types::F64,
+            Value::Bool(_) => Types::Bool,
+            Value::Char(_) => Types::Char,
+            Value::Str(_) => Types::Str,
+            Value::StrAddr(_) => Types::StrAddr,
+            Value::Null => Types::Char, // FIXME:
+        }
+    }
+}
+
 impl AsBytes for Value {
     fn to_bytes(&self) -> Box<[u8]> {
         match self {

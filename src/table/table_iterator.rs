@@ -1,23 +1,27 @@
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::TablePage;
 use crate::pages::{PageId, INVALID_PAGE};
+use crate::tuple::schema::Schema;
 use crate::tuple::{Entry, TupleId};
 use crate::txn_manager::TxnId;
+use crate::types::{Types, Value};
 
 use super::Table;
 
 // TODO: try to iterate over pages not tuples
-pub(super) struct TableIterator {
+pub(super) struct TableIterator<'a> {
     page: TablePage,
     current_slot: usize,
     next_page: PageId,
     bpm: ArcBufferPool,
     num_tuples: usize,
     active_txn: Option<TxnId>,
+    schema: Schema,
+    table: &'a Table,
 }
 
-impl TableIterator {
-    pub fn new(table: &Table) -> Self {
+impl<'a> TableIterator<'a> {
+    pub fn new(table: &'a Table) -> Self {
         let bpm = table.bpm.clone();
         let page: TablePage = bpm
             .lock()
@@ -35,12 +39,13 @@ impl TableIterator {
             page,
             bpm,
             active_txn: table.active_txn,
-            // schema is not needed for now, can copy from table though
+            schema: table.schema.clone(),
+            table,
         }
     }
 }
 
-impl Iterator for TableIterator {
+impl<'a> Iterator for TableIterator<'a> {
     type Item = (TupleId, Entry);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -72,12 +77,14 @@ impl Iterator for TableIterator {
             return self.next();
         }
 
-        let entry = self.page.read_tuple(self.current_slot);
+        let (meta, tuple) = self.page.read_tuple(self.current_slot);
         self.current_slot += 1;
 
-        if entry.0.is_deleted() {
+        if meta.is_deleted() {
             return self.next();
         }
+
+        let entry = (meta, tuple);
 
         let page_id = self.page.get_page_id();
 

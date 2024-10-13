@@ -130,13 +130,7 @@ impl Tuple {
         &self.data
     }
 
-    #[allow(unused)]
-    pub fn set_field(
-        &mut self,
-        field: u8,
-        value: Option<Box<dyn AsBytes>>,
-        schema: &Schema,
-    ) -> Result<()> {
+    pub fn set_field(&mut self, field: u8, value: Option<Value>, schema: &Schema) -> Result<()> {
         if value.is_none() {
             self._null_bitmap |= 1 << field;
         } else {

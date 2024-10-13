@@ -1,14 +1,50 @@
 use crate::{tuple::schema::Field, types::Value};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ResultSet {
     pub cols: Vec<Field>,
     pub data: Vec<Vec<Value>>,
+    cap: usize,
 }
 
 impl ResultSet {
     pub fn new(cols: Vec<Field>, data: Vec<Vec<Value>>) -> Self {
-        Self { cols, data }
+        Self {
+            cols,
+            cap: data.len(),
+            data,
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            cols: Vec::with_capacity(capacity),
+            data: Vec::with_capacity(capacity),
+            cap: capacity,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        self.cap
+    }
+
+    pub fn concat(mut self, other: ResultSet) -> Self {
+        self.data
+            .iter_mut()
+            .zip(other.data.into_iter())
+            .for_each(|(a, b)| a.extend(b));
+
+        let cols = self
+            .cols
+            .into_iter()
+            .chain(other.cols.into_iter())
+            .collect();
+
+        Self {
+            cols,
+            cap: self.data.len(),
+            data: self.data,
+        }
     }
 
     pub fn show(&self) {

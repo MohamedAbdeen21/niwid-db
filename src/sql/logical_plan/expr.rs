@@ -1,8 +1,12 @@
 use sqlparser::ast::BinaryOperator; // just use sqlparser operators instead of writing our own
 
-use crate::types::Value;
+use crate::{
+    tuple::schema::{Field, Schema},
+    types::Value,
+};
 
 #[allow(unused)]
+#[derive(Clone, Debug)]
 pub enum LogicalExpr {
     Literal(Value),
     Column(String),
@@ -13,6 +17,13 @@ impl LogicalExpr {
         match self {
             LogicalExpr::Literal(v) => format!("{}", v),
             LogicalExpr::Column(v) => format!("#{}", v),
+        }
+    }
+
+    pub fn to_field(&self, schema: &Schema) -> Field {
+        match self {
+            LogicalExpr::Literal(v) => Field::new(&format!("{}", v), v.get_type(), true),
+            LogicalExpr::Column(v) => schema.fields.iter().find(|f| f.name == *v).unwrap().clone(),
         }
     }
 }
