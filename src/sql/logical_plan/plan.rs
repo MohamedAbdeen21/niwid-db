@@ -280,7 +280,7 @@ mod tests {
     fn test_print() -> Result<()> {
         let scan = LogicalPlan::Scan(Scan {
             table_name: "test".to_string(),
-            schema: Schema::new(vec![Field::new("a", Types::I64, false)]),
+            schema: Schema::new(vec![Field::new("a", Types::UInt, false)]),
         });
 
         let string = scan.print();
@@ -291,7 +291,7 @@ mod tests {
             expr: BooleanBinaryExpr::new(
                 LogicalExpr::Column("a".to_string()),
                 BinaryOperator::Gt,
-                LogicalExpr::Literal(ValueFactory::from_string(&Types::I64, "10")),
+                LogicalExpr::Literal(ValueFactory::from_string(&Types::UInt, "10")),
             ),
             input: scan,
         }));

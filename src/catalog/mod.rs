@@ -33,8 +33,8 @@ impl Catalog {
     fn table() -> (Table, Schema) {
         let schema = Schema::new(vec![
             Field::new("table_name", Types::Str, false),
-            Field::new("first_page", Types::I64, false),
-            Field::new("last_page", Types::I64, false),
+            Field::new("first_page", Types::UInt, false),
+            Field::new("last_page", Types::UInt, false),
             Field::new("schema", Types::Str, false),
         ]);
 
@@ -55,8 +55,8 @@ impl Catalog {
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
             let name = table.fetch_string(values[0].str_addr());
-            let first_page_id = ValueFactory::from_bytes(&Types::I64, &values[1].to_bytes()).i64();
-            let last_page_id = ValueFactory::from_bytes(&Types::I64, &values[2].to_bytes()).i64();
+            let first_page_id = ValueFactory::from_bytes(&Types::UInt, &values[1].to_bytes()).u32();
+            let last_page_id = ValueFactory::from_bytes(&Types::UInt, &values[2].to_bytes()).u32();
             let schema = table.fetch_string(values[3].str_addr());
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
@@ -101,11 +101,11 @@ impl Catalog {
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
             ValueFactory::from_string(&Types::Str, table_name),
-            ValueFactory::from_string(&Types::I64, &table.get_first_page_id().to_string()),
-            ValueFactory::from_string(&Types::I64, &table.get_last_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, &table.get_first_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, &table.get_last_page_id().to_string()),
             ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
-        let tuple = Tuple::new(tuple_data, schema);
+        let tuple = Tuple::new(tuple_data, &self.schema);
         let tuple_id = self.table.insert(tuple)?;
 
         self.tables.push((tuple_id, table));

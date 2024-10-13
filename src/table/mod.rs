@@ -169,8 +169,8 @@ impl Table {
             .iter()
             .scan(0, |acc, ty| {
                 let size = if *ty == Types::Str {
-                    let slice = &tuple.get_data()[*acc..*acc + 2];
-                    ValueFactory::from_bytes(&Types::U16, slice).u16() as usize + 2
+                    let slice = tuple.get_data()[*acc..*acc + 2].try_into().unwrap();
+                    u16::from_ne_bytes(slice) as usize + 2
                 } else {
                     ty.size()
                 };
@@ -361,8 +361,8 @@ mod tests {
     #[test]
     fn test_unpin_drop() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("id", Types::U8, false),
-            Field::new("age", Types::U16, false),
+            Field::new("id", Types::UInt, false),
+            Field::new("age", Types::UInt, false),
         ]);
 
         let mut table = test_table(2, &schema)?;
@@ -370,8 +370,8 @@ mod tests {
         let bpm = table.bpm.clone();
 
         let tuple_data: Vec<Value> = vec![
-            ValueFactory::from_string(&Types::U8, "2"),
-            ValueFactory::from_string(&Types::U16, "50000"),
+            ValueFactory::from_string(&Types::UInt, "2"),
+            ValueFactory::from_string(&Types::UInt, "50000"),
         ];
         let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
@@ -386,21 +386,21 @@ mod tests {
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let schema = Schema::new(vec![Field::new("a", Types::U128, false)]);
+        let schema = Schema::new(vec![Field::new("a", Types::UInt, false)]);
         let mut table = test_table(4, &schema)?;
 
         let first_id = table.get_first_page_id();
         let blob_id = table.get_blob_page_id();
 
-        // entry size = 33 (17 meta + 16 data)
+        // entry size = 21 (17 meta + 4 data)
         // slot size = 4
         // free page = 4080
-        // 110 * 37 ≈ 4080
-        let tuples_per_page = 110;
+        // 163 * 25 ≈ 4080
+        let tuples_per_page = 163;
 
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::U128, &i.to_string())],
+                vec![ValueFactory::from_string(&Types::UInt, &i.to_string())],
                 &schema,
             );
             table.insert(tuple)?;
@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(table.first_page, table.last_page);
 
         table.insert(Tuple::new(
-            vec![ValueFactory::from_string(&Types::U128, "99999")],
+            vec![ValueFactory::from_string(&Types::UInt, "99999")],
             &schema,
         ))?;
         let second_id = table.get_last_page_id();
@@ -419,7 +419,7 @@ mod tests {
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::U128, &i.to_string())],
+                vec![ValueFactory::from_string(&Types::UInt, &i.to_string())],
                 &schema,
             );
             table.insert(tuple)?;
@@ -448,18 +448,18 @@ mod tests {
         let s1 = "Hello, World!";
         let s2 = "Hello, Again";
         let schema = Schema::new(vec![
-            Field::new("a", Types::U8, false),
+            Field::new("a", Types::UInt, false),
             Field::new("str", Types::Str, false),
-            Field::new("b", Types::U8, false),
+            Field::new("b", Types::UInt, false),
         ]);
 
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "100"),
+                ValueFactory::from_string(&Types::UInt, "100"),
                 ValueFactory::from_string(&Types::Str, s1),
-                ValueFactory::from_string(&Types::U8, "50"),
+                ValueFactory::from_string(&Types::UInt, "50"),
             ],
             &schema,
         );
@@ -467,9 +467,9 @@ mod tests {
 
         let tuple = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "20"),
+                ValueFactory::from_string(&Types::UInt, "20"),
                 ValueFactory::from_string(&Types::Str, s2),
-                ValueFactory::from_string(&Types::U8, "10"),
+                ValueFactory::from_string(&Types::UInt, "10"),
             ],
             &schema,
         );
@@ -503,7 +503,7 @@ mod tests {
         let s2 = "Hello, Again";
         let schema = Schema::new(vec![
             Field::new("s1", Types::Str, false),
-            Field::new("a", Types::U8, false),
+            Field::new("a", Types::UInt, false),
             Field::new("s2", Types::Str, false),
         ]);
 
@@ -512,7 +512,7 @@ mod tests {
         let tuple = Tuple::new(
             vec![
                 ValueFactory::from_string(&Types::Str, s1),
-                ValueFactory::from_string(&Types::U8, "100"),
+                ValueFactory::from_string(&Types::UInt, "100"),
                 ValueFactory::from_string(&Types::Str, s2),
             ],
             &schema,
@@ -523,7 +523,7 @@ mod tests {
             let values = tuple.get_values(&schema)?;
             let read_s1 = table.fetch_string(values[0].str_addr());
 
-            let a = U8::from_bytes(&values[1].to_bytes()).0;
+            let a = UInt::from_bytes(&values[1].to_bytes()).0;
 
             let read_s2 = table.fetch_string(values[2].str_addr());
 
@@ -542,27 +542,27 @@ mod tests {
     #[test]
     fn test_delete() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::U128, false),
-            Field::new("b", Types::F64, false),
-            Field::new("c", Types::I8, false),
+            Field::new("a", Types::UInt, false),
+            Field::new("b", Types::Float, false),
+            Field::new("c", Types::Int, false),
         ]);
 
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U128, "10"),
-                ValueFactory::from_string(&Types::F64, "10.0"),
-                ValueFactory::from_string(&Types::I8, "10"),
+                ValueFactory::from_string(&Types::UInt, "10"),
+                ValueFactory::from_string(&Types::Float, "10.0"),
+                ValueFactory::from_string(&Types::Int, "10"),
             ],
             &schema,
         );
         let t1_id = table.insert(tuple)?;
 
         let tuple_data = vec![
-            ValueFactory::from_string(&Types::U128, "20"),
-            ValueFactory::from_string(&Types::F64, "20.0"),
-            ValueFactory::from_string(&Types::I8, "20"),
+            ValueFactory::from_string(&Types::UInt, "20"),
+            ValueFactory::from_string(&Types::Float, "20.0"),
+            ValueFactory::from_string(&Types::Int, "20"),
         ];
         let tuple = Tuple::new(tuple_data.clone(), &schema);
         let t2_id = table.insert(tuple)?;
@@ -592,9 +592,9 @@ mod tests {
     #[test]
     fn test_nulls() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::U128, false),
-            Field::new("b", Types::Str, false),
-            Field::new("c", Types::I8, false),
+            Field::new("a", Types::UInt, true),
+            Field::new("b", Types::Str, true),
+            Field::new("c", Types::Int, true),
         ]);
 
         let mut table = test_table(4, &schema)?;

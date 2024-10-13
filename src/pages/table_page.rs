@@ -364,14 +364,17 @@ mod tests {
         let table_page_2: TablePage = page.into();
 
         let tuple = Tuple::new(
-            vec![ValueFactory::from_string(&Types::U16, "300")],
-            &Schema::new(vec![Field::new("a", Types::U16, false)]),
+            vec![ValueFactory::from_string(&Types::UInt, "300")],
+            &Schema::new(vec![Field::new("a", Types::UInt, false)]),
         );
 
         table_page.insert_tuple(&tuple)?;
         table_page.insert_tuple(&tuple)?;
 
-        assert_eq!(page.read_bytes(PAGE_SIZE - 2, PAGE_SIZE), tuple.to_bytes());
+        assert_eq!(
+            page.read_bytes(PAGE_SIZE - Types::UInt.size(), PAGE_SIZE),
+            tuple.to_bytes()
+        );
         assert!(page.is_dirty());
         assert!(table_page.header().is_dirty());
         assert!(table_page_2.header().is_dirty());

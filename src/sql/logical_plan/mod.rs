@@ -153,7 +153,7 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
         .flat_map(|e| match e {
             SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
                 vec![LogicalExpr::Literal(ValueFactory::from_string(
-                    &Types::I16,
+                    &Types::UInt,
                     &s,
                 ))]
             }
@@ -174,15 +174,15 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
                 .map(|c| LogicalExpr::Column(c))
                 .collect(),
             SelectItem::UnnamedExpr(Expr::Tuple(fields)) => {
-                if fields.iter().any(|e| !matches!(e, Expr::Value(_))) {
-                    unimplemented!();
+                if let Some(expr) = fields.iter().find(|e| !matches!(e, Expr::Value(_))) {
+                    unimplemented!("{:?}", expr);
                 };
 
                 fields
                     .iter()
                     .map(|e| match e {
                         Expr::Value(SqlValue::Number(s, _)) => {
-                            LogicalExpr::Literal(ValueFactory::from_string(&Types::I16, s))
+                            LogicalExpr::Literal(ValueFactory::from_string(&Types::UInt, s))
                         }
                         Expr::Value(SqlValue::SingleQuotedString(s)) => {
                             LogicalExpr::Literal(ValueFactory::from_string(&Types::Str, s))
@@ -225,7 +225,7 @@ impl From<Expr> for LogicalExpr {
             Expr::Identifier(ident) => LogicalExpr::Column(ident.to_string()),
             Expr::Value(value) => {
                 let (ty, v) = match value {
-                    SqlValue::Number(v, _) => (Types::I16, v),
+                    SqlValue::Number(v, _) => (Types::UInt, v),
                     SqlValue::SingleQuotedString(s) => (Types::Str, s),
                     _ => unimplemented!(),
                 };

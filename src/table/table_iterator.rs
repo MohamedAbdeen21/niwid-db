@@ -4,7 +4,6 @@ use crate::pages::{PageId, INVALID_PAGE};
 use crate::tuple::schema::Schema;
 use crate::tuple::{Entry, TupleId};
 use crate::txn_manager::TxnId;
-use crate::types::{Types, Value};
 
 use super::Table;
 
@@ -107,15 +106,15 @@ mod tests {
     #[test]
     fn test_skip_deleted() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("id", Types::U8, false),
-            Field::new("age", Types::U16, false),
+            Field::new("id", Types::UInt, false),
+            Field::new("age", Types::UInt, false),
         ]);
         let mut table = test_table(3, &schema)?;
 
         let t1 = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "2"),
-                ValueFactory::from_string(&Types::U16, "3"),
+                ValueFactory::from_string(&Types::UInt, "2"),
+                ValueFactory::from_string(&Types::UInt, "3"),
             ],
             &schema,
         );
@@ -123,8 +122,8 @@ mod tests {
 
         let t2 = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "4"),
-                ValueFactory::from_string(&Types::U16, "5"),
+                ValueFactory::from_string(&Types::UInt, "4"),
+                ValueFactory::from_string(&Types::UInt, "5"),
             ],
             &schema,
         );
@@ -134,8 +133,8 @@ mod tests {
 
         let t3 = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "6"),
-                ValueFactory::from_string(&Types::U16, "7"),
+                ValueFactory::from_string(&Types::UInt, "6"),
+                ValueFactory::from_string(&Types::UInt, "7"),
             ],
             &schema,
         );
@@ -158,19 +157,19 @@ mod tests {
     #[test]
     fn test_multiple_pages() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::U128, false),
-            Field::new("b", Types::U128, false),
+            Field::new("a", Types::Int, false),
+            Field::new("b", Types::Int, false),
         ]);
 
-        let tuples_per_page = 76;
+        let tuples_per_page = 140;
 
         let mut table = test_table(3, &schema)?;
 
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
                 vec![
-                    ValueFactory::from_string(&Types::U128, &i.to_string()),
-                    ValueFactory::from_string(&Types::U128, &i.to_string()),
+                    ValueFactory::from_string(&Types::Int, &i.to_string()),
+                    ValueFactory::from_string(&Types::Int, &i.to_string()),
                 ],
                 &schema,
             );

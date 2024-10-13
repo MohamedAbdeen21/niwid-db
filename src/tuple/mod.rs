@@ -11,6 +11,7 @@ use std::{mem, slice};
 pub type Entry = (TupleMetaData, Tuple);
 /// Page Id and slot Id
 pub type TupleId = (PageId, usize);
+pub const TUPLE_ID_SIZE: usize = 12;
 
 #[repr(C)]
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -222,11 +223,16 @@ impl TupleMetaData {
 }
 
 pub trait TupleExt {
+    fn from_string(s: &str) -> Self;
     fn from_bytes(bytes: &[u8]) -> Self;
     fn to_bytes(&self) -> Vec<u8>;
 }
 
 impl TupleExt for TupleId {
+    fn from_string(_s: &str) -> Self {
+        unreachable!()
+    }
+
     fn from_bytes(bytes: &[u8]) -> Self {
         let page_offset = std::mem::size_of::<PageId>();
         let slot_size = std::mem::size_of::<usize>();

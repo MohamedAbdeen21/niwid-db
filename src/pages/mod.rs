@@ -12,7 +12,7 @@ use crate::disk_manager::DiskWritable;
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
 pub const INVALID_PAGE: PageId = 0;
 
-pub type PageId = i64;
+pub type PageId = u32;
 
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement `From<Page>` and `Into<Page>` traits

@@ -66,7 +66,7 @@ impl BufferPoolManager {
             Err(_) => {
                 let mut page = Page::new();
                 page.set_page_id(BUFFER_POOL_PAGE);
-                page.write_bytes(2, 10, &STARTING_PAGE_ID.to_ne_bytes());
+                page.write_bytes(2, 6, &STARTING_PAGE_ID.to_ne_bytes());
                 page
             }
         };
@@ -83,9 +83,8 @@ impl BufferPoolManager {
     }
 
     pub fn increment_page_id(&mut self) -> Result<PageId> {
-        let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(2, 10).try_into().unwrap());
-        self.next_page_id
-            .write_bytes(2, 10, &(id + 1).to_ne_bytes());
+        let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(2, 6).try_into().unwrap());
+        self.next_page_id.write_bytes(2, 6, &(id + 1).to_ne_bytes());
         self.disk_manager.write_to_file(&self.next_page_id, None)?;
         Ok(id)
     }

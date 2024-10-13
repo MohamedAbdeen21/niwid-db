@@ -14,7 +14,7 @@ impl Default for Field {
     fn default() -> Self {
         Self {
             name: String::new(),
-            ty: Types::U8,
+            ty: Types::Int,
             nullable: false,
         }
     }
@@ -105,9 +105,9 @@ mod tests {
     #[test]
     fn test_to_sql() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::I64, false),
+            Field::new("a", Types::Int, false),
             Field::new("b", Types::Str, true),
-            Field::new("c", Types::U8, false),
+            Field::new("c", Types::UInt, false),
         ]);
 
         let sql = format!(
