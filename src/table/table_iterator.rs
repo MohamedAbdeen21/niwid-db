@@ -1,26 +1,23 @@
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::TablePage;
 use crate::pages::{PageId, INVALID_PAGE};
-use crate::tuple::schema::Schema;
 use crate::tuple::{Entry, TupleId};
 use crate::txn_manager::TxnId;
 
 use super::Table;
 
 // TODO: try to iterate over pages not tuples
-pub(super) struct TableIterator<'a> {
+pub(super) struct TableIterator {
     page: TablePage,
     current_slot: usize,
     next_page: PageId,
     bpm: ArcBufferPool,
     num_tuples: usize,
     active_txn: Option<TxnId>,
-    schema: Schema,
-    table: &'a Table,
 }
 
-impl<'a> TableIterator<'a> {
-    pub fn new(table: &'a Table) -> Self {
+impl TableIterator {
+    pub fn new(table: &Table) -> Self {
         let bpm = table.bpm.clone();
         let page: TablePage = bpm
             .lock()
@@ -38,13 +35,11 @@ impl<'a> TableIterator<'a> {
             page,
             bpm,
             active_txn: table.active_txn,
-            schema: table.schema.clone(),
-            table,
         }
     }
 }
 
-impl<'a> Iterator for TableIterator<'a> {
+impl Iterator for TableIterator {
     type Item = (TupleId, Entry);
 
     fn next(&mut self) -> Option<Self::Item> {

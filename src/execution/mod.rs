@@ -33,9 +33,7 @@ impl Executable for Insert {
         let input = self.input.execute()?;
 
         for row in input.data {
-            println!("{:?}", row);
             let tuple = Tuple::new(row, &self.schema);
-            println!("{:?}", tuple);
 
             let _tuple_id = Catalog::get()
                 .lock()
@@ -50,8 +48,16 @@ impl Executable for Insert {
 
 impl Executable for Explain {
     fn execute(&self) -> Result<ResultSet> {
-        println!("{}", self.input.print());
-        Ok(ResultSet::default())
+        println!("Logical plan:\n{}", self.input.print());
+        // time the execution time
+        if self.analyze {
+            let start = std::time::Instant::now();
+            let result = self.input.execute()?;
+            println!("Execution time: {:?}", start.elapsed());
+            Ok(result)
+        } else {
+            Ok(ResultSet::default())
+        }
     }
 }
 

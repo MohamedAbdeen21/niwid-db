@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::pages::PageId;
@@ -21,15 +22,16 @@ lazy_static! {
 
 pub struct Catalog {
     pub table: Table,
-    tables: Vec<(TupleId, Table)>, // TODO: handle ownership
+    tables: HashMap<String, (TupleId, Table)>, // TODO: handle ownership
     #[allow(unused)]
-    schema: Schema, // A catalog is itself a table
+    schema: Schema,       // A catalog is itself a table
 }
 
 impl Catalog {
     pub fn get() -> ArcCatalog {
         CATALOG.clone()
     }
+
     fn table() -> (Table, Schema) {
         let schema = Schema::new(vec![
             Field::new("table_name", Types::Str, false),
@@ -48,22 +50,23 @@ impl Catalog {
 
         (table, schema)
     }
-    fn build_catalog() -> Vec<(TupleId, Table)> {
+
+    fn build_catalog() -> HashMap<String, (TupleId, Table)> {
         let (table, schema) = Self::table();
 
-        let mut tables = vec![];
+        let mut tables = HashMap::new();
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
-            let name = table.fetch_string(values[0].str_addr());
+            let name = table.fetch_string(values[0].str_addr()).0;
             let first_page_id = ValueFactory::from_bytes(&Types::UInt, &values[1].to_bytes()).u32();
             let last_page_id = ValueFactory::from_bytes(&Types::UInt, &values[2].to_bytes()).u32();
             let schema = table.fetch_string(values[3].str_addr());
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
-            tables.push((
-                *id,
-                Table::fetch(name.0, &schema, first_page_id, last_page_id).expect("Fetch failed"),
-            ));
+            let table = Table::fetch(name.clone(), &schema, first_page_id, last_page_id)
+                .expect("Fetch failed");
+
+            tables.insert(name, (*id, table));
 
             Ok(())
         };
@@ -108,51 +111,44 @@ impl Catalog {
         let tuple = Tuple::new(tuple_data, &self.schema);
         let tuple_id = self.table.insert(tuple)?;
 
-        self.tables.push((tuple_id, table));
+        self.tables
+            .insert(table_name.to_string(), (tuple_id, table));
 
         Ok(())
     }
 
-    pub fn get_table<'a, 'b>(&'a mut self, table_name: &str) -> Option<&'b mut Table>
-    where
-        'a: 'b,
-    {
-        self.tables
-            .iter_mut()
-            .find(|(_, table)| table.get_name() == table_name)
-            .map(|(_, table)| table)
+    pub fn get_table(&mut self, table_name: &str) -> Option<&mut Table> {
+        self.tables.get_mut(table_name).map(|(_, table)| table)
     }
 
     #[allow(unused)]
     pub fn drop_table(&mut self, table_name: &str) -> Option<()> {
-        let mut tuple_id = None;
-        self.table
-            .scan(|(id, (_, tuple))| {
-                let name_bytes = tuple.get_value_of("table_name", &self.schema)?.unwrap();
-                let name = self.table.fetch_string(name_bytes.str_addr()).0;
+        let tuple_id = self.tables.get(table_name)?.0;
 
-                if name == table_name {
-                    tuple_id = Some(*id);
-                }
+        self.table.delete(tuple_id).ok()?;
 
-                Ok(())
-            })
-            .ok()?;
-
-        self.table.delete(tuple_id?).ok()?;
-
-        let index = self
-            .tables
-            .iter()
-            .position(|(_, table)| table.get_name() == table_name)?;
-
-        self.tables.remove(index);
+        self.tables.remove(table_name);
 
         Some(())
     }
-}
 
-impl Drop for Catalog {
-    // TODO: update each table's last_page
-    fn drop(&mut self) {}
+    pub fn update_last_page(&mut self, table_name: String) -> Result<()> {
+        let (tuple_id, table) = self.tables.get_mut(&table_name).unwrap();
+
+        let schema = table.get_schema();
+
+        let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
+        let tuple_data: Vec<Value> = vec![
+            ValueFactory::from_string(&Types::Str, &table_name),
+            ValueFactory::from_string(&Types::UInt, &table.get_first_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, &table.get_last_page_id().to_string()),
+            ValueFactory::from_string(&Types::Str, &serialized_schema),
+        ];
+        let tuple = Tuple::new(tuple_data, &self.schema);
+        let new_tuple_id = self.table.update(Some(*tuple_id), tuple)?;
+
+        self.tables.get_mut(&table_name).unwrap().0 = new_tuple_id;
+
+        Ok(())
+    }
 }

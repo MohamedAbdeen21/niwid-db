@@ -1,11 +1,12 @@
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
+use crate::catalog::Catalog;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
 use crate::pages::PageId;
 use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{AsBytes, Str, StrAddr, Types, ValueFactory};
+use crate::types::{Str, StrAddr, Types, ValueFactory};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
@@ -276,6 +277,8 @@ impl Table {
         let page_id = self.bpm.lock().new_page()?.writer().get_page_id();
 
         last_page.set_next_page_id(page_id);
+
+        Catalog::get().lock().update_last_page(self.name.clone())?;
 
         self.last_page = page_id;
 

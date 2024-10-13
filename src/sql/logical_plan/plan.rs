@@ -21,7 +21,7 @@ impl Default for LogicalPlan {
 impl LogicalPlan {
     #[allow(unused)]
     pub fn print(&self) -> String {
-        self.print_indent(0)
+        self.print_indent(1)
     }
 
     fn print_indent(&self, indent: usize) -> String {
@@ -32,7 +32,7 @@ impl LogicalPlan {
             LogicalPlan::CreateTable(c) => c.print(indent),
             LogicalPlan::Explain(e) => e.print(indent),
             LogicalPlan::Insert(i) => i.print(indent),
-            LogicalPlan::Empty => format!("{}Empty", "-".repeat(indent * 2)),
+            LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
         }
     }
 
@@ -74,7 +74,7 @@ impl Insert {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{}{}: {}\n{}",
+            "{} {}: {}\n{}",
             "-".repeat(indent * 2),
             self.name(),
             self.table_name,
@@ -85,11 +85,12 @@ impl Insert {
 
 pub struct Explain {
     pub input: LogicalPlan,
+    pub analyze: bool,
 }
 
 impl Explain {
-    pub fn new(input: LogicalPlan) -> Self {
-        Self { input }
+    pub fn new(input: LogicalPlan, analyze: bool) -> Self {
+        Self { input, analyze }
     }
 
     fn name(&self) -> String {
@@ -102,7 +103,7 @@ impl Explain {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{}{}:\n{}",
+            "{} {}:\n{}",
             "-".repeat(indent * 2),
             self.name(),
             self.input.print_indent(indent + 1)
@@ -142,7 +143,7 @@ impl CreateTable {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{}{}: {} [skip if exists: {}]\n{}",
+            "{} {}: {} [skip if exists: {}]\n{}",
             "-".repeat(indent * 2),
             self.name(),
             self.table_name,
@@ -172,7 +173,7 @@ impl Scan {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{}{}: {} [{}]\n",
+            "{} {}: {} [{}]\n",
             "-".repeat(indent * 2),
             self.name(),
             self.table_name,
@@ -211,7 +212,7 @@ impl Filter {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{}{}: {}\n{}",
+            "{} {}: {}\n{}",
             "-".repeat(indent * 2),
             self.name(),
             self.expr.print(),
@@ -246,7 +247,7 @@ impl Projection {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{}{}: [{}]\n{}",
+            "{} {}: [{}]\n{}",
             "-".repeat(indent * 2),
             self.name(),
             self.projections

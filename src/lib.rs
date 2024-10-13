@@ -26,7 +26,6 @@ macro_rules! get_caller_name {
         let frames = bt.frames();
         if frames.len() > 1 {
             let caller_frame = &frames[1]; // Caller frame
-                                           // println!("{:?}", frames);
             if let Some(symbol) = caller_frame.symbols().first() {
                 if let Some(name) = symbol.name() {
                     name.to_string() // Return the caller's name as a string

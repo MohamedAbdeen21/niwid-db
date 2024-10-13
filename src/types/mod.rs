@@ -179,10 +179,6 @@ pub trait Primitive {
     fn from_string(s: &str) -> Self;
 }
 
-trait FromString {
-    fn from_string(s: &str) -> Self;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UInt(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

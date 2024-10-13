@@ -20,7 +20,9 @@ use crate::{
 
 pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
     match statement {
-        Statement::Explain { statement, .. } => build_explain(*statement),
+        Statement::Explain {
+            statement, analyze, ..
+        } => build_explain(*statement, analyze),
         Statement::Insert(SqlInsert {
             table_name,
             source,
@@ -49,10 +51,10 @@ pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
     }
 }
 
-fn build_explain(statement: Statement) -> Result<LogicalPlan> {
+fn build_explain(statement: Statement, analyze: bool) -> Result<LogicalPlan> {
     let root = build_initial_plan(statement)?;
 
-    Ok(LogicalPlan::Explain(Box::new(Explain::new(root))))
+    Ok(LogicalPlan::Explain(Box::new(Explain::new(root, analyze))))
 }
 
 #[allow(unused)]
