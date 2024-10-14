@@ -2,20 +2,20 @@ pub mod result_set;
 
 use crate::catalog::Catalog;
 use crate::sql::logical_plan::expr::LogicalExpr;
-use crate::sql::logical_plan::plan::{CreateTable, Filter, Insert, LogicalPlan, Scan};
+use crate::sql::logical_plan::plan::{CreateTable, Filter, Insert, LogicalPlan, Scan, Values};
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
 use crate::types::Value;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use result_set::ResultSet;
 
 pub trait Executable {
-    fn execute(&self) -> Result<ResultSet>;
+    fn execute(self) -> Result<ResultSet>;
 }
 
 impl LogicalPlan {
-    pub fn execute(&self) -> Result<ResultSet> {
+    pub fn execute(self) -> Result<ResultSet> {
         match self {
             LogicalPlan::Projection(plan) => plan.execute(),
             LogicalPlan::Scan(scan) => scan.execute(),
@@ -23,14 +23,38 @@ impl LogicalPlan {
             LogicalPlan::CreateTable(create) => create.execute(),
             LogicalPlan::Explain(explain) => explain.execute(),
             LogicalPlan::Insert(i) => i.execute(),
+            LogicalPlan::Values(v) => v.execute(),
             LogicalPlan::Empty => Ok(ResultSet::default()),
         }
     }
 }
 
+impl Executable for Values {
+    fn execute(self) -> Result<ResultSet> {
+        let input = ResultSet::with_capacity(1);
+        let output = self
+            .rows
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|expr| expr.evaluate(&input))
+                    .reduce(|a, b| a.concat(b))
+                    .unwrap() // TODO: ?
+            })
+            .reduce(|a, b| a.union(b))
+            .unwrap();
+
+        Ok(output)
+    }
+}
+
 impl Executable for Insert {
-    fn execute(&self) -> Result<ResultSet> {
+    fn execute(self) -> Result<ResultSet> {
         let input = self.input.execute()?;
+
+        if input.cols.len() != self.table_schema.fields.len() {
+            return Err(anyhow!("Column count mismatch"));
+        }
 
         for row in input.data {
             let tuple = Tuple::new(row, &self.schema);
@@ -47,7 +71,7 @@ impl Executable for Insert {
 }
 
 impl Executable for Explain {
-    fn execute(&self) -> Result<ResultSet> {
+    fn execute(self) -> Result<ResultSet> {
         println!("Logical plan:\n{}", self.input.print());
         // time the execution time
         if self.analyze {
@@ -62,7 +86,7 @@ impl Executable for Explain {
 }
 
 impl Executable for CreateTable {
-    fn execute(&self) -> Result<ResultSet> {
+    fn execute(self) -> Result<ResultSet> {
         let catalog = Catalog::get();
         catalog
             .lock()
@@ -73,10 +97,10 @@ impl Executable for CreateTable {
 }
 
 impl LogicalExpr {
-    fn evaluate(&self, input: &ResultSet) -> ResultSet {
+    fn evaluate(self, input: &ResultSet) -> ResultSet {
         let size = input.size();
         match self {
-            LogicalExpr::Literal(c) => {
+            LogicalExpr::Literal(ref c) => {
                 let input_schema = Schema::new(input.cols.clone());
                 let field = self.to_field(&input_schema);
                 let data = (0..size).map(|_| vec![c.clone()]).collect::<Vec<_>>();
@@ -94,7 +118,7 @@ impl LogicalExpr {
 }
 
 impl Executable for Projection {
-    fn execute(&self) -> Result<ResultSet> {
+    fn execute(self) -> Result<ResultSet> {
         let input = if matches!(self.input, LogicalPlan::Empty) {
             ResultSet::with_capacity(1)
         } else {
@@ -114,7 +138,7 @@ impl Executable for Projection {
 }
 
 impl Executable for Scan {
-    fn execute(&self) -> Result<ResultSet> {
+    fn execute(self) -> Result<ResultSet> {
         let arc_catalog = Catalog::get();
         let mut catalog = arc_catalog.lock();
         let table = catalog.get_table(&self.table_name).unwrap();
@@ -145,7 +169,7 @@ impl Executable for Scan {
 }
 
 impl Executable for Filter {
-    fn execute(&self) -> Result<ResultSet> {
+    fn execute(self) -> Result<ResultSet> {
         let input = self.input.execute()?;
 
         let mut output = vec![];

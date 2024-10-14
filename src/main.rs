@@ -8,8 +8,10 @@ fn main() -> Result<()> {
 
     ctx.execute_sql("CREATE TABLE IF NOT EXISTS users (id UINT, num INT, msg VARCHAR)")?;
 
-    ctx.execute_sql("EXPLAIN ANALYZE INSERT INTO users SELECT (1,2,'hello')")?;
-    ctx.execute_sql("EXPLAIN ANALYZE SELECT num, id, msg FROM users")?
+    // ctx.execute_sql("EXPLAIN ANALYZE INSERT INTO users SELECT (1,2,'hello');")?;
+    ctx.execute_sql("EXPLAIN ANALYZE INSERT INTO users VALUES (1,2,'hello'), (2,3,'world');")?;
+    // ctx.execute_sql("EXPLAIN ANALYZE INSERT INTO users VALUES (1,2,'hello');")?;
+    ctx.execute_sql("EXPLAIN ANALYZE SELECT num, id, msg FROM users;")?
         .show();
     // ctx.execute_sql("SELECT num, id, msg FROM users")?.show();
 

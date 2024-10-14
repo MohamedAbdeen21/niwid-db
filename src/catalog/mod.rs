@@ -55,6 +55,7 @@ impl Catalog {
         let (table, schema) = Self::table();
 
         let mut tables = HashMap::new();
+
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
             let name = table.fetch_string(values[0].str_addr()).0;
@@ -115,6 +116,12 @@ impl Catalog {
             .insert(table_name.to_string(), (tuple_id, table));
 
         Ok(())
+    }
+
+    pub fn get_schema(&self, table_name: &str) -> Option<Schema> {
+        self.tables
+            .get(table_name)
+            .map(|(_, table)| table.get_schema())
     }
 
     pub fn get_table(&mut self, table_name: &str) -> Option<&mut Table> {

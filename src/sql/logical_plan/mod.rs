@@ -3,11 +3,11 @@ pub mod optimizer;
 pub mod plan;
 
 use expr::{BooleanBinaryExpr, LogicalExpr};
-use plan::{CreateTable, Explain, Filter, Insert, LogicalPlan, Projection, Scan};
+use plan::{CreateTable, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Values};
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr, Ident, Insert as SqlInsert,
     ObjectName, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
-    Value as SqlValue,
+    Value as SqlValue, Values as SqlValues,
 };
 
 use anyhow::{anyhow, Result};
@@ -17,6 +17,12 @@ use crate::{
     tuple::schema::Schema,
     types::{Types, ValueFactory},
 };
+
+macro_rules! value {
+    ($t:ident, $s:expr) => {
+        ValueFactory::from_string(&Types::$t, &$s)
+    };
+}
 
 pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
     match statement {
@@ -57,6 +63,30 @@ fn build_explain(statement: Statement, analyze: bool) -> Result<LogicalPlan> {
     Ok(LogicalPlan::Explain(Box::new(Explain::new(root, analyze))))
 }
 
+fn build_expr(expr: Expr) -> Result<LogicalExpr> {
+    match expr {
+        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
+        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, s))),
+        _ => todo!(),
+    }
+}
+
+fn build_values(rows: Vec<Vec<Expr>>) -> Result<LogicalPlan> {
+    let rows = rows
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|expr| match expr {
+                    Expr::Value(_) => build_expr(expr),
+                    e => todo!("{}", e),
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(LogicalPlan::Values(Values::new(rows, Schema::default())))
+}
+
 #[allow(unused)]
 fn build_query(query: Option<Box<Query>>) -> Result<Option<LogicalPlan>> {
     if query.is_none() {
@@ -67,7 +97,7 @@ fn build_query(query: Option<Box<Query>>) -> Result<Option<LogicalPlan>> {
 
     let input = match *body {
         SetExpr::Select(_) => build_select(body, limit)?,
-        SetExpr::Values(_) => todo!(),
+        SetExpr::Values(SqlValues { rows, .. }) => build_values(rows)?,
         _ => unimplemented!(),
     };
 
@@ -82,8 +112,14 @@ fn build_insert(
 ) -> Result<LogicalPlan> {
     let input = build_query(source)?.unwrap();
     let table_name = table_name.0.first().unwrap().value.clone();
+    let schema = Catalog::get().lock().get_schema(&table_name).unwrap();
 
-    let root = LogicalPlan::Insert(Box::new(Insert::new(input, table_name, Schema::default())));
+    let root = LogicalPlan::Insert(Box::new(Insert::new(
+        input,
+        table_name,
+        schema,
+        Schema::default(),
+    )));
 
     Ok(root)
 }
@@ -154,16 +190,10 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
         .iter()
         .flat_map(|e| match e {
             SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
-                vec![LogicalExpr::Literal(ValueFactory::from_string(
-                    &Types::UInt,
-                    &s,
-                ))]
+                vec![LogicalExpr::Literal(value!(UInt, s))]
             }
             SelectItem::UnnamedExpr(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                vec![LogicalExpr::Literal(ValueFactory::from_string(
-                    &Types::Str,
-                    &s,
-                ))]
+                vec![LogicalExpr::Literal(value!(Str, s))]
             }
             SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                 vec![LogicalExpr::Column(ident.value.clone())]
@@ -175,24 +205,16 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
                 .map(|f| f.name.clone())
                 .map(|c| LogicalExpr::Column(c))
                 .collect(),
-            SelectItem::UnnamedExpr(Expr::Tuple(fields)) => {
-                if let Some(expr) = fields.iter().find(|e| !matches!(e, Expr::Value(_))) {
-                    unimplemented!("{:?}", expr);
-                };
-
-                fields
-                    .iter()
-                    .map(|e| match e {
-                        Expr::Value(SqlValue::Number(s, _)) => {
-                            LogicalExpr::Literal(ValueFactory::from_string(&Types::UInt, s))
-                        }
-                        Expr::Value(SqlValue::SingleQuotedString(s)) => {
-                            LogicalExpr::Literal(ValueFactory::from_string(&Types::Str, s))
-                        }
-                        e => todo!("{}", e),
-                    })
-                    .collect()
-            }
+            SelectItem::UnnamedExpr(Expr::Tuple(fields)) => fields
+                .iter()
+                .map(|e| match e {
+                    Expr::Value(SqlValue::Number(s, _)) => LogicalExpr::Literal(value!(UInt, s)),
+                    Expr::Value(SqlValue::SingleQuotedString(s)) => {
+                        LogicalExpr::Literal(value!(Str, s))
+                    }
+                    e => todo!("{}", e),
+                })
+                .collect(),
             e => todo!("{}", e),
         })
         .collect::<Vec<_>>();
@@ -242,6 +264,6 @@ impl From<Expr> for LogicalExpr {
 
 impl From<bool> for LogicalExpr {
     fn from(b: bool) -> LogicalExpr {
-        LogicalExpr::Literal(ValueFactory::from_string(&Types::Bool, &b.to_string()))
+        LogicalExpr::Literal(value!(Bool, b.to_string()))
     }
 }

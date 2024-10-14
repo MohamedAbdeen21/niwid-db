@@ -9,6 +9,7 @@ pub enum LogicalPlan {
     CreateTable(Box<CreateTable>),
     Explain(Box<Explain>),
     Insert(Box<Insert>),
+    Values(Values),
     Empty,
 }
 
@@ -32,6 +33,7 @@ impl LogicalPlan {
             LogicalPlan::CreateTable(c) => c.print(indent),
             LogicalPlan::Explain(e) => e.print(indent),
             LogicalPlan::Insert(i) => i.print(indent),
+            LogicalPlan::Values(v) => v.print(indent),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
         }
     }
@@ -44,22 +46,68 @@ impl LogicalPlan {
             LogicalPlan::CreateTable(c) => c.schema(),
             LogicalPlan::Explain(e) => e.schema(),
             LogicalPlan::Insert(i) => i.schema(),
+            LogicalPlan::Values(v) => v.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
         }
+    }
+}
+
+pub struct Values {
+    pub rows: Vec<Vec<LogicalExpr>>,
+    pub schema: Schema,
+}
+
+impl Values {
+    pub fn new(rows: Vec<Vec<LogicalExpr>>, schema: Schema) -> Self {
+        Self { rows, schema }
+    }
+
+    fn name(&self) -> String {
+        "Values".to_string()
+    }
+
+    fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    fn print(&self, indent: usize) -> String {
+        format!(
+            "{} {}: [{}]",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.rows
+                .iter()
+                .map(|row| format!(
+                    "({})",
+                    row.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
     }
 }
 
 pub struct Insert {
     pub input: LogicalPlan,
     pub table_name: String,
+    pub table_schema: Schema,
     pub schema: Schema, // RETURNING statement
 }
 
 impl Insert {
-    pub fn new(input: LogicalPlan, table_name: String, schema: Schema) -> Self {
+    pub fn new(
+        input: LogicalPlan,
+        table_name: String,
+        table_schema: Schema,
+        schema: Schema,
+    ) -> Self {
         Self {
             input,
             table_name,
+            table_schema,
             schema,
         }
     }
@@ -286,7 +334,7 @@ mod tests {
 
         let string = scan.print();
 
-        assert_eq!(string, "Scan: test [#a]\n");
+        assert_eq!(string, "-- Scan: test [#a]\n");
 
         let filter = LogicalPlan::Filter(Box::new(Filter {
             expr: BooleanBinaryExpr::new(
@@ -297,7 +345,7 @@ mod tests {
             input: scan,
         }));
 
-        assert_eq!(filter.print(), "Filter: #a > 10\n--Scan: test [#a]\n");
+        assert_eq!(filter.print(), "-- Filter: #a > 10\n---- Scan: test [#a]\n");
 
         Ok(())
     }

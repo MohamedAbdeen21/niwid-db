@@ -90,6 +90,7 @@ impl Iterator for TableIterator {
 mod tests {
     use anyhow::Result;
 
+    use crate::catalog::Catalog;
     use crate::pages::table_page::TablePage;
     use crate::table::tests::test_table;
     use crate::tuple::schema::{Field, Schema};

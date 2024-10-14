@@ -278,6 +278,8 @@ impl Table {
 
         last_page.set_next_page_id(page_id);
 
+        // FIXME: it works for now, but I don't like it
+        #[cfg(not(test))]
         Catalog::get().lock().update_last_page(self.name.clone())?;
 
         self.last_page = page_id;

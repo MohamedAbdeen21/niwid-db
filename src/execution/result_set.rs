@@ -28,6 +28,17 @@ impl ResultSet {
         self.cap
     }
 
+    pub fn union(mut self, other: ResultSet) -> Self {
+        if self.cols.iter().map(|c| c.ty.clone()).collect::<Vec<_>>()
+            != other.cols.iter().map(|c| c.ty.clone()).collect::<Vec<_>>()
+        {
+            panic!("Cannot union two result sets with different schemas");
+        }
+
+        self.data.extend(other.data);
+        self
+    }
+
     pub fn concat(mut self, other: ResultSet) -> Self {
         self.data
             .iter_mut()
