@@ -405,11 +405,11 @@ mod tests {
         let first_id = table.get_first_page_id();
         let blob_id = table.get_blob_page_id();
 
-        // entry size = 21 (17 meta + 4 data)
+        // entry size = 22 (18 meta + 4 data)
         // slot size = 4
-        // free page = 4080
-        // 163 * 25 ≈ 4080
-        let tuples_per_page = 163;
+        // free page = 4090
+        // 4090 / 24 ≈ 157
+        let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 4);
 
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(

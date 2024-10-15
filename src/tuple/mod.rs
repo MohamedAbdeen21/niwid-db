@@ -168,9 +168,10 @@ impl Serialize for Tuple {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct TupleMetaData {
+    _padding: [u8; 1],
+    is_deleted: bool,
     timestamp: u64,
     null_bitmap: u64,
-    is_deleted: bool,
 }
 
 impl Serialize for TupleMetaData {
@@ -198,6 +199,7 @@ impl Default for TupleMetaData {
 impl TupleMetaData {
     pub fn new(nulls: u64) -> Self {
         Self {
+            _padding: [0; 1],
             timestamp: 0,
             null_bitmap: nulls,
             is_deleted: false,

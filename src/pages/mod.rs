@@ -14,27 +14,35 @@ pub const INVALID_PAGE: PageId = 0;
 
 pub type PageId = u32;
 
+/// The data that is shared and modified between all page types
+/// 3 padding bytes, dirty flag, and then the actual data
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct PageData {
+    _padding: [u8; 3],
+    is_dirty: bool,
+    bytes: [u8; PAGE_SIZE],
+}
+
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement `From<Page>` and `Into<Page>` traits
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Page {
-    /// Underlying block of memory of size [`PAGE_SIZE`]
-    data: [u8; PAGE_SIZE],
-    is_dirty: bool,
+    data: PageData,
     page_id: PageId,
     latch: Arc<Latch>,
 }
 
 impl Serialize for Page {
     fn to_bytes(&self) -> &[u8] {
-        &self.data
+        &self.data.bytes
     }
 
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), PAGE_SIZE);
         let mut page = Page::new();
-        page.data.copy_from_slice(bytes);
+        page.data.bytes.copy_from_slice(bytes);
         page
     }
 }
@@ -62,23 +70,26 @@ impl Default for Page {
 impl Page {
     pub fn new() -> Self {
         Page {
-            data: [0; PAGE_SIZE],
-            is_dirty: false,
+            data: PageData {
+                _padding: [0; 3],
+                bytes: [0; PAGE_SIZE],
+                is_dirty: false,
+            },
             page_id: INVALID_PAGE,
             latch: Arc::new(Latch::new()),
         }
     }
 
     pub fn mark_clean(&mut self) {
-        self.is_dirty = false;
+        self.data.is_dirty = false;
     }
 
     pub fn mark_dirty(&mut self) {
-        self.is_dirty = true;
+        self.data.is_dirty = true;
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.is_dirty
+        self.data.is_dirty
     }
 
     pub fn get_page_id(&self) -> PageId {
@@ -90,11 +101,11 @@ impl Page {
     }
 
     pub fn read_bytes(&self, start: usize, end: usize) -> &[u8] {
-        &self.data[start..end]
+        &self.data.bytes[start..end]
     }
 
     pub fn write_bytes(&mut self, start: usize, end: usize, bytes: &[u8]) {
-        self.data[start..end].copy_from_slice(bytes);
+        self.data.bytes[start..end].copy_from_slice(bytes);
         self.mark_dirty();
     }
 

@@ -90,7 +90,7 @@ impl Iterator for TableIterator {
 mod tests {
     use anyhow::Result;
 
-    use crate::pages::table_page::TablePage;
+    use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
     use crate::table::tests::test_table;
     use crate::tuple::schema::{Field, Schema};
     use crate::tuple::{Entry, Tuple, TupleId};
@@ -156,7 +156,7 @@ mod tests {
             Field::new("b", Types::Int, false),
         ]);
 
-        let tuples_per_page = 140;
+        let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 8);
 
         let mut table = test_table(3, &schema)?;
 
