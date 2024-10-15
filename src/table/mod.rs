@@ -1,4 +1,5 @@
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
+#[cfg(not(test))]
 use crate::catalog::Catalog;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
 use crate::pages::PageId;

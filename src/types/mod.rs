@@ -106,6 +106,47 @@ pub enum Value {
     Null,
 }
 
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Value::UInt(l), Value::UInt(r)) => l.partial_cmp(&r),
+            (Value::Int(l), Value::Int(r)) => l.partial_cmp(&r),
+            (Value::Float(l), Value::Float(r)) => l.partial_cmp(&r),
+            (Value::Bool(l), Value::Bool(r)) => l.partial_cmp(&r),
+            (Value::Char(l), Value::Char(r)) => l.partial_cmp(&r),
+            (Value::Str(l), Value::Str(r)) => l.partial_cmp(&r),
+            (Value::Null, Value::Null) => Some(std::cmp::Ordering::Equal),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => l.partial_cmp(&(*r as i32)),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => (*l as i32).partial_cmp(r),
+            _ => None,
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::UInt(l), Value::UInt(r)) => l == r,
+            (Value::Int(l), Value::Int(r)) => l == r,
+            (Value::Float(l), Value::Float(r)) => l == r,
+            (Value::Bool(l), Value::Bool(r)) => l == r,
+            (Value::Char(l), Value::Char(r)) => l == r,
+            (Value::Str(l), Value::Str(r)) => l == r,
+            (Value::Null, Value::Null) => true,
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => *l as u32 == *r,
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => *l == *r as u32,
+            (Value::Char(Char(l)), Value::Str(Str(r))) => {
+                if r.len() != 1 {
+                    false
+                } else {
+                    *l == r.chars().next().unwrap()
+                }
+            }
+            _ => false,
+        }
+    }
+}
+
 impl Value {
     pub fn get_type(&self) -> Types {
         match self {

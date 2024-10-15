@@ -1,14 +1,17 @@
 pub mod result_set;
 
 use crate::catalog::Catalog;
-use crate::sql::logical_plan::expr::LogicalExpr;
-use crate::sql::logical_plan::plan::{CreateTable, Filter, Insert, LogicalPlan, Scan, Values};
+use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
+use crate::sql::logical_plan::plan::{
+    CreateTable, DropTables, Filter, Insert, LogicalPlan, Scan, Values,
+};
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
 use crate::types::Value;
 use anyhow::{anyhow, Result};
 use result_set::ResultSet;
+use sqlparser::ast::BinaryOperator;
 
 pub trait Executable {
     fn execute(self) -> Result<ResultSet>;
@@ -25,7 +28,23 @@ impl LogicalPlan {
             LogicalPlan::Insert(i) => i.execute(),
             LogicalPlan::Values(v) => v.execute(),
             LogicalPlan::Empty => Ok(ResultSet::default()),
+            LogicalPlan::DropTables(d) => d.execute(),
         }
+    }
+}
+
+impl Executable for DropTables {
+    fn execute(self) -> Result<ResultSet> {
+        for table_name in self.table_names {
+            if let None = Catalog::get()
+                .lock()
+                .drop_table(&table_name, self.if_exists)
+            {
+                return Err(anyhow!("Table {} does not exist", table_name));
+            }
+        }
+
+        Ok(ResultSet::default())
     }
 }
 
@@ -96,6 +115,23 @@ impl Executable for CreateTable {
     }
 }
 
+impl Executable for Filter {
+    fn execute(self) -> Result<ResultSet> {
+        let input = self.input.execute()?;
+        let mask = self.expr.evaluate(&input);
+
+        let output = input
+            .data
+            .into_iter()
+            .enumerate()
+            .filter(|(i, _)| mask[*i])
+            .map(|(_, r)| r)
+            .collect::<Vec<_>>();
+
+        Ok(ResultSet::new(input.cols, output))
+    }
+}
+
 impl LogicalExpr {
     fn evaluate(self, input: &ResultSet) -> ResultSet {
         let size = input.size();
@@ -112,6 +148,53 @@ impl LogicalExpr {
                     .map(|i| vec![input.data[i][index].clone()])
                     .collect::<Vec<_>>();
                 ResultSet::new(vec![input.cols[index].clone()], data)
+            }
+        }
+    }
+}
+
+impl BooleanBinaryExpr {
+    fn eval_op(&self, left: &Value, right: &Value) -> bool {
+        match &self.op {
+            BinaryOperator::Eq => left == right,
+            BinaryOperator::NotEq => left != right,
+            BinaryOperator::Gt => left > right,
+            BinaryOperator::Lt => left < right,
+            BinaryOperator::GtEq => left >= right,
+            BinaryOperator::LtEq => left <= right,
+            e => todo!("{}", e),
+        }
+    }
+
+    fn evaluate(self, input: &ResultSet) -> Vec<bool> {
+        match (&self.left, &self.right) {
+            (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
+                let index1 = input.cols.iter().position(|col| &col.name == c1).unwrap();
+                let index2 = input.cols.iter().position(|col| &col.name == c2).unwrap();
+                input
+                    .data
+                    .iter()
+                    .map(|row| self.eval_op(&row[index1], &row[index2]))
+                    .collect()
+            }
+            (LogicalExpr::Literal(v1), LogicalExpr::Column(c2)) => {
+                let index2 = input.cols.iter().position(|col| &col.name == c2).unwrap();
+                input
+                    .data
+                    .iter()
+                    .map(|row| self.eval_op(v1, &row[index2]))
+                    .collect()
+            }
+            (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
+                let index1 = input.cols.iter().position(|col| &col.name == c1).unwrap();
+                input
+                    .data
+                    .iter()
+                    .map(|row| self.eval_op(&row[index1], v2))
+                    .collect()
+            }
+            (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
+                vec![self.eval_op(v1, v2)].repeat(input.size())
             }
         }
     }
@@ -165,19 +248,5 @@ impl Executable for Scan {
         })?;
 
         Ok(ResultSet::new(schema.fields.clone(), output))
-    }
-}
-
-impl Executable for Filter {
-    fn execute(self) -> Result<ResultSet> {
-        let input = self.input.execute()?;
-
-        let mut output = vec![];
-        for row in input.data {
-            // TODO: evaluate the expression
-            output.push(row);
-        }
-
-        Ok(ResultSet::new(input.cols, output))
     }
 }

@@ -3,10 +3,12 @@ pub mod optimizer;
 pub mod plan;
 
 use expr::{BooleanBinaryExpr, LogicalExpr};
-use plan::{CreateTable, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Values};
+use plan::{
+    CreateTable, DropTables, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Values,
+};
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr, Ident, Insert as SqlInsert,
-    ObjectName, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
+    ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
     Value as SqlValue, Values as SqlValues,
 };
 
@@ -40,6 +42,13 @@ pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
             let Query { body, limit, .. } = *query;
             build_select(body, limit)
         }
+        Statement::Drop {
+            object_type,
+            if_exists,
+            names,
+            ..
+        } => build_drop(object_type, if_exists, names),
+        #[allow(unused)]
         Statement::Update {
             table,
             assignments,
@@ -53,8 +62,26 @@ pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
             if_not_exists,
             ..
         }) => build_create(name, columns, if_not_exists),
-        _ => unimplemented!(),
+        e => unimplemented!("{}", e),
     }
+}
+
+fn build_drop(
+    object_type: ObjectType,
+    if_exists: bool,
+    names: Vec<ObjectName>,
+) -> Result<LogicalPlan> {
+    if object_type != ObjectType::Table {
+        return Err(anyhow!("Unsupported object type: {:?}", object_type));
+    }
+
+    Ok(LogicalPlan::DropTables(DropTables::new(
+        names
+            .iter()
+            .map(|n| n.0.first().unwrap().value.clone())
+            .collect(),
+        if_exists,
+    )))
 }
 
 fn build_explain(statement: Statement, analyze: bool) -> Result<LogicalPlan> {

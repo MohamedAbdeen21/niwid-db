@@ -10,6 +10,7 @@ pub enum LogicalPlan {
     Explain(Box<Explain>),
     Insert(Box<Insert>),
     Values(Values),
+    DropTables(DropTables),
     Empty,
 }
 
@@ -34,6 +35,7 @@ impl LogicalPlan {
             LogicalPlan::Explain(e) => e.print(indent),
             LogicalPlan::Insert(i) => i.print(indent),
             LogicalPlan::Values(v) => v.print(indent),
+            LogicalPlan::DropTables(d) => d.print(indent),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
         }
     }
@@ -47,8 +49,44 @@ impl LogicalPlan {
             LogicalPlan::Explain(e) => e.schema(),
             LogicalPlan::Insert(i) => i.schema(),
             LogicalPlan::Values(v) => v.schema(),
+            LogicalPlan::DropTables(d) => d.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
         }
+    }
+}
+
+pub struct DropTables {
+    pub table_names: Vec<String>,
+    pub if_exists: bool,
+}
+
+impl DropTables {
+    pub fn new(table_names: Vec<String>, if_exists: bool) -> Self {
+        Self {
+            table_names,
+            if_exists,
+        }
+    }
+
+    fn name(&self) -> String {
+        "DropTable".to_string()
+    }
+
+    fn schema(&self) -> Schema {
+        Schema::new(vec![])
+    }
+
+    fn print(&self, indent: usize) -> String {
+        format!(
+            "{} {}: [{}]",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.table_names
+                .iter()
+                .map(|v| format!("#{}", v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 

@@ -43,9 +43,9 @@ impl BinaryExpr {
 }
 
 pub struct BooleanBinaryExpr {
-    left: LogicalExpr,
-    op: BinaryOperator,
-    right: LogicalExpr,
+    pub left: LogicalExpr,
+    pub op: BinaryOperator,
+    pub right: LogicalExpr,
 }
 
 impl BooleanBinaryExpr {

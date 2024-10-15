@@ -74,6 +74,8 @@ impl Catalog {
 
         table.scan(table_builder).expect("Catalog scan failed");
 
+        tables.insert(CATALOG_NAME.to_string(), ((CATALOG_PAGE, 0), table));
+
         tables
     }
 
@@ -128,9 +130,11 @@ impl Catalog {
         self.tables.get_mut(table_name).map(|(_, table)| table)
     }
 
-    #[allow(unused)]
-    pub fn drop_table(&mut self, table_name: &str) -> Option<()> {
-        let tuple_id = self.tables.get(table_name)?.0;
+    pub fn drop_table(&mut self, table_name: &str, ignore_if_exists: bool) -> Option<()> {
+        let tuple_id = match self.tables.get(table_name) {
+            Some((tuple_id, _)) => *tuple_id,
+            None => return if ignore_if_exists { Some(()) } else { None },
+        };
 
         self.table.delete(tuple_id).ok()?;
 
