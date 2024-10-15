@@ -4,12 +4,13 @@ pub mod plan;
 
 use expr::{BooleanBinaryExpr, LogicalExpr};
 use plan::{
-    CreateTable, DropTables, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Values,
+    CreateTable, DropTables, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Truncate,
+    Values,
 };
 use sqlparser::ast::{
     BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr, Ident, Insert as SqlInsert,
     ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
-    Value as SqlValue, Values as SqlValues,
+    TruncateTableTarget, Value as SqlValue, Values as SqlValues,
 };
 
 use anyhow::{anyhow, Result};
@@ -62,8 +63,34 @@ pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
             if_not_exists,
             ..
         }) => build_create(name, columns, if_not_exists),
+        Statement::Truncate {
+            table_names, table, ..
+        } => build_truncate(table_names, table),
         e => unimplemented!("{}", e),
     }
+}
+
+fn build_truncate(table_names: Vec<TruncateTableTarget>, table: bool) -> Result<LogicalPlan> {
+    if !table {
+        return Err(anyhow!("Did you mean 'TRUNCATE TABLE'?"));
+    }
+
+    // TODO: handle multiple tables
+    let table_name = table_names
+        .first()
+        .unwrap()
+        .name
+        .0
+        .first()
+        .unwrap()
+        .value
+        .clone();
+
+    if Catalog::get().lock().get_table(&table_name).is_none() {
+        return Err(anyhow!("Table {} does not exist", table_name));
+    }
+
+    Ok(LogicalPlan::Truncate(Truncate::new(table_name)))
 }
 
 fn build_drop(
@@ -217,34 +244,47 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
         .iter()
         .flat_map(|e| match e {
             SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
-                vec![LogicalExpr::Literal(value!(UInt, s))]
+                vec![Ok(LogicalExpr::Literal(value!(UInt, s)))]
             }
             SelectItem::UnnamedExpr(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                vec![LogicalExpr::Literal(value!(Str, s))]
+                vec![Ok(LogicalExpr::Literal(value!(Str, s)))]
             }
             SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
-                vec![LogicalExpr::Column(ident.value.clone())]
+                let name = ident.value.clone();
+                if root
+                    .schema()
+                    .fields
+                    .iter()
+                    .find(|f| f.name == name)
+                    .is_none()
+                {
+                    vec![Err(anyhow!("Column {} doesn't exist", name))]
+                } else {
+                    vec![Ok(LogicalExpr::Column(ident.value.clone()))]
+                }
             }
             SelectItem::Wildcard(_) => root
                 .schema()
                 .fields
                 .iter()
                 .map(|f| f.name.clone())
-                .map(|c| LogicalExpr::Column(c))
+                .map(|c| Ok(LogicalExpr::Column(c)))
                 .collect(),
             SelectItem::UnnamedExpr(Expr::Tuple(fields)) => fields
                 .iter()
                 .map(|e| match e {
-                    Expr::Value(SqlValue::Number(s, _)) => LogicalExpr::Literal(value!(UInt, s)),
+                    Expr::Value(SqlValue::Number(s, _)) => {
+                        Ok(LogicalExpr::Literal(value!(UInt, s)))
+                    }
                     Expr::Value(SqlValue::SingleQuotedString(s)) => {
-                        LogicalExpr::Literal(value!(Str, s))
+                        Ok(LogicalExpr::Literal(value!(Str, s)))
                     }
                     e => todo!("{}", e),
                 })
                 .collect(),
             e => todo!("{}", e),
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     root = LogicalPlan::Projection(Box::new(Projection::new(root, columns.clone())));
 

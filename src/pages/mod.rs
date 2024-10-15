@@ -73,6 +73,10 @@ impl Page {
         self.data[0] = 0;
     }
 
+    pub fn mark_dirty(&mut self) {
+        self.data[0] = 1;
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.data[0] == 1
     }
@@ -91,7 +95,7 @@ impl Page {
 
     pub fn write_bytes(&mut self, start: usize, end: usize, bytes: &[u8]) {
         self.data[start..end].copy_from_slice(bytes);
-        self.data[0] = 1;
+        self.mark_dirty();
     }
 
     pub fn set_latch(&mut self, latch: Arc<Latch>) {

@@ -57,6 +57,7 @@ impl Frame {
     }
 
     pub fn writer(&mut self) -> &mut Page {
+        self.page.mark_dirty();
         &mut self.page
     }
 

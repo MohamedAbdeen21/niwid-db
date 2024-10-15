@@ -6,12 +6,14 @@ fn main() -> Result<()> {
 
     ctx.start_txn()?;
 
-    ctx.execute_sql("DROP TABLE IF EXISTS users;")?;
+    // ctx.execute_sql("DROP TABLE IF EXISTS users;")?;
 
     ctx.execute_sql(
-        "CREATE TABLE users
+        "CREATE TABLE IF NOT EXISTS users
         (id UINT, num INT, msg VARCHAR)",
     )?;
+
+    ctx.execute_sql("TRUNCATE TABLE users;")?;
 
     ctx.execute_sql(
         "EXPLAIN ANALYZE INSERT INTO users

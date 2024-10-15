@@ -11,6 +11,7 @@ pub enum LogicalPlan {
     Insert(Box<Insert>),
     Values(Values),
     DropTables(DropTables),
+    Truncate(Truncate),
     Empty,
 }
 
@@ -36,6 +37,7 @@ impl LogicalPlan {
             LogicalPlan::Insert(i) => i.print(indent),
             LogicalPlan::Values(v) => v.print(indent),
             LogicalPlan::DropTables(d) => d.print(indent),
+            LogicalPlan::Truncate(t) => t.print(indent),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
         }
     }
@@ -50,8 +52,27 @@ impl LogicalPlan {
             LogicalPlan::Insert(i) => i.schema(),
             LogicalPlan::Values(v) => v.schema(),
             LogicalPlan::DropTables(d) => d.schema(),
+            LogicalPlan::Truncate(t) => t.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
         }
+    }
+}
+
+pub struct Truncate {
+    pub table_name: String,
+}
+
+impl Truncate {
+    pub fn new(table_name: String) -> Self {
+        Self { table_name }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema::default()
+    }
+
+    pub fn print(&self, indent: usize) -> String {
+        format!("{} Truncate: {}", "-".repeat(indent * 2), self.table_name)
     }
 }
 

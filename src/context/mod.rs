@@ -74,6 +74,8 @@ impl Context {
     pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
         let statment = parse(sql)?;
 
+        // println!("SQL: {:?}", statment);
+
         let plan = build_initial_plan(statment)?;
         let plan = optimize_logical_plan(plan);
 

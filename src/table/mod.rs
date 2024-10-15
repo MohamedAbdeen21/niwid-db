@@ -14,8 +14,8 @@ pub mod table_iterator;
 
 pub struct Table {
     name: String,
-    first_page: PageId,
-    last_page: PageId,
+    pub first_page: PageId,
+    pub last_page: PageId,
     blob_page: PageId,
     bpm: ArcBufferPool,
     txn_manager: ArcTransactionManager,
@@ -281,7 +281,7 @@ impl Table {
 
         // FIXME: it works for now, but I don't like it
         #[cfg(not(test))]
-        Catalog::get().lock().update_last_page(self.name.clone())?;
+        Catalog::get().lock().update_pages(self.name.clone())?;
 
         self.last_page = page_id;
 
@@ -324,6 +324,13 @@ impl Table {
         }
 
         Ok(tuple_id)
+    }
+
+    pub fn truncate(&mut self) -> Result<()> {
+        self.first_page = self.bpm.lock().new_page()?.writer().get_page_id();
+        self.last_page = self.first_page;
+
+        Ok(())
     }
 }
 

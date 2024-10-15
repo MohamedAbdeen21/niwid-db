@@ -3,7 +3,7 @@ pub mod result_set;
 use crate::catalog::Catalog;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, DropTables, Filter, Insert, LogicalPlan, Scan, Values,
+    CreateTable, DropTables, Filter, Insert, LogicalPlan, Scan, Truncate, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::Schema;
@@ -27,9 +27,22 @@ impl LogicalPlan {
             LogicalPlan::Explain(explain) => explain.execute(),
             LogicalPlan::Insert(i) => i.execute(),
             LogicalPlan::Values(v) => v.execute(),
-            LogicalPlan::Empty => Ok(ResultSet::default()),
             LogicalPlan::DropTables(d) => d.execute(),
+            LogicalPlan::Truncate(t) => t.execute(),
+            LogicalPlan::Empty => Ok(ResultSet::default()),
         }
+    }
+}
+
+impl Executable for Truncate {
+    fn execute(self) -> Result<ResultSet> {
+        Catalog::get()
+            .lock()
+            .get_table(&self.table_name)
+            .unwrap()
+            .truncate()?;
+
+        Ok(ResultSet::default())
     }
 }
 

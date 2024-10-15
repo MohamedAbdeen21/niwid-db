@@ -130,6 +130,19 @@ impl Catalog {
         self.tables.get_mut(table_name).map(|(_, table)| table)
     }
 
+    pub fn truncate_table(&mut self, table_name: &str) -> Result<()> {
+        let table = match self.tables.get_mut(table_name) {
+            Some((_, table)) => table,
+            None => return Err(anyhow!("Table {} does not exist", table_name)),
+        };
+
+        table.truncate()?;
+
+        self.update_pages(table_name.to_string())?;
+
+        Ok(())
+    }
+
     pub fn drop_table(&mut self, table_name: &str, ignore_if_exists: bool) -> Option<()> {
         let tuple_id = match self.tables.get(table_name) {
             Some((tuple_id, _)) => *tuple_id,
@@ -143,7 +156,7 @@ impl Catalog {
         Some(())
     }
 
-    pub fn update_last_page(&mut self, table_name: String) -> Result<()> {
+    pub fn update_pages(&mut self, table_name: String) -> Result<()> {
         let (tuple_id, table) = self.tables.get_mut(&table_name).unwrap();
 
         let schema = table.get_schema();
