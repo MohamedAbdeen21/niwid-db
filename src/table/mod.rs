@@ -128,7 +128,7 @@ impl Table {
         }
 
         // page is full, add another page
-        let new_blob_page: TablePage = self.bpm.lock().new_page()?.writer().into();
+        let new_blob_page: TablePage = self.bpm.lock().new_page()?.reader().into();
 
         self.bpm.lock().unpin(&self.blob_page, self.active_txn);
 
@@ -275,7 +275,7 @@ impl Table {
         }
 
         // page is full, add another page and link to table
-        let page_id = self.bpm.lock().new_page()?.writer().get_page_id();
+        let page_id = self.bpm.lock().new_page()?.reader().get_page_id();
 
         last_page.set_next_page_id(page_id);
 
@@ -327,7 +327,7 @@ impl Table {
     }
 
     pub fn truncate(&mut self) -> Result<()> {
-        self.first_page = self.bpm.lock().new_page()?.writer().get_page_id();
+        self.first_page = self.bpm.lock().new_page()?.reader().get_page_id();
         self.last_page = self.first_page;
 
         Ok(())

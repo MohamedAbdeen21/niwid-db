@@ -13,6 +13,14 @@ pub const META_SIZE: usize = mem::size_of::<TupleMetaData>();
 // This means that the last address in the page is [`PAGE_END`] and not [`PAGE_SIZE`].
 pub const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct TablePageHeader {
+    num_tuples: u16,
+    /// INVALID_PAGE (-1) if there are no more pages
+    next_page: PageId,
+}
+
 /// The Table Page data that persists on disk
 /// all other fields are helpers (pointers and flags)
 /// that are computed on the fly
@@ -29,6 +37,7 @@ pub struct TablePage {
     data: *mut TablePageData,
     page_id: PageId,
     latch: Arc<Latch>,
+    is_dirty: bool,
     read_only: bool,
 }
 
@@ -47,6 +56,11 @@ impl TablePage {
             panic!("Cannot modify read only page");
         }
         &mut unsafe { self.data.as_mut() }.unwrap().header
+    }
+
+    #[cfg(test)]
+    pub fn is_dirty(&self) -> bool {
+        self.is_dirty
     }
 
     pub fn set_next_page_id(&mut self, page_id: PageId) {
@@ -140,7 +154,7 @@ impl TablePage {
         data.bytes[tuple_offset..(tuple_offset + tuple_size)].copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
-        self.header_mut().is_dirty |= true;
+        self.is_dirty |= true;
 
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
@@ -175,7 +189,7 @@ impl TablePage {
         data.bytes[tuple_offset..(tuple_offset + tuple.len())].copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
-        self.header_mut().is_dirty |= true;
+        self.is_dirty |= true;
 
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
@@ -193,7 +207,7 @@ impl TablePage {
 
         data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
             .copy_from_slice(deleted_meta.to_bytes());
-        self.header_mut().is_dirty |= true;
+        self.is_dirty |= true;
     }
 
     pub fn read_tuple(&self, slot: usize) -> Entry {
@@ -241,11 +255,13 @@ impl TablePage {
 
 impl<'a> From<&'a mut Page> for TablePage {
     fn from(page: &'a mut Page) -> TablePage {
+        page.mark_dirty();
         let data = page.data.as_mut_ptr() as *mut TablePageData;
         TablePage {
             data,
             page_id: page.get_page_id(),
             latch: page.latch.clone(),
+            is_dirty: page.is_dirty(),
             read_only: false,
         }
     }
@@ -257,19 +273,11 @@ impl<'a> From<&'a Page> for TablePage {
         TablePage {
             data,
             page_id: page.get_page_id(),
+            is_dirty: page.is_dirty(),
             latch: page.latch.clone(),
             read_only: true,
         }
     }
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct TablePageHeader {
-    is_dirty: bool,
-    num_tuples: u16,
-    /// INVALID_PAGE (-1) if there are no more pages
-    next_page: PageId,
 }
 
 impl TablePageHeader {
@@ -287,11 +295,6 @@ impl TablePageHeader {
 
     pub fn get_num_tuples(&self) -> usize {
         self.num_tuples as usize
-    }
-
-    #[cfg(test)]
-    pub fn is_dirty(&self) -> bool {
-        self.is_dirty
     }
 }
 
@@ -376,8 +379,8 @@ mod tests {
             tuple.to_bytes()
         );
         assert!(page.is_dirty());
-        assert!(table_page.header().is_dirty());
-        assert!(table_page_2.header().is_dirty());
+        assert!(table_page.is_dirty);
+        assert!(table_page_2.is_dirty);
 
         assert_eq!(table_page_2.read_tuple(0).1.to_bytes(), tuple.to_bytes());
 

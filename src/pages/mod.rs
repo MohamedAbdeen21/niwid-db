@@ -20,9 +20,8 @@ pub type PageId = u32;
 #[derive(Debug, Clone)]
 pub struct Page {
     /// Underlying block of memory of size [`PAGE_SIZE`]
-    /// first two bytes are the is_dirty flag as it's shared with
-    /// other page types
     data: [u8; PAGE_SIZE],
+    is_dirty: bool,
     page_id: PageId,
     latch: Arc<Latch>,
 }
@@ -64,21 +63,22 @@ impl Page {
     pub fn new() -> Self {
         Page {
             data: [0; PAGE_SIZE],
+            is_dirty: false,
             page_id: INVALID_PAGE,
             latch: Arc::new(Latch::new()),
         }
     }
 
     pub fn mark_clean(&mut self) {
-        self.data[0] = 0;
+        self.is_dirty = false;
     }
 
     pub fn mark_dirty(&mut self) {
-        self.data[0] = 1;
+        self.is_dirty = true;
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.data[0] == 1
+        self.is_dirty
     }
 
     pub fn get_page_id(&self) -> PageId {

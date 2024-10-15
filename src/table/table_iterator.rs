@@ -175,12 +175,12 @@ mod tests {
             .bpm
             .lock()
             .fetch_frame(table.first_page, None)?
-            .writer()
+            .reader()
             .into();
 
         assert_eq!(table.first_page, table.last_page);
 
-        assert!(first_page.header().is_dirty());
+        assert!(first_page.is_dirty());
 
         let tuple = Tuple::new(vec![Value::Null, Value::Null], &schema);
         table.insert(tuple)?;

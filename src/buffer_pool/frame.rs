@@ -56,8 +56,8 @@ impl Frame {
         &self.latch
     }
 
+    /// Be careful: Calling into on a mut page will mark it as dirty
     pub fn writer(&mut self) -> &mut Page {
-        self.page.mark_dirty();
         &mut self.page
     }
 

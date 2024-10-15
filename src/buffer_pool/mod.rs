@@ -66,7 +66,7 @@ impl BufferPoolManager {
             Err(_) => {
                 let mut page = Page::new();
                 page.set_page_id(BUFFER_POOL_PAGE);
-                page.write_bytes(2, 6, &STARTING_PAGE_ID.to_ne_bytes());
+                page.write_bytes(0, size_of::<PageId>(), &STARTING_PAGE_ID.to_ne_bytes());
                 page
             }
         };
@@ -83,8 +83,9 @@ impl BufferPoolManager {
     }
 
     pub fn increment_page_id(&mut self) -> Result<PageId> {
-        let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(2, 6).try_into().unwrap());
-        self.next_page_id.write_bytes(2, 6, &(id + 1).to_ne_bytes());
+        let l = size_of::<PageId>();
+        let id = PageId::from_ne_bytes(self.next_page_id.read_bytes(0, l).try_into().unwrap());
+        self.next_page_id.write_bytes(0, l, &(id + 1).to_ne_bytes());
         self.disk_manager.write_to_file(&self.next_page_id, None)?;
         Ok(id)
     }
@@ -287,7 +288,7 @@ impl BufferPoolManager {
         // TODO: do we need to check txns?
         if let Some(id) = page_id {
             let frame_id = self.page_table.get(&id).unwrap();
-            let page = self.frames[*frame_id].writer();
+            let page = self.frames[*frame_id].reader();
             self.disk_manager.write_to_file(page, None)?;
             return Ok(());
         }
@@ -301,7 +302,7 @@ impl BufferPoolManager {
                     panic!("Frame {} has pin count {}", f.get_page_id(), pins);
                 }
             })
-            .map(|f| f.writer())
+            .map(|f| f.reader())
             .try_for_each(|p| self.disk_manager.write_to_file(p, None))
     }
 }
@@ -363,7 +364,7 @@ mod tests {
         let mut bpm = BufferPoolManager::new(2, &path);
 
         let frame = bpm.new_page()?;
-        let page = frame.writer();
+        let page = frame.reader();
         let table_page: TablePage = page.into();
 
         page.get_latch().try_wlock();
@@ -391,7 +392,7 @@ mod tests {
 
         bpm.start_txn(1)?;
 
-        let page = bpm.new_page()?.writer();
+        let page = bpm.new_page()?.reader();
         let lock = page.get_latch().clone();
 
         let page_id = page.get_page_id();
@@ -418,7 +419,7 @@ mod tests {
         lock.wunlock();
 
         // frame and page are sharing lock
-        let new_page = bpm.fetch_frame(page_id, None)?.writer();
+        let new_page = bpm.fetch_frame(page_id, None)?.reader();
         assert!(!new_page.get_latch().is_locked());
 
         assert_eq!(new_page.read_bytes(PAGE_END - data.len(), PAGE_END), data);

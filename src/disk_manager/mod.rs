@@ -304,7 +304,7 @@ mod tests {
         page.set_page_id(page_id);
 
         let data = "Hello, World!".as_bytes();
-        let start = 1;
+        let start = 2;
         let end = data.len() + start;
         page.write_bytes(start, end, data);
 
