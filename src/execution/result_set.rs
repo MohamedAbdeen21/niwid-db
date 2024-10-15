@@ -2,7 +2,7 @@ use crate::{tuple::schema::Field, types::Value};
 
 #[derive(Default, Debug)]
 pub struct ResultSet {
-    pub cols: Vec<Field>,
+    pub fields: Vec<Field>,
     pub data: Vec<Vec<Value>>,
     cap: usize,
 }
@@ -10,7 +10,7 @@ pub struct ResultSet {
 impl ResultSet {
     pub fn new(cols: Vec<Field>, data: Vec<Vec<Value>>) -> Self {
         Self {
-            cols,
+            fields: cols,
             cap: data.len(),
             data,
         }
@@ -18,7 +18,7 @@ impl ResultSet {
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            cols: Vec::with_capacity(capacity),
+            fields: Vec::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
             cap: capacity,
         }
@@ -29,10 +29,14 @@ impl ResultSet {
     }
 
     pub fn union(mut self, other: ResultSet) -> Self {
-        if self.cols.iter().map(|c| c.ty.clone()).collect::<Vec<_>>()
-            != other.cols.iter().map(|c| c.ty.clone()).collect::<Vec<_>>()
+        if self.fields.iter().map(|c| c.ty.clone()).collect::<Vec<_>>()
+            != other
+                .fields
+                .iter()
+                .map(|c| c.ty.clone())
+                .collect::<Vec<_>>()
         {
-            panic!("Cannot union two result sets with different schemas");
+            panic!("Schema mismatch");
         }
 
         self.data.extend(other.data);
@@ -46,13 +50,13 @@ impl ResultSet {
             .for_each(|(a, b)| a.extend(b));
 
         let cols = self
-            .cols
+            .fields
             .into_iter()
-            .chain(other.cols.into_iter())
+            .chain(other.fields.into_iter())
             .collect();
 
         Self {
-            cols,
+            fields: cols,
             cap: self.data.len(),
             data: self.data,
         }
@@ -60,7 +64,7 @@ impl ResultSet {
 
     pub fn show(&self) {
         let col_widths: Vec<usize> = self
-            .cols
+            .fields
             .iter()
             .enumerate()
             .map(|(i, col)| {
@@ -77,7 +81,7 @@ impl ResultSet {
 
         print_row_divider(&col_widths);
 
-        for (i, col) in self.cols.iter().enumerate() {
+        for (i, col) in self.fields.iter().enumerate() {
             print!(
                 "| {:^width$} ",
                 format!("{} ({})", col.name, col.ty.to_sql()),

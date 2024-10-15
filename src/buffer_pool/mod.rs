@@ -3,9 +3,11 @@ mod replacer;
 
 use crate::catalog::CATALOG_PAGE;
 use crate::disk_manager::{DiskManager, DISK_STORAGE};
+#[cfg(debug_assertions)]
+use crate::get_caller_name;
 use crate::pages::{Page, PageId, INVALID_PAGE};
+use crate::printdbg;
 use crate::txn_manager::TxnId;
-use crate::{get_caller_name, printdbg};
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use lazy_static::lazy_static;

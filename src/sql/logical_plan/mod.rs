@@ -138,7 +138,14 @@ fn build_values(rows: Vec<Vec<Expr>>) -> Result<LogicalPlan> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(LogicalPlan::Values(Values::new(rows, Schema::default())))
+    let fields = rows
+        .first()
+        .unwrap()
+        .iter()
+        .map(|e| e.to_field(&Schema::default()))
+        .collect();
+
+    Ok(LogicalPlan::Values(Values::new(rows, Schema::new(fields))))
 }
 
 #[allow(unused)]
@@ -167,6 +174,18 @@ fn build_insert(
     let input = build_query(source)?.unwrap();
     let table_name = table_name.0.first().unwrap().value.clone();
     let schema = Catalog::get().lock().get_schema(&table_name).unwrap();
+
+    let input_schema = input.schema();
+    let input_types: Vec<_> = input_schema.fields.iter().map(|f| &f.ty).collect();
+    let table_types: Vec<_> = schema.fields.iter().map(|f| &f.ty).collect();
+
+    if input_types != table_types {
+        return Err(anyhow!(
+            "Schema mismatch: {:?} vs {:?}",
+            input_types,
+            table_types
+        ));
+    }
 
     let root = LogicalPlan::Insert(Box::new(Insert::new(
         input,

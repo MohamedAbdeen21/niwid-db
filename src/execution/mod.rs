@@ -84,7 +84,7 @@ impl Executable for Insert {
     fn execute(self) -> Result<ResultSet> {
         let input = self.input.execute()?;
 
-        if input.cols.len() != self.table_schema.fields.len() {
+        if input.fields.len() != self.table_schema.fields.len() {
             return Err(anyhow!("Column count mismatch"));
         }
 
@@ -141,7 +141,7 @@ impl Executable for Filter {
             .map(|(_, r)| r)
             .collect::<Vec<_>>();
 
-        Ok(ResultSet::new(input.cols, output))
+        Ok(ResultSet::new(input.fields, output))
     }
 }
 
@@ -150,17 +150,17 @@ impl LogicalExpr {
         let size = input.size();
         match self {
             LogicalExpr::Literal(ref c) => {
-                let input_schema = Schema::new(input.cols.clone());
+                let input_schema = Schema::new(input.fields.clone());
                 let field = self.to_field(&input_schema);
                 let data = (0..size).map(|_| vec![c.clone()]).collect::<Vec<_>>();
                 ResultSet::new(vec![field], data)
             }
             LogicalExpr::Column(c) => {
-                let index = input.cols.iter().position(|col| col.name == *c).unwrap();
+                let index = input.fields.iter().position(|col| col.name == *c).unwrap();
                 let data = (0..size)
                     .map(|i| vec![input.data[i][index].clone()])
                     .collect::<Vec<_>>();
-                ResultSet::new(vec![input.cols[index].clone()], data)
+                ResultSet::new(vec![input.fields[index].clone()], data)
             }
         }
     }
@@ -182,8 +182,8 @@ impl BooleanBinaryExpr {
     fn evaluate(self, input: &ResultSet) -> Vec<bool> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
-                let index1 = input.cols.iter().position(|col| &col.name == c1).unwrap();
-                let index2 = input.cols.iter().position(|col| &col.name == c2).unwrap();
+                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
+                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
                 input
                     .data
                     .iter()
@@ -191,7 +191,7 @@ impl BooleanBinaryExpr {
                     .collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Column(c2)) => {
-                let index2 = input.cols.iter().position(|col| &col.name == c2).unwrap();
+                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
                 input
                     .data
                     .iter()
@@ -199,7 +199,7 @@ impl BooleanBinaryExpr {
                     .collect()
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
-                let index1 = input.cols.iter().position(|col| &col.name == c1).unwrap();
+                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
                 input
                     .data
                     .iter()
