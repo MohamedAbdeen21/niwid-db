@@ -414,7 +414,7 @@ mod tests {
 
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::UInt, &i.to_string())],
+                vec![ValueFactory::from_string(&Types::UInt, i.to_string())],
                 &schema,
             );
             table.insert(tuple)?;
@@ -433,7 +433,7 @@ mod tests {
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::UInt, &i.to_string())],
+                vec![ValueFactory::from_string(&Types::UInt, i.to_string())],
                 &schema,
             );
             table.insert(tuple)?;

@@ -123,7 +123,7 @@ fn build_drop(
     if !if_exists {
         let non_existant: Vec<String> = names
             .iter()
-            .filter(|&name| Catalog::get().lock().get_table(&name, txn_id).is_none())
+            .filter(|&name| Catalog::get().lock().get_table(name, txn_id).is_none())
             .cloned()
             .collect();
 

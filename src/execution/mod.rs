@@ -199,7 +199,7 @@ impl BinaryExpr {
                 input
                     .data
                     .iter()
-                    .map(|row| self.eval_op(&v1, &row[index2]))
+                    .map(|row| self.eval_op(v1, &row[index2]))
                     .collect()
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
@@ -207,11 +207,11 @@ impl BinaryExpr {
                 input
                     .data
                     .iter()
-                    .map(|row| self.eval_op(&row[index1], &v2))
+                    .map(|row| self.eval_op(&row[index1], v2))
                     .collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
-                input.data.iter().map(|_| self.eval_op(&v1, &v2)).collect()
+                input.data.iter().map(|_| self.eval_op(v1, v2)).collect()
             }
             (l, r) => todo!("{:?} {:?}", l, r),
         }

@@ -111,8 +111,8 @@ impl Catalog {
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
             ValueFactory::from_string(&Types::Str, &table_name),
-            ValueFactory::from_string(&Types::UInt, &table.get_first_page_id().to_string()),
-            ValueFactory::from_string(&Types::UInt, &table.get_last_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, table.get_first_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, table.get_last_page_id().to_string()),
             ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);
@@ -181,8 +181,8 @@ impl Catalog {
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
             ValueFactory::from_string(&Types::Str, &table_name),
-            ValueFactory::from_string(&Types::UInt, &table.get_first_page_id().to_string()),
-            ValueFactory::from_string(&Types::UInt, &table.get_last_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, table.get_first_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, table.get_last_page_id().to_string()),
             ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
 

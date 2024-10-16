@@ -164,8 +164,8 @@ mod tests {
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
                 vec![
-                    ValueFactory::from_string(&Types::Int, &i.to_string()),
-                    ValueFactory::from_string(&Types::Int, &i.to_string()),
+                    ValueFactory::from_string(&Types::Int, i.to_string()),
+                    ValueFactory::from_string(&Types::Int, i.to_string()),
                 ],
                 &schema,
             );
