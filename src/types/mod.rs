@@ -106,6 +106,60 @@ pub enum Value {
     Null,
 }
 
+impl Value {
+    pub fn add(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l + r)),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l + r)),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l + r)),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 + r)),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l + *r as i32)),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 + r)),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l + *r as f32)),
+            (l, r) => unimplemented!("{} + {}", l, r),
+        }
+    }
+
+    pub fn sub(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l - r)),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l - r)),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l - r)),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 - r)),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l - *r as i32)),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 - r)),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l - *r as f32)),
+            (l, r) => unimplemented!("{} - {}", l, r),
+        }
+    }
+
+    pub fn mul(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l * r)),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l * r)),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l * r)),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 * r)),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l * *r as i32)),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 * r)),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l * *r as f32)),
+            (l, r) => unimplemented!("{} * {}", l, r),
+        }
+    }
+
+    pub fn div(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l / r)),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l / r)),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l / r)),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 / r)),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l / *r as i32)),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 / r)),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l / *r as f32)),
+            (l, r) => unimplemented!("{} / {}", l, r),
+        }
+    }
+}
+
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
@@ -416,8 +470,8 @@ impl ValueFactory {
         impl_fn!(t, from_bytes, bytes)
     }
 
-    pub fn from_string(t: &Types, s: &str) -> Value {
-        impl_fn!(t, from_string, s)
+    pub fn from_string(t: &Types, s: impl Into<String>) -> Value {
+        impl_fn!(t, from_string, &s.into())
     }
 
     pub fn null() -> Value {

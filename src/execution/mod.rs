@@ -1,6 +1,7 @@
 pub mod result_set;
 
 use crate::catalog::Catalog;
+use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
     CreateTable, DropTables, Filter, Insert, LogicalPlan, Scan, Truncate, Values,
@@ -8,46 +9,49 @@ use crate::sql::logical_plan::plan::{
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::Schema;
 use crate::tuple::Tuple;
+use crate::txn_manager::TxnId;
 use crate::types::Value;
 use anyhow::{anyhow, Result};
 use result_set::ResultSet;
 use sqlparser::ast::BinaryOperator;
 
 pub trait Executable {
-    fn execute(self) -> Result<ResultSet>;
+    fn execute(self, txn: Option<TxnId>) -> Result<ResultSet>;
 }
 
 impl LogicalPlan {
-    pub fn execute(self) -> Result<ResultSet> {
+    pub fn execute(self, txn: Option<TxnId>) -> Result<ResultSet> {
         match self {
-            LogicalPlan::Projection(plan) => plan.execute(),
-            LogicalPlan::Scan(scan) => scan.execute(),
-            LogicalPlan::Filter(filter) => filter.execute(),
-            LogicalPlan::CreateTable(create) => create.execute(),
-            LogicalPlan::Explain(explain) => explain.execute(),
-            LogicalPlan::Insert(i) => i.execute(),
-            LogicalPlan::Values(v) => v.execute(),
-            LogicalPlan::DropTables(d) => d.execute(),
-            LogicalPlan::Truncate(t) => t.execute(),
+            LogicalPlan::Projection(plan) => plan.execute(txn),
+            LogicalPlan::Scan(scan) => scan.execute(txn),
+            LogicalPlan::Filter(filter) => filter.execute(txn),
+            LogicalPlan::CreateTable(create) => create.execute(txn),
+            LogicalPlan::Explain(explain) => explain.execute(txn),
+            LogicalPlan::Insert(i) => i.execute(txn),
+            LogicalPlan::Values(v) => v.execute(txn),
+            LogicalPlan::DropTables(d) => d.execute(txn),
+            LogicalPlan::Truncate(t) => t.execute(txn),
             LogicalPlan::Empty => Ok(ResultSet::default()),
         }
     }
 }
 
 impl Executable for Truncate {
-    fn execute(self) -> Result<ResultSet> {
-        Catalog::get().lock().truncate_table(&self.table_name)?;
+    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
+        Catalog::get()
+            .lock()
+            .truncate_table(self.table_name, txn_id)?;
 
         Ok(ResultSet::default())
     }
 }
 
 impl Executable for DropTables {
-    fn execute(self) -> Result<ResultSet> {
+    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
         for table_name in self.table_names {
             if Catalog::get()
                 .lock()
-                .drop_table(&table_name, self.if_exists)
+                .drop_table(table_name.clone(), self.if_exists, txn_id)
                 .is_none()
             {
                 return Err(anyhow!("Table {} does not exist", table_name));
@@ -59,7 +63,7 @@ impl Executable for DropTables {
 }
 
 impl Executable for Values {
-    fn execute(self) -> Result<ResultSet> {
+    fn execute(self, _: Option<TxnId>) -> Result<ResultSet> {
         let input = ResultSet::with_capacity(1);
         let output = self
             .rows
@@ -78,8 +82,8 @@ impl Executable for Values {
 }
 
 impl Executable for Insert {
-    fn execute(self) -> Result<ResultSet> {
-        let input = self.input.execute()?;
+    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
+        let input = self.input.execute(txn_id)?;
 
         if input.fields.len() != self.table_schema.fields.len() {
             return Err(anyhow!("Column count mismatch"));
@@ -90,7 +94,7 @@ impl Executable for Insert {
 
             let _tuple_id = Catalog::get()
                 .lock()
-                .get_table(&self.table_name)
+                .get_table(&self.table_name, txn_id)
                 .unwrap()
                 .insert(tuple);
         }
@@ -100,12 +104,12 @@ impl Executable for Insert {
 }
 
 impl Executable for Explain {
-    fn execute(self) -> Result<ResultSet> {
+    fn execute(self, _txn_id: Option<TxnId>) -> Result<ResultSet> {
         println!("Logical plan:\n{}", self.input.print());
         // time the execution time
         if self.analyze {
             let start = std::time::Instant::now();
-            let result = self.input.execute()?;
+            let result = self.input.execute(_txn_id)?;
             println!("Execution time: {:?}", start.elapsed());
             Ok(result)
         } else {
@@ -115,19 +119,19 @@ impl Executable for Explain {
 }
 
 impl Executable for CreateTable {
-    fn execute(self) -> Result<ResultSet> {
+    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
         let catalog = Catalog::get();
         catalog
             .lock()
-            .add_table(&self.table_name, &self.schema, self.if_not_exists)
+            .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)
             .unwrap();
         Ok(ResultSet::default())
     }
 }
 
 impl Executable for Filter {
-    fn execute(self) -> Result<ResultSet> {
-        let input = self.input.execute()?;
+    fn execute(self, _txn_id: Option<TxnId>) -> Result<ResultSet> {
+        let input = self.input.execute(_txn_id)?;
         let mask = self.expr.evaluate(&input);
 
         let output = input
@@ -159,6 +163,57 @@ impl LogicalExpr {
                     .collect::<Vec<_>>();
                 ResultSet::new(vec![input.fields[index].clone()], data)
             }
+            LogicalExpr::BinaryExpr(ref expr) => {
+                let schema = Schema::new(input.fields.clone());
+                let field = self.to_field(&schema);
+                ResultSet::new(vec![field], vec![expr.evaluate(input)])
+            }
+        }
+    }
+}
+
+impl BinaryExpr {
+    fn eval_op(&self, left: &Value, right: &Value) -> Value {
+        match &self.op {
+            BinaryOperator::Plus => left.add(right),
+            BinaryOperator::Minus => left.sub(right),
+            BinaryOperator::Multiply => left.sub(right),
+            BinaryOperator::Divide => left.div(right),
+            e => todo!("{}", e),
+        }
+    }
+
+    pub(super) fn evaluate(&self, input: &ResultSet) -> Vec<Value> {
+        match (&self.left, &self.right) {
+            (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
+                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
+                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
+                input
+                    .data
+                    .iter()
+                    .map(|row| self.eval_op(&row[index1], &row[index2]))
+                    .collect()
+            }
+            (LogicalExpr::Literal(v1), LogicalExpr::Column(c2)) => {
+                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
+                input
+                    .data
+                    .iter()
+                    .map(|row| self.eval_op(&v1, &row[index2]))
+                    .collect()
+            }
+            (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
+                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
+                input
+                    .data
+                    .iter()
+                    .map(|row| self.eval_op(&row[index1], &v2))
+                    .collect()
+            }
+            (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
+                input.data.iter().map(|_| self.eval_op(&v1, &v2)).collect()
+            }
+            (l, r) => todo!("{:?} {:?}", l, r),
         }
     }
 }
@@ -206,16 +261,17 @@ impl BooleanBinaryExpr {
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
                 [self.eval_op(v1, v2)].repeat(input.size())
             }
+            e => todo!("{:?}", e),
         }
     }
 }
 
 impl Executable for Projection {
-    fn execute(self) -> Result<ResultSet> {
+    fn execute(self, _txn_id: Option<TxnId>) -> Result<ResultSet> {
         let input = if matches!(self.input, LogicalPlan::Empty) {
             ResultSet::with_capacity(1)
         } else {
-            self.input.execute()?
+            self.input.execute(_txn_id)?
         };
 
         let output = self
@@ -231,10 +287,10 @@ impl Executable for Projection {
 }
 
 impl Executable for Scan {
-    fn execute(self) -> Result<ResultSet> {
+    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
         let arc_catalog = Catalog::get();
         let mut catalog = arc_catalog.lock();
-        let table = catalog.get_table(&self.table_name).unwrap();
+        let table = catalog.get_table(&self.table_name, txn_id).unwrap();
 
         let schema = table.get_schema();
 

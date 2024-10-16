@@ -74,6 +74,7 @@ impl Iterator for TableIterator {
         let (meta, tuple) = self.page.read_tuple(self.current_slot);
         self.current_slot += 1;
 
+        // FIXME: Can run into stack overflows because of recursion
         if meta.is_deleted() {
             return self.next();
         }

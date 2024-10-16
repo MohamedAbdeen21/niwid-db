@@ -360,6 +360,7 @@ impl Projection {
                     match s {
                         LogicalExpr::Column(c) => format!("#{}", c),
                         LogicalExpr::Literal(l) => format!("{}", l),
+                        LogicalExpr::BinaryExpr(b) => format!("({})", b.print()),
                     }
                 })
                 .collect::<Vec<_>>()

@@ -1,11 +1,12 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::pages::PageId;
 use crate::table::Table;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
+use crate::txn_manager::TxnId;
 use crate::types::{AsBytes, Types, Value, ValueFactory};
+use crate::versioned_map::VersionedMap;
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
@@ -25,8 +26,8 @@ lazy_static! {
 // but for catalog, we have the tables hashmap, so the catalog has to manage
 // txns on its own
 pub struct Catalog {
-    tables: HashMap<String, (TupleId, Table)>, // TODO: handle ownership
-    schema: Schema,                            // A catalog is itself a table
+    pub tables: VersionedMap<String, (TupleId, Table)>, // TODO: handle ownership
+    schema: Schema,                                     // A catalog is itself a table
 }
 
 impl Catalog {
@@ -34,12 +35,18 @@ impl Catalog {
         CATALOG.clone()
     }
 
+    /// Catalog is a table itself, this gives access to the underlying table
     pub fn table(&mut self) -> &mut Table {
-        self.get_table(CATALOG_NAME).unwrap()
+        // No need to track version for catalog, catalog always has the same
+        // tuple_id and can never be deleted (TODO:)
+        self.tables
+            .get_mut(None, &CATALOG_NAME.to_string())
+            .map(|(_, t)| t)
+            .unwrap()
     }
 
-    fn build_catalog(table: Table, schema: &Schema) -> HashMap<String, (TupleId, Table)> {
-        let mut tables = HashMap::new();
+    fn build_catalog(table: Table, schema: &Schema) -> VersionedMap<String, (TupleId, Table)> {
+        let mut tables = VersionedMap::new();
 
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(schema)?;
@@ -52,14 +59,14 @@ impl Catalog {
             let table = Table::fetch(name.clone(), &schema, first_page_id, last_page_id)
                 .expect("Fetch failed");
 
-            tables.insert(name, (*id, table));
+            tables.insert(None, name, (*id, table));
 
             Ok(())
         };
 
         table.scan(table_builder).expect("Catalog scan failed");
 
-        tables.insert(CATALOG_NAME.to_string(), ((CATALOG_PAGE, 0), table));
+        tables.insert(None, CATALOG_NAME.to_string(), ((CATALOG_PAGE, 0), table));
 
         tables
     }
@@ -88,11 +95,12 @@ impl Catalog {
 
     pub fn add_table(
         &mut self,
-        table_name: &str,
+        table_name: String,
         schema: &Schema,
         ignore_if_exists: bool,
+        txn: Option<TxnId>,
     ) -> Result<()> {
-        if self.get_table(table_name).is_some() {
+        if self.get_table(&table_name, txn).is_some() {
             if ignore_if_exists {
                 return Ok(());
             }
@@ -102,7 +110,7 @@ impl Catalog {
         let table = Table::new(table_name.to_string(), schema)?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
-            ValueFactory::from_string(&Types::Str, table_name),
+            ValueFactory::from_string(&Types::Str, &table_name),
             ValueFactory::from_string(&Types::UInt, &table.get_first_page_id().to_string()),
             ValueFactory::from_string(&Types::UInt, &table.get_last_page_id().to_string()),
             ValueFactory::from_string(&Types::Str, &serialized_schema),
@@ -111,49 +119,62 @@ impl Catalog {
         let tuple_id = self.table().insert(tuple)?;
 
         self.tables
-            .insert(table_name.to_string(), (tuple_id, table));
+            .insert(txn, table_name.to_string(), (tuple_id, table));
 
         Ok(())
     }
 
-    pub fn get_schema(&self, table_name: &str) -> Option<Schema> {
+    pub fn get_schema(&self, table_name: &str, txn: Option<TxnId>) -> Option<Schema> {
         self.tables
-            .get(table_name)
+            .get(txn, &table_name.to_string())
             .map(|(_, table)| table.get_schema())
     }
 
-    pub fn get_table(&mut self, table_name: &str) -> Option<&mut Table> {
-        self.tables.get_mut(table_name).map(|(_, table)| table)
+    pub fn get_table(&mut self, table_name: &str, txn: Option<TxnId>) -> Option<&mut Table> {
+        if table_name == CATALOG_NAME {
+            // Catalog table should be accessed through table() method
+            // this should limit direct operations on the catalog
+            return None;
+        }
+
+        self.tables
+            .get_mut(txn, &table_name.to_string())
+            .map(|(_, table)| table)
     }
 
-    pub fn truncate_table(&mut self, table_name: &str) -> Result<()> {
-        let table = match self.tables.get_mut(table_name) {
-            Some((_, table)) => table,
-            None => return Err(anyhow!("Table {} does not exist", table_name)),
+    pub fn truncate_table(&mut self, table_name: String, txn: Option<TxnId>) -> Result<()> {
+        let table = match self.get_table(&table_name, txn) {
+            Some(table) => table,
+            None => return Err(anyhow!("Table {} doesn't exist", table_name)),
         };
 
         table.truncate()?;
 
-        self.update_pages(table_name.to_string())?;
+        self.update_pages(table_name.to_string(), txn)?;
 
         Ok(())
     }
 
-    pub fn drop_table(&mut self, table_name: &str, ignore_if_exists: bool) -> Option<()> {
-        let tuple_id = match self.tables.get(table_name) {
+    pub fn drop_table(
+        &mut self,
+        table_name: String,
+        ignore_if_exists: bool,
+        txn: Option<TxnId>,
+    ) -> Option<()> {
+        let tuple_id = match self.tables.get(txn, &table_name) {
             Some((tuple_id, _)) => *tuple_id,
             None => return if ignore_if_exists { Some(()) } else { None },
         };
 
         self.table().delete(tuple_id).ok()?;
 
-        self.tables.remove(table_name);
+        self.tables.remove(txn, &table_name);
 
         Some(())
     }
 
-    pub fn update_pages(&mut self, table_name: String) -> Result<()> {
-        let (tuple_id, table) = self.tables.get_mut(&table_name).unwrap();
+    pub fn update_pages(&mut self, table_name: String, txn: Option<TxnId>) -> Result<()> {
+        let (tuple_id, table) = self.tables.get_mut(txn, &table_name).unwrap();
 
         let schema = table.get_schema();
 
@@ -169,7 +190,7 @@ impl Catalog {
         let tuple_id = *tuple_id;
         let new_tuple_id = self.table().update(Some(tuple_id), tuple)?;
 
-        self.tables.get_mut(&table_name).unwrap().0 = new_tuple_id;
+        self.tables.get_mut(txn, &table_name).unwrap().0 = new_tuple_id;
 
         Ok(())
     }

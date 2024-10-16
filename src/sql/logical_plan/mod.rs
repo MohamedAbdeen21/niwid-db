@@ -2,7 +2,7 @@ pub mod expr;
 pub mod optimizer;
 pub mod plan;
 
-use expr::{BooleanBinaryExpr, LogicalExpr};
+use expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use plan::{
     CreateTable, DropTables, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Truncate,
     Values,
@@ -18,37 +18,39 @@ use anyhow::{anyhow, Result};
 use crate::{
     catalog::Catalog,
     tuple::schema::Schema,
+    txn_manager::TxnId,
     types::{Types, ValueFactory},
 };
 
+#[macro_export]
 macro_rules! value {
     ($t:ident, $s:expr) => {
         ValueFactory::from_string(&Types::$t, &$s)
     };
 }
 
-pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
+pub fn build_initial_plan(statement: Statement, txn_id: Option<TxnId>) -> Result<LogicalPlan> {
     match statement {
         Statement::Explain {
             statement, analyze, ..
-        } => build_explain(*statement, analyze),
+        } => build_explain(*statement, analyze, txn_id),
         Statement::Insert(SqlInsert {
             table_name,
             source,
             columns,
             returning,
             ..
-        }) => build_insert(table_name, source, columns, returning),
+        }) => build_insert(table_name, source, columns, returning, txn_id),
         Statement::Query(query) => {
             let Query { body, limit, .. } = *query;
-            build_select(body, limit)
+            build_select(body, limit, txn_id)
         }
         Statement::Drop {
             object_type,
             if_exists,
             names,
             ..
-        } => build_drop(object_type, if_exists, names),
+        } => build_drop(object_type, if_exists, names, txn_id),
         #[allow(unused)]
         Statement::Update {
             table,
@@ -65,12 +67,16 @@ pub fn build_initial_plan(statement: Statement) -> Result<LogicalPlan> {
         }) => build_create(name, columns, if_not_exists),
         Statement::Truncate {
             table_names, table, ..
-        } => build_truncate(table_names, table),
+        } => build_truncate(table_names, table, txn_id),
         e => unimplemented!("{}", e),
     }
 }
 
-fn build_truncate(table_names: Vec<TruncateTableTarget>, table: bool) -> Result<LogicalPlan> {
+fn build_truncate(
+    table_names: Vec<TruncateTableTarget>,
+    table: bool,
+    txn_id: Option<TxnId>,
+) -> Result<LogicalPlan> {
     if !table {
         return Err(anyhow!("Did you mean 'TRUNCATE TABLE'?"));
     }
@@ -86,7 +92,11 @@ fn build_truncate(table_names: Vec<TruncateTableTarget>, table: bool) -> Result<
         .value
         .clone();
 
-    if Catalog::get().lock().get_table(&table_name).is_none() {
+    if Catalog::get()
+        .lock()
+        .get_table(&table_name, txn_id)
+        .is_none()
+    {
         return Err(anyhow!("Table {} does not exist", table_name));
     }
 
@@ -97,22 +107,40 @@ fn build_drop(
     object_type: ObjectType,
     if_exists: bool,
     names: Vec<ObjectName>,
+    txn_id: Option<TxnId>,
 ) -> Result<LogicalPlan> {
     if object_type != ObjectType::Table {
         return Err(anyhow!("Unsupported object type: {:?}", object_type));
     }
 
-    Ok(LogicalPlan::DropTables(DropTables::new(
-        names
+    let names: Vec<_> = names
+        .iter()
+        .map(|n| n.0.first().unwrap().value.clone())
+        .collect();
+
+    println!("names: {:?}", names);
+
+    if !if_exists {
+        let non_existant: Vec<String> = names
             .iter()
-            .map(|n| n.0.first().unwrap().value.clone())
-            .collect(),
-        if_exists,
-    )))
+            .filter(|&name| Catalog::get().lock().get_table(&name, txn_id).is_none())
+            .cloned()
+            .collect();
+
+        if !non_existant.is_empty() {
+            return Err(anyhow!("Table(s) {} don't exist", non_existant.join(", ")));
+        }
+    }
+
+    Ok(LogicalPlan::DropTables(DropTables::new(names, if_exists)))
 }
 
-fn build_explain(statement: Statement, analyze: bool) -> Result<LogicalPlan> {
-    let root = build_initial_plan(statement)?;
+fn build_explain(
+    statement: Statement,
+    analyze: bool,
+    txn_id: Option<TxnId>,
+) -> Result<LogicalPlan> {
+    let root = build_initial_plan(statement, txn_id)?;
 
     Ok(LogicalPlan::Explain(Box::new(Explain::new(root, analyze))))
 }
@@ -121,7 +149,8 @@ fn build_expr(expr: Expr) -> Result<LogicalExpr> {
     match expr {
         Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
         Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, s))),
-        _ => todo!(),
+        Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value)),
+        e => todo!("{:?}", e),
     }
 }
 
@@ -148,8 +177,7 @@ fn build_values(rows: Vec<Vec<Expr>>) -> Result<LogicalPlan> {
     Ok(LogicalPlan::Values(Values::new(rows, Schema::new(fields))))
 }
 
-#[allow(unused)]
-fn build_query(query: Option<Box<Query>>) -> Result<Option<LogicalPlan>> {
+fn build_query(query: Option<Box<Query>>, txn_id: Option<TxnId>) -> Result<Option<LogicalPlan>> {
     if query.is_none() {
         return Ok(None);
     }
@@ -157,7 +185,7 @@ fn build_query(query: Option<Box<Query>>) -> Result<Option<LogicalPlan>> {
     let Query { body, limit, .. } = *query.unwrap();
 
     let input = match *body {
-        SetExpr::Select(_) => build_select(body, limit)?,
+        SetExpr::Select(_) => build_select(body, limit, txn_id)?,
         SetExpr::Values(SqlValues { rows, .. }) => build_values(rows)?,
         _ => unimplemented!(),
     };
@@ -170,10 +198,14 @@ fn build_insert(
     source: Option<Box<Query>>,
     _columns: Vec<Ident>,
     _returning: Option<Vec<SelectItem>>,
+    txn_id: Option<TxnId>,
 ) -> Result<LogicalPlan> {
-    let input = build_query(source)?.unwrap();
+    let input = build_query(source, txn_id)?.unwrap();
     let table_name = table_name.0.first().unwrap().value.clone();
-    let schema = Catalog::get().lock().get_schema(&table_name).unwrap();
+    let schema = Catalog::get()
+        .lock()
+        .get_schema(&table_name, txn_id)
+        .unwrap();
 
     let input_schema = input.schema();
     let input_types: Vec<_> = input_schema.fields.iter().map(|f| &f.ty).collect();
@@ -216,7 +248,11 @@ fn build_create(
     Ok(LogicalPlan::CreateTable(Box::new(create)))
 }
 
-fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan> {
+fn build_select(
+    body: Box<SetExpr>,
+    _limit: Option<Expr>,
+    txn_id: Option<TxnId>,
+) -> Result<LogicalPlan> {
     let select = match *body {
         SetExpr::Select(ref select) => select,
         _ => unimplemented!(),
@@ -230,7 +266,11 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
                 _ => todo!(),
             };
 
-            let schema = Catalog::get().lock().get_table(&name).unwrap().get_schema();
+            let schema = Catalog::get()
+                .lock()
+                .get_table(&name, txn_id)
+                .unwrap()
+                .get_schema();
 
             LogicalPlan::Scan(Scan::new(name, schema.clone()))
         }
@@ -263,10 +303,10 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
         .iter()
         .flat_map(|e| match e {
             SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
-                vec![Ok(LogicalExpr::Literal(value!(UInt, s)))]
+                vec![Ok(LogicalExpr::Literal(value!(UInt, *s)))]
             }
             SelectItem::UnnamedExpr(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                vec![Ok(LogicalExpr::Literal(value!(Str, s)))]
+                vec![Ok(LogicalExpr::Literal(value!(Str, *s)))]
             }
             SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                 let name = ident.value.clone();
@@ -287,15 +327,22 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
                 .iter()
                 .map(|e| match e {
                     Expr::Value(SqlValue::Number(s, _)) => {
-                        Ok(LogicalExpr::Literal(value!(UInt, s)))
+                        Ok(LogicalExpr::Literal(value!(UInt, *s)))
                     }
                     Expr::Value(SqlValue::SingleQuotedString(s)) => {
-                        Ok(LogicalExpr::Literal(value!(Str, s)))
+                        Ok(LogicalExpr::Literal(value!(Str, *s)))
                     }
                     e => todo!("{}", e),
                 })
                 .collect(),
-            e => todo!("{}", e),
+            SelectItem::UnnamedExpr(Expr::BinaryOp { left, right, op }) => {
+                vec![Ok(LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(
+                    build_expr(*left.clone()).unwrap(),
+                    op.clone(),
+                    build_expr(*right.clone()).unwrap(),
+                ))))]
+            }
+            e => todo!("{:?}", e),
         })
         .collect::<Result<Vec<_>>>()?;
 

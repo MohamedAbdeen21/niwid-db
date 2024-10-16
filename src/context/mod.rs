@@ -16,18 +16,35 @@ pub struct Context {
     catalog_changed: bool,
 }
 
-impl Context {
-    pub fn new() -> Result<Self> {
-        Ok(Self {
+impl Default for Context {
+    fn default() -> Self {
+        Self {
             catalog: Catalog::get(),
             txn_manager: TransactionManager::get(),
             active_txn: None,
             txn_tables: vec![],
             catalog_changed: false,
-        })
+        }
+    }
+}
+
+impl Context {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn add_table(&mut self, name: &str, schema: &Schema, ignore_if_exists: bool) -> Result<()> {
+    pub fn truncate_table(&mut self, table_name: String) -> Result<()> {
+        self.catalog
+            .lock()
+            .truncate_table(table_name, self.active_txn)
+    }
+
+    pub fn add_table(
+        &mut self,
+        name: String,
+        schema: &Schema,
+        ignore_if_exists: bool,
+    ) -> Result<()> {
         if let Some(txn_id) = self.active_txn {
             self.catalog.lock().table().start_txn(txn_id)?;
             self.catalog_changed = true;
@@ -35,7 +52,7 @@ impl Context {
 
         self.catalog
             .lock()
-            .add_table(name, schema, ignore_if_exists)
+            .add_table(name, schema, ignore_if_exists, self.active_txn)
     }
 
     pub fn start_txn(&mut self) -> Result<()> {
@@ -56,8 +73,12 @@ impl Context {
 
         self.txn_manager.lock().commit(self.active_txn.unwrap())?;
 
-        for table in self.txn_tables.iter_mut() {
-            self.catalog.lock().get_table(table).unwrap().commit_txn()?;
+        for table in self.txn_tables.drain(..) {
+            self.catalog
+                .lock()
+                .get_table(&table, self.active_txn)
+                .unwrap()
+                .commit_txn()?;
         }
 
         if self.catalog_changed {
@@ -65,7 +86,7 @@ impl Context {
             self.catalog_changed = false;
         }
 
-        self.txn_tables.clear();
+        self.catalog.lock().tables.commit(self.active_txn.unwrap());
         self.active_txn = None;
 
         Ok(())
@@ -79,10 +100,15 @@ impl Context {
         self.txn_manager.lock().abort(self.active_txn.unwrap())?;
 
         for table in self.txn_tables.iter_mut() {
-            self.catalog.lock().get_table(table).unwrap().abort_txn()?;
+            self.catalog
+                .lock()
+                .get_table(table, self.active_txn)
+                .unwrap()
+                .abort_txn()?;
         }
 
         self.txn_tables.clear();
+        self.catalog.lock().tables.abort(self.active_txn.unwrap());
         self.active_txn = None;
 
         Ok(())
@@ -93,10 +119,10 @@ impl Context {
 
         // println!("SQL: {:?}", statment);
 
-        let plan = build_initial_plan(statment)?;
+        let plan = build_initial_plan(statment, self.active_txn)?;
         let plan = optimize_logical_plan(plan);
 
-        plan.execute()
+        plan.execute(self.active_txn)
     }
 }
 

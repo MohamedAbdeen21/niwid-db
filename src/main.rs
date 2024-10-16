@@ -2,7 +2,7 @@ use anyhow::Result;
 use idk::context::Context;
 
 fn main() -> Result<()> {
-    let mut ctx = Context::new()?;
+    let mut ctx = Context::new();
 
     ctx.start_txn()?;
 
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     .show();
 
     ctx.execute_sql(
-        "EXPLAIN ANALYZE SELECT num, id, msg
+        "EXPLAIN ANALYZE SELECT num + 1, id, msg
         FROM users WHERE num > 2;",
     )?
     .show();

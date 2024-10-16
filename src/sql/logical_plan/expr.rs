@@ -5,11 +5,11 @@ use crate::{
     types::Value,
 };
 
-#[allow(unused)]
 #[derive(Clone, Debug)]
 pub enum LogicalExpr {
     Literal(Value),
     Column(String),
+    BinaryExpr(Box<BinaryExpr>),
 }
 
 impl LogicalExpr {
@@ -17,6 +17,7 @@ impl LogicalExpr {
         match self {
             LogicalExpr::Literal(v) => format!("{}", v),
             LogicalExpr::Column(v) => format!("#{}", v),
+            LogicalExpr::BinaryExpr(binary_expr) => format!("({})", binary_expr.print()),
         }
     }
 
@@ -24,21 +25,25 @@ impl LogicalExpr {
         match self {
             LogicalExpr::Literal(v) => Field::new(&format!("{}", v), v.get_type(), true),
             LogicalExpr::Column(v) => schema.fields.iter().find(|f| f.name == *v).unwrap().clone(),
+            LogicalExpr::BinaryExpr(e) => e.left.to_field(schema),
         }
     }
 }
 
-#[allow(unused)]
+#[derive(Clone, Debug)]
 pub struct BinaryExpr {
-    left: LogicalExpr,
-    op: BinaryOperator,
-    right: LogicalExpr,
+    pub left: LogicalExpr,
+    pub op: BinaryOperator,
+    pub right: LogicalExpr,
 }
 
 impl BinaryExpr {
-    #[allow(unused)]
     pub fn new(left: LogicalExpr, op: BinaryOperator, right: LogicalExpr) -> Self {
         Self { left, op, right }
+    }
+
+    pub fn print(&self) -> String {
+        format!("({} {} {})", self.left.print(), self.op, self.right.print())
     }
 }
 

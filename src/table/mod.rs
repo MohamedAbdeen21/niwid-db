@@ -12,6 +12,7 @@ use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
 
+#[derive(Clone)]
 pub struct Table {
     name: String,
     pub first_page: PageId,
@@ -277,7 +278,9 @@ impl Table {
 
         // FIXME: it works for now, but I don't like it
         #[cfg(not(test))]
-        Catalog::get().lock().update_pages(self.name.clone())?;
+        Catalog::get()
+            .lock()
+            .update_pages(self.name.clone(), self.active_txn)?;
 
         self.last_page = page_id;
 
