@@ -189,17 +189,14 @@ impl BufferPoolManager {
 
     pub fn unpin(&mut self, page_id: &PageId, txn_id: Option<TxnId>) {
         // TODO: we expect all shadow frames to be dropped when txn ends, right? ...
-        let frame_id = if txn_id.is_some() && self.txn_table.contains_key(&txn_id.unwrap()) {
-            *self
-                .txn_table
-                .get(&txn_id.unwrap())
-                .unwrap()
+        let frame_id = match txn_id.and_then(|id| self.txn_table.get(&id)) {
+            Some(frames) => *frames
                 .iter()
                 .find(|f| self.frames[**f].get_page_id() == *page_id)
-                .unwrap()
-        } else {
-            *self.page_table.get(page_id).unwrap()
+                .unwrap(),
+            None => *self.page_table.get(page_id).unwrap(),
         };
+
         let frame = &mut self.frames[frame_id];
         assert!(frame.get_pin_count() > 0);
         frame.unpin();
@@ -256,8 +253,8 @@ impl BufferPoolManager {
     /// locks should be upgraded by the calling txn_manager
     pub fn commit_txn(&mut self, txn_id: TxnId) -> Result<()> {
         // commit shadowed pages to txn cache, this is for durability and atomicity
-        for frame_id in self.txn_table.get(&txn_id).unwrap() {
-            let page = self.frames[*frame_id].writer();
+        for shadow_frame_id in self.txn_table.get(&txn_id).unwrap() {
+            let page = self.frames[*shadow_frame_id].writer();
             self.disk_manager.write_to_file(page, Some(txn_id))?;
             page.mark_clean();
         }
@@ -274,6 +271,7 @@ impl BufferPoolManager {
 
             old_frame.take_page(shadow_frame);
 
+            // unpin the original frame
             self.unpin(&shadow_page_id, None);
 
             self.free_frames.push_back(shadow_frame_id);
@@ -282,8 +280,23 @@ impl BufferPoolManager {
         Ok(())
     }
 
-    pub fn abort_txn(&mut self, _txn_id: TxnId) -> Result<()> {
-        todo!()
+    pub fn abort_txn(&mut self, txn_id: TxnId) -> Result<()> {
+        self.disk_manager.abort_txn(txn_id)?;
+
+        for frame_id in self
+            .txn_table
+            .remove(&txn_id)
+            .ok_or(anyhow!("Invalid txn id"))?
+        {
+            let page_id = self.frames[frame_id].reader().get_page_id();
+
+            // unpin the original frame
+            self.unpin(&page_id, None);
+
+            self.free_frames.push_back(frame_id);
+        }
+
+        Ok(())
     }
 
     pub fn flush(&mut self, page_id: Option<PageId>) -> Result<()> {

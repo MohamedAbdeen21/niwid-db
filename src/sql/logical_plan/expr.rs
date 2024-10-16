@@ -13,7 +13,7 @@ pub enum LogicalExpr {
 }
 
 impl LogicalExpr {
-    pub fn to_string(&self) -> String {
+    pub fn print(&self) -> String {
         match self {
             LogicalExpr::Literal(v) => format!("{}", v),
             LogicalExpr::Column(v) => format!("#{}", v),
@@ -55,11 +55,6 @@ impl BooleanBinaryExpr {
     }
 
     pub fn print(&self) -> String {
-        format!(
-            "{} {} {}",
-            self.left.to_string(),
-            self.op,
-            self.right.to_string()
-        )
+        format!("{} {} {}", self.left.print(), self.op, self.right.print())
     }
 }

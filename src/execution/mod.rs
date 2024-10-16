@@ -36,11 +36,7 @@ impl LogicalPlan {
 
 impl Executable for Truncate {
     fn execute(self) -> Result<ResultSet> {
-        Catalog::get()
-            .lock()
-            .get_table(&self.table_name)
-            .unwrap()
-            .truncate()?;
+        Catalog::get().lock().truncate_table(&self.table_name)?;
 
         Ok(ResultSet::default())
     }
@@ -49,9 +45,10 @@ impl Executable for Truncate {
 impl Executable for DropTables {
     fn execute(self) -> Result<ResultSet> {
         for table_name in self.table_names {
-            if let None = Catalog::get()
+            if Catalog::get()
                 .lock()
                 .drop_table(&table_name, self.if_exists)
+                .is_none()
             {
                 return Err(anyhow!("Table {} does not exist", table_name));
             }
@@ -207,7 +204,7 @@ impl BooleanBinaryExpr {
                     .collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
-                vec![self.eval_op(v1, v2)].repeat(input.size())
+                [self.eval_op(v1, v2)].repeat(input.size())
             }
         }
     }

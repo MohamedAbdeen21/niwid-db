@@ -70,6 +70,10 @@ impl Tuple {
         self.data.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     pub fn get_value_of(&self, field: &str, schema: &Schema) -> Result<Option<Value>> {
         let field_id = schema
             .fields

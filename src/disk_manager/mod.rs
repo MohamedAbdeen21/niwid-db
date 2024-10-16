@@ -166,6 +166,15 @@ impl DiskManager {
         Path::join(Path::new(&self.path), Path::new("txn"))
     }
 
+    pub fn abort_txn(&self, txn_id: TxnId) -> Result<()> {
+        remove_dir_all(Path::join(
+            Path::new(&self.txn_dir()),
+            Path::new(&txn_id.to_string()),
+        ))?;
+
+        Ok(())
+    }
+
     pub fn commit_txn(&self, txn_id: TxnId) -> Result<()> {
         let txn_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
 

@@ -138,10 +138,7 @@ impl Values {
                 .iter()
                 .map(|row| format!(
                     "({})",
-                    row.iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    row.iter().map(|v| v.print()).collect::<Vec<_>>().join(", ")
                 ))
                 .collect::<Vec<_>>()
                 .join(",")

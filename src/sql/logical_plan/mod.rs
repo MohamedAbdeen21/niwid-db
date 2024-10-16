@@ -270,13 +270,7 @@ fn build_select(body: Box<SetExpr>, _limit: Option<Expr>) -> Result<LogicalPlan>
             }
             SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                 let name = ident.value.clone();
-                if root
-                    .schema()
-                    .fields
-                    .iter()
-                    .find(|f| f.name == name)
-                    .is_none()
-                {
+                if !root.schema().fields.iter().any(|f| f.name == name) {
                     vec![Err(anyhow!("Column {} doesn't exist", name))]
                 } else {
                     vec![Ok(LogicalExpr::Column(ident.value.clone()))]

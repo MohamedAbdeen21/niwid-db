@@ -46,14 +46,10 @@ impl ResultSet {
     pub fn concat(mut self, other: ResultSet) -> Self {
         self.data
             .iter_mut()
-            .zip(other.data.into_iter())
+            .zip(other.data)
             .for_each(|(a, b)| a.extend(b));
 
-        let cols = self
-            .fields
-            .into_iter()
-            .chain(other.fields.into_iter())
-            .collect();
+        let cols = self.fields.into_iter().chain(other.fields).collect();
 
         Self {
             fields: cols,

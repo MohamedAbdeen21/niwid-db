@@ -73,10 +73,6 @@ impl Table {
         })
     }
 
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-
     pub fn get_first_page_id(&self) -> PageId {
         self.first_page
     }
@@ -219,8 +215,8 @@ impl Table {
         }
     }
 
-    pub fn abort_txn(&self, txn_id: TxnId) -> Result<()> {
-        self.txn_manager.lock().abort(txn_id)
+    pub fn abort_txn(&mut self) -> Result<()> {
+        self.commit_txn()
     }
 
     /// fetch the string from the tuple, takes TupleId bytes
@@ -304,7 +300,9 @@ impl Table {
 
         page.delete_tuple(slot_id);
 
-        let page_id = page.get_page_id();
+        if self.active_txn.is_none() {
+            self.bpm.lock().flush(Some(page_id))?;
+        }
 
         self.bpm.lock().unpin(&page_id, self.active_txn);
 

@@ -20,11 +20,13 @@ lazy_static! {
     static ref CATALOG: ArcCatalog = Arc::new(Mutex::new(Catalog::new()));
 }
 
+// FIXME: Catalog is shared between contexts.
+// For other tables, all changes happen inside BPM, who manages the txns
+// but for catalog, we have the tables hashmap, so the catalog has to manage
+// txns on its own
 pub struct Catalog {
-    pub table: Table,
     tables: HashMap<String, (TupleId, Table)>, // TODO: handle ownership
-    #[allow(unused)]
-    schema: Schema,       // A catalog is itself a table
+    schema: Schema,                            // A catalog is itself a table
 }
 
 impl Catalog {
@@ -32,32 +34,15 @@ impl Catalog {
         CATALOG.clone()
     }
 
-    fn table() -> (Table, Schema) {
-        let schema = Schema::new(vec![
-            Field::new("table_name", Types::Str, false),
-            Field::new("first_page", Types::UInt, false),
-            Field::new("last_page", Types::UInt, false),
-            Field::new("schema", Types::Str, false),
-        ]);
-
-        let table = Table::fetch(
-            CATALOG_NAME.to_string(),
-            &schema,
-            CATALOG_PAGE,
-            CATALOG_PAGE,
-        )
-        .expect("Catalog fetch failed");
-
-        (table, schema)
+    pub fn table(&mut self) -> &mut Table {
+        self.get_table(CATALOG_NAME).unwrap()
     }
 
-    fn build_catalog() -> HashMap<String, (TupleId, Table)> {
-        let (table, schema) = Self::table();
-
+    fn build_catalog(table: Table, schema: &Schema) -> HashMap<String, (TupleId, Table)> {
         let mut tables = HashMap::new();
 
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
-            let values = tuple.get_values(&schema)?;
+            let values = tuple.get_values(schema)?;
             let name = table.fetch_string(values[0].str_addr()).0;
             let first_page_id = ValueFactory::from_bytes(&Types::UInt, &values[1].to_bytes()).u32();
             let last_page_id = ValueFactory::from_bytes(&Types::UInt, &values[2].to_bytes()).u32();
@@ -79,15 +64,26 @@ impl Catalog {
         tables
     }
 
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let (table, schema) = Self::table();
-        let tables = Self::build_catalog();
+        let schema = Schema::new(vec![
+            Field::new("table_name", Types::Str, false),
+            Field::new("first_page", Types::UInt, false),
+            Field::new("last_page", Types::UInt, false),
+            Field::new("schema", Types::Str, false),
+        ]);
 
-        Catalog {
-            table,
-            tables,
-            schema,
-        }
+        let table = Table::fetch(
+            CATALOG_NAME.to_string(),
+            &schema,
+            CATALOG_PAGE,
+            CATALOG_PAGE,
+        )
+        .expect("Catalog fetch failed");
+
+        let tables = Self::build_catalog(table, &schema);
+
+        Catalog { tables, schema }
     }
 
     pub fn add_table(
@@ -112,7 +108,7 @@ impl Catalog {
             ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);
-        let tuple_id = self.table.insert(tuple)?;
+        let tuple_id = self.table().insert(tuple)?;
 
         self.tables
             .insert(table_name.to_string(), (tuple_id, table));
@@ -149,7 +145,7 @@ impl Catalog {
             None => return if ignore_if_exists { Some(()) } else { None },
         };
 
-        self.table.delete(tuple_id).ok()?;
+        self.table().delete(tuple_id).ok()?;
 
         self.tables.remove(table_name);
 
@@ -168,8 +164,10 @@ impl Catalog {
             ValueFactory::from_string(&Types::UInt, &table.get_last_page_id().to_string()),
             ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
+
         let tuple = Tuple::new(tuple_data, &self.schema);
-        let new_tuple_id = self.table.update(Some(*tuple_id), tuple)?;
+        let tuple_id = *tuple_id;
+        let new_tuple_id = self.table().update(Some(tuple_id), tuple)?;
 
         self.tables.get_mut(&table_name).unwrap().0 = new_tuple_id;
 

@@ -104,7 +104,15 @@ impl TransactionManager {
 
     pub fn abort(&mut self, txn_id: TxnId) -> Result<()> {
         self.bpm.lock().abort_txn(txn_id)?;
-        self.locked_pages.remove(&txn_id);
+
+        for page_id in self.locked_pages.remove(&txn_id).unwrap().iter() {
+            self.bpm
+                .lock()
+                .fetch_frame(*page_id, None)?
+                .get_latch()
+                .wunlock();
+            self.bpm.lock().unpin(page_id, None);
+        }
 
         Ok(())
     }

@@ -109,12 +109,12 @@ pub enum Value {
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
-            (Value::UInt(l), Value::UInt(r)) => l.partial_cmp(&r),
-            (Value::Int(l), Value::Int(r)) => l.partial_cmp(&r),
-            (Value::Float(l), Value::Float(r)) => l.partial_cmp(&r),
-            (Value::Bool(l), Value::Bool(r)) => l.partial_cmp(&r),
-            (Value::Char(l), Value::Char(r)) => l.partial_cmp(&r),
-            (Value::Str(l), Value::Str(r)) => l.partial_cmp(&r),
+            (Value::UInt(l), Value::UInt(r)) => l.partial_cmp(r),
+            (Value::Int(l), Value::Int(r)) => l.partial_cmp(r),
+            (Value::Float(l), Value::Float(r)) => l.partial_cmp(r),
+            (Value::Bool(l), Value::Bool(r)) => l.partial_cmp(r),
+            (Value::Char(l), Value::Char(r)) => l.partial_cmp(r),
+            (Value::Str(l), Value::Str(r)) => l.partial_cmp(r),
             (Value::Null, Value::Null) => Some(std::cmp::Ordering::Equal),
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => l.partial_cmp(&(*r as i32)),
             (Value::UInt(UInt(l)), Value::Int(Int(r))) => (*l as i32).partial_cmp(r),

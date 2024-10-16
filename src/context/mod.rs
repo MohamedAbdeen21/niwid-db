@@ -9,7 +9,7 @@ use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use anyhow::Result;
 
 pub struct Context {
-    pub catalog: ArcCatalog,
+    catalog: ArcCatalog,
     txn_manager: ArcTransactionManager,
     active_txn: Option<TxnId>,
     txn_tables: Vec<String>,
@@ -29,7 +29,7 @@ impl Context {
 
     pub fn add_table(&mut self, name: &str, schema: &Schema, ignore_if_exists: bool) -> Result<()> {
         if let Some(txn_id) = self.active_txn {
-            self.catalog.lock().table.start_txn(txn_id)?;
+            self.catalog.lock().table().start_txn(txn_id)?;
             self.catalog_changed = true;
         }
 
@@ -61,8 +61,25 @@ impl Context {
         }
 
         if self.catalog_changed {
-            self.catalog.lock().table.commit_txn()?;
+            self.catalog.lock().table().commit_txn()?;
             self.catalog_changed = false;
+        }
+
+        self.txn_tables.clear();
+        self.active_txn = None;
+
+        Ok(())
+    }
+
+    pub fn abort_txn(&mut self) -> Result<()> {
+        if self.active_txn.is_none() {
+            return Ok(());
+        }
+
+        self.txn_manager.lock().abort(self.active_txn.unwrap())?;
+
+        for table in self.txn_tables.iter_mut() {
+            self.catalog.lock().get_table(table).unwrap().abort_txn()?;
         }
 
         self.txn_tables.clear();
