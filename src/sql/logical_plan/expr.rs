@@ -25,7 +25,7 @@ impl LogicalExpr {
         match self {
             LogicalExpr::Literal(v) => Field::new(&format!("{}", v), v.get_type(), true),
             LogicalExpr::Column(v) => schema.fields.iter().find(|f| f.name == *v).unwrap().clone(),
-            LogicalExpr::BinaryExpr(e) => e.left.to_field(schema),
+            LogicalExpr::BinaryExpr(e) => e.to_field(schema),
         }
     }
 }
@@ -44,6 +44,17 @@ impl BinaryExpr {
 
     pub fn print(&self) -> String {
         format!("({} {} {})", self.left.print(), self.op, self.right.print())
+    }
+
+    fn to_field(&self, schema: &Schema) -> Field {
+        let left = self.left.to_field(schema);
+        let right = self.right.to_field(schema);
+
+        Field::new(
+            &format!("{} {} {}", left.name, self.op.to_string(), right.name),
+            left.ty,
+            left.nullable,
+        )
     }
 }
 

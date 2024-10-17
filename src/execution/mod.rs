@@ -177,7 +177,7 @@ impl BinaryExpr {
         match &self.op {
             BinaryOperator::Plus => left.add(right),
             BinaryOperator::Minus => left.sub(right),
-            BinaryOperator::Multiply => left.sub(right),
+            BinaryOperator::Multiply => left.mul(right),
             BinaryOperator::Divide => left.div(right),
             e => todo!("{}", e),
         }
@@ -213,7 +213,36 @@ impl BinaryExpr {
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
                 input.data.iter().map(|_| self.eval_op(v1, v2)).collect()
             }
-            (l, r) => todo!("{:?} {:?}", l, r),
+            (LogicalExpr::BinaryExpr(l), LogicalExpr::BinaryExpr(r)) => {
+                let left = l.evaluate(input);
+                let right = r.evaluate(input);
+                left.iter()
+                    .zip(right.iter())
+                    .map(|(l, r)| self.eval_op(l, r))
+                    .collect()
+            }
+            (LogicalExpr::Literal(value), LogicalExpr::BinaryExpr(binary_expr)) => {
+                let right = binary_expr.evaluate(input);
+                right.iter().map(|r| self.eval_op(value, r)).collect()
+            }
+            (LogicalExpr::Column(c), LogicalExpr::BinaryExpr(binary_expr)) => {
+                let index = input.fields.iter().position(|col| &col.name == c).unwrap();
+                let right = binary_expr.evaluate(input);
+                right
+                    .iter()
+                    .map(|r| self.eval_op(&input.data[0][index], r))
+                    .collect()
+            }
+            (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Literal(value)) => {
+                let left = binary_expr.evaluate(input);
+                left.iter().map(|l| self.eval_op(l, value)).collect()
+            }
+            (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Column(_)) => {
+                let left = binary_expr.evaluate(input);
+                left.iter()
+                    .map(|l| self.eval_op(l, &input.data[0][0]))
+                    .collect()
+            }
         }
     }
 }

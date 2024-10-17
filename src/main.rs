@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     .show();
 
     ctx.execute_sql(
-        "EXPLAIN ANALYZE SELECT num + 1, id, msg
+        "EXPLAIN ANALYZE SELECT (num + 1) * 2, id, msg
         FROM users WHERE num > 2;",
     )?
     .show();

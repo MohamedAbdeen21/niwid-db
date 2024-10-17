@@ -150,6 +150,10 @@ fn build_expr(expr: Expr) -> Result<LogicalExpr> {
         Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
         Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, s))),
         Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value)),
+        Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
+            BinaryExpr::new(build_expr(*left)?, op, build_expr(*right)?),
+        ))),
+        Expr::Nested(e) => build_expr(*e),
         e => todo!("{:?}", e),
     }
 }
