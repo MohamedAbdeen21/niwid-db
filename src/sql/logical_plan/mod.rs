@@ -258,12 +258,7 @@ fn build_update(
         .get_schema(&table_name, txn_id)
         .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
 
-    if schema
-        .fields
-        .iter()
-        .find(|f| *f.name == assignments.0)
-        .is_none()
-    {
+    if !schema.fields.iter().any(|f| *f.name == assignments.0) {
         return Err(anyhow!(
             "Column {} does not exist in table {}",
             assignments.0,

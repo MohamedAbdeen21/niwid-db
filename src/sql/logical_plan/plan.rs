@@ -96,7 +96,7 @@ impl Update {
             self.table_name,
             self.assignments.0,
             self.assignments.1.print(),
-            self.input.print()
+            self.input.print_indent(indent + 1)
         )
     }
 }

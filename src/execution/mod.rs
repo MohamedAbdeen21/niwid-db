@@ -10,9 +10,9 @@ use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::Tuple;
 use crate::txn_manager::TxnId;
-use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
+use crate::types::{Types, UInt};
 use crate::value;
 use anyhow::{anyhow, Result};
 use result_set::ResultSet;
@@ -53,34 +53,39 @@ impl Executable for Update {
 
         let (_, mask) = self.selection.evaluate(&input);
 
+        let (selected_col, expr) = self.assignments;
+
         let schema = table.get_schema();
 
         let updated_col_id = schema
             .fields
             .iter()
-            .position(|f| f.name == self.assignments.0)
-            .ok_or_else(|| anyhow!("Column {} does not exist", self.assignments.0))?;
+            .position(|f| f.name == selected_col)
+            .ok_or_else(|| anyhow!("Column {} does not exist", selected_col))?;
 
-        // fetch the tuple_ids that need to be updated
-        let mut new_tuples = vec![];
-        let mut row = 0; // table doesn't expose iter and therefore enumerate, sue me
-        table.scan(|(tuple_id, (_, tuple))| {
-            if mask[row].is_truthy() {
-                let mut new_tuple_values = tuple.get_values(&schema)?.clone();
+        let selected_rows = input
+            .data
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask[*i].is_truthy())
+            .map(|(_, r)| r)
+            .collect::<Vec<_>>();
 
-                new_tuple_values[updated_col_id] =
-                    self.assignments.1.clone().evaluate(&input).1[0].clone();
+        for row in selected_rows {
+            let tuple_id = match (&row[0], &row[1]) {
+                (Value::UInt(UInt(v)), Value::UInt(UInt(u))) => Some((*v, *u as usize)),
+                _ => unreachable!(),
+            };
 
-                let new_tuple = Tuple::new(new_tuple_values, &schema);
+            let mut new_tuple = row[2..].to_vec();
 
-                new_tuples.push((*tuple_id, new_tuple));
+            for value in expr.evaluate(&input).1 {
+                new_tuple[updated_col_id] = value;
             }
-            row += 1;
-            Ok(())
-        })?;
 
-        for (tuple_id, new_tuple) in new_tuples {
-            table.update(Some(tuple_id), new_tuple)?;
+            let new_tuple = Tuple::new(new_tuple, &schema);
+
+            table.update(tuple_id, new_tuple)?;
         }
 
         Ok(ResultSet::default())
@@ -205,7 +210,8 @@ impl LogicalExpr {
             LogicalExpr::Literal(ref c) => {
                 let input_schema = Schema::new(input.fields.clone());
                 let field = self.to_field(&input_schema);
-                (field, vec![c.clone()])
+                let data = (0..size).map(|_| c.clone()).collect::<Vec<_>>();
+                (field, data)
             }
             LogicalExpr::Column(c) => {
                 let index = input.fields.iter().position(|col| col.name == *c).unwrap();
@@ -394,8 +400,15 @@ impl Executable for Scan {
         let schema = table.get_schema();
 
         let mut output = vec![];
-        table.scan(|(_, (_, tuple))| {
-            let values = tuple.get_values(&schema)?;
+        // TODO: pass the tuple_id as tuple for udpate to use
+        // need to define a tuple type first though
+        table.scan(|((page_id, slot_id), (_, tuple))| {
+            let mut values = vec![
+                value!(UInt, page_id.to_string()),
+                value!(UInt, slot_id.to_string()),
+            ];
+
+            values.extend(tuple.get_values(&schema)?);
 
             let values = values
                 .into_iter()
@@ -412,6 +425,13 @@ impl Executable for Scan {
             Ok(())
         })?;
 
-        Ok(ResultSet::new(schema.fields.clone(), output))
+        let mut fields = vec![
+            Field::new("page_id", Types::UInt, false),
+            Field::new("slot_id", Types::UInt, false),
+        ];
+
+        fields.extend(schema.fields.clone());
+
+        Ok(ResultSet::new(fields, output))
     }
 }

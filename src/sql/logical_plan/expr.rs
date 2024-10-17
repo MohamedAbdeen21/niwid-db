@@ -64,7 +64,7 @@ impl BinaryExpr {
         let right = self.right.to_field(schema);
 
         Field::new(
-            &format!("{} {} {}", left.name, self.op.to_string(), right.name),
+            &format!("{} {} {}", left.name, self.op, right.name),
             left.ty,
             left.nullable,
         )
