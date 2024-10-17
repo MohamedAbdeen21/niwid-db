@@ -340,12 +340,32 @@ fn build_select(
                 })
                 .collect(),
             SelectItem::UnnamedExpr(Expr::BinaryOp { left, right, op }) => {
+                let left = match build_expr(*left.clone()) {
+                    Ok(expr) => expr,
+                    Err(e) => return vec![Err(e)],
+                };
+                let right = match build_expr(*right.clone()) {
+                    Ok(expr) => expr,
+                    Err(e) => return vec![Err(e)],
+                };
                 vec![Ok(LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(
-                    build_expr(*left.clone()).unwrap(),
+                    left,
                     op.clone(),
-                    build_expr(*right.clone()).unwrap(),
+                    right,
                 ))))]
             }
+            SelectItem::ExprWithAlias { expr, alias } => {
+                let expr = match build_expr(expr.clone()) {
+                    Ok(expr) => expr,
+                    Err(e) => return vec![Err(e)],
+                };
+
+                vec![Ok(LogicalExpr::AliasedExpr(
+                    Box::new(expr),
+                    alias.value.clone(),
+                ))]
+            }
+
             e => todo!("{:?}", e),
         })
         .collect::<Result<Vec<_>>>()?;

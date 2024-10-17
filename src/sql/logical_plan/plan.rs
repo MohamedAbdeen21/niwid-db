@@ -356,13 +356,7 @@ impl Projection {
             self.name(),
             self.projections
                 .iter()
-                .map(|s| {
-                    match s {
-                        LogicalExpr::Column(c) => format!("#{}", c),
-                        LogicalExpr::Literal(l) => format!("{}", l),
-                        LogicalExpr::BinaryExpr(b) => format!("({})", b.print()),
-                    }
-                })
+                .map(|s| s.print())
                 .collect::<Vec<_>>()
                 .join(","),
             self.input.print_indent(indent + 1)

@@ -10,6 +10,7 @@ pub enum LogicalExpr {
     Literal(Value),
     Column(String),
     BinaryExpr(Box<BinaryExpr>),
+    AliasedExpr(Box<LogicalExpr>, String),
 }
 
 impl LogicalExpr {
@@ -18,6 +19,7 @@ impl LogicalExpr {
             LogicalExpr::Literal(v) => format!("{}", v),
             LogicalExpr::Column(v) => format!("#{}", v),
             LogicalExpr::BinaryExpr(binary_expr) => format!("({})", binary_expr.print()),
+            LogicalExpr::AliasedExpr(expr, alias) => format!("{} AS {}", expr.print(), alias),
         }
     }
 
@@ -26,6 +28,10 @@ impl LogicalExpr {
             LogicalExpr::Literal(v) => Field::new(&format!("{}", v), v.get_type(), true),
             LogicalExpr::Column(v) => schema.fields.iter().find(|f| f.name == *v).unwrap().clone(),
             LogicalExpr::BinaryExpr(e) => e.to_field(schema),
+            LogicalExpr::AliasedExpr(e, alias) => {
+                let field = e.to_field(schema);
+                Field::new(alias, field.ty, field.nullable)
+            }
         }
     }
 }

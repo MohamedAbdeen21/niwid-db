@@ -1,4 +1,4 @@
-use std::sync::Arc;
+mod versioned_map;
 
 use crate::pages::PageId;
 use crate::table::Table;
@@ -6,10 +6,11 @@ use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
 use crate::txn_manager::TxnId;
 use crate::types::{AsBytes, Types, Value, ValueFactory};
-use crate::versioned_map::VersionedMap;
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
+use std::sync::Arc;
+use versioned_map::VersionedMap;
 
 // preserve page_id 1 for catalog, bpm starts assigning at 2
 pub const CATALOG_PAGE: PageId = 2;

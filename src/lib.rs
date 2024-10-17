@@ -9,7 +9,6 @@ mod table;
 pub mod tuple;
 mod txn_manager;
 pub mod types;
-mod versioned_map;
 
 #[macro_export]
 macro_rules! printdbg {

@@ -96,7 +96,6 @@ impl<K: std::cmp::Eq + std::hash::Hash + Clone, V: Clone> VersionedMap<K, V> {
 
 #[cfg(test)]
 mod tests {
-    // tests/versioned_map_tests.rs
     use super::*;
     use anyhow::Result;
 

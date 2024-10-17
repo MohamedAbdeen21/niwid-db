@@ -16,6 +16,16 @@ impl ResultSet {
         }
     }
 
+    pub fn from_col(field: Field, col: Vec<Value>) -> Self {
+        let rows: Vec<_> = col.into_iter().map(|value| vec![value]).collect();
+
+        Self {
+            fields: vec![field],
+            cap: rows.len(),
+            data: rows,
+        }
+    }
+
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             fields: Vec::with_capacity(capacity),
