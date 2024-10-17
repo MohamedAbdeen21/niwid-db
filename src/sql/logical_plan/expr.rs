@@ -1,4 +1,4 @@
-use sqlparser::ast::BinaryOperator; // just use sqlparser operators instead of writing our own
+use sqlparser::ast::BinaryOperator;
 
 use crate::{
     tuple::schema::{Field, Schema},
@@ -18,7 +18,14 @@ impl LogicalExpr {
         match self {
             LogicalExpr::Literal(v) => format!("{}", v),
             LogicalExpr::Column(v) => format!("#{}", v),
-            LogicalExpr::BinaryExpr(binary_expr) => format!("({})", binary_expr.print()),
+            LogicalExpr::BinaryExpr(binary_expr) => {
+                let inner_expr = binary_expr.print();
+                if inner_expr.starts_with('(') && inner_expr.ends_with(')') {
+                    inner_expr
+                } else {
+                    format!("({})", inner_expr)
+                }
+            }
             LogicalExpr::AliasedExpr(expr, alias) => format!("{} AS {}", expr.print(), alias),
         }
     }

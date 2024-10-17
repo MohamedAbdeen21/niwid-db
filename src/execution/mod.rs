@@ -71,7 +71,7 @@ impl Executable for Values {
             .map(|row| {
                 row.into_iter()
                     .map(|expr| expr.evaluate(&input))
-                    .map(|(field, data)| ResultSet::new(vec![field], data))
+                    .map(|(field, data)| ResultSet::from_col(field, data))
                     .reduce(|a, b| a.concat(b))
                     .unwrap() // TODO: ?
             })
@@ -148,33 +148,26 @@ impl Executable for Filter {
 }
 
 impl LogicalExpr {
-    fn evaluate(self, input: &ResultSet) -> (Field, Vec<Vec<Value>>) {
+    fn evaluate(self, input: &ResultSet) -> (Field, Vec<Value>) {
         let size = input.size();
         match self {
             LogicalExpr::Literal(ref c) => {
                 let input_schema = Schema::new(input.fields.clone());
                 let field = self.to_field(&input_schema);
-                let data = (0..size).map(|_| vec![c.clone()]).collect::<Vec<_>>();
-                (field, data)
+                (field, vec![c.clone()])
             }
             LogicalExpr::Column(c) => {
                 let index = input.fields.iter().position(|col| col.name == *c).unwrap();
                 let data = (0..size)
-                    .map(|i| vec![input.data[i][index].clone()])
+                    .map(|i| input.data[i][index].clone())
                     .collect::<Vec<_>>();
                 (input.fields[index].clone(), data)
             }
             LogicalExpr::BinaryExpr(ref expr) => {
                 let schema = Schema::new(input.fields.clone());
                 let field = self.to_field(&schema);
-                let data = expr
-                    .evaluate(input)
-                    .into_iter()
-                    .map(|r| vec![r])
-                    .collect::<Vec<_>>();
-                (field, data)
+                (field, expr.evaluate(input))
             }
-
             LogicalExpr::AliasedExpr(ref expr, _) => {
                 let result = expr.clone().evaluate(input);
 
@@ -262,9 +255,8 @@ impl BinaryExpr {
             | (expr2, LogicalExpr::AliasedExpr(expr, _)) => {
                 let (_, left) = expr.clone().evaluate(input);
                 let (_, right) = expr2.clone().evaluate(input);
-                left[0]
-                    .iter()
-                    .zip(right[0].iter())
+                left.iter()
+                    .zip(right.iter())
                     .map(|(l, r)| self.eval_op(l, r))
                     .collect()
             }
@@ -281,7 +273,7 @@ impl BooleanBinaryExpr {
             BinaryOperator::Lt => left < right,
             BinaryOperator::GtEq => left >= right,
             BinaryOperator::LtEq => left <= right,
-            e => todo!("{:?}", e),
+            e => todo!("{}", e),
         }
     }
 
@@ -333,7 +325,7 @@ impl Executable for Projection {
             .iter()
             .cloned()
             .map(|p| p.evaluate(&input))
-            .map(|(field, data)| ResultSet::new(vec![field], data))
+            .map(|(field, data)| ResultSet::from_col(field, data))
             .reduce(|a, b| a.concat(b))
             .unwrap();
 
