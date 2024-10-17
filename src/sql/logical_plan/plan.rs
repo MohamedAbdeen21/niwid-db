@@ -12,6 +12,7 @@ pub enum LogicalPlan {
     Values(Values),
     DropTables(DropTables),
     Truncate(Truncate),
+    Update(Box<Update>),
     Empty,
 }
 
@@ -38,6 +39,7 @@ impl LogicalPlan {
             LogicalPlan::Values(v) => v.print(indent),
             LogicalPlan::DropTables(d) => d.print(indent),
             LogicalPlan::Truncate(t) => t.print(indent),
+            LogicalPlan::Update(u) => u.print(indent),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
         }
     }
@@ -53,8 +55,49 @@ impl LogicalPlan {
             LogicalPlan::Values(v) => v.schema(),
             LogicalPlan::DropTables(d) => d.schema(),
             LogicalPlan::Truncate(t) => t.schema(),
+            LogicalPlan::Update(u) => u.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
         }
+    }
+}
+
+pub struct Update {
+    // only reason this is here is because we want Scan
+    // to be the only way to access tuples, mainly for str indirection
+    pub input: LogicalPlan,
+    pub table_name: String,
+    pub assignments: (String, LogicalExpr),
+    pub selection: LogicalExpr,
+}
+
+impl Update {
+    pub fn new(
+        input: LogicalPlan,
+        table_name: String,
+        assignments: (String, LogicalExpr),
+        filter: LogicalExpr,
+    ) -> Self {
+        Self {
+            input,
+            table_name,
+            assignments,
+            selection: filter,
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema::new(vec![])
+    }
+
+    pub fn print(&self, indent: usize) -> String {
+        format!(
+            "{} Update: {} [#{} = {}]\n{}",
+            "-".repeat(indent * 2),
+            self.table_name,
+            self.assignments.0,
+            self.assignments.1.print(),
+            self.input.print()
+        )
     }
 }
 

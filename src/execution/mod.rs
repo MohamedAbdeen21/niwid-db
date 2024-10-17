@@ -4,13 +4,16 @@ use crate::catalog::Catalog;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, DropTables, Filter, Insert, LogicalPlan, Scan, Truncate, Values,
+    CreateTable, DropTables, Filter, Insert, LogicalPlan, Scan, Truncate, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::Tuple;
 use crate::txn_manager::TxnId;
+use crate::types::Types;
 use crate::types::Value;
+use crate::types::ValueFactory;
+use crate::value;
 use anyhow::{anyhow, Result};
 use result_set::ResultSet;
 use sqlparser::ast::BinaryOperator;
@@ -31,8 +34,56 @@ impl LogicalPlan {
             LogicalPlan::Values(v) => v.execute(txn),
             LogicalPlan::DropTables(d) => d.execute(txn),
             LogicalPlan::Truncate(t) => t.execute(txn),
+            LogicalPlan::Update(u) => u.execute(txn),
             LogicalPlan::Empty => Ok(ResultSet::default()),
         }
+    }
+}
+
+impl Executable for Update {
+    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
+        let input = self.input.execute(txn_id)?;
+
+        let c = Catalog::get();
+        let mut catalog = c.lock();
+
+        let table = catalog
+            .get_table(&self.table_name, txn_id)
+            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))?;
+
+        let (_, mask) = self.selection.evaluate(&input);
+
+        let schema = table.get_schema();
+
+        let updated_col_id = schema
+            .fields
+            .iter()
+            .position(|f| f.name == self.assignments.0)
+            .ok_or_else(|| anyhow!("Column {} does not exist", self.assignments.0))?;
+
+        // fetch the tuple_ids that need to be updated
+        let mut new_tuples = vec![];
+        let mut row = 0; // table doesn't expose iter and therefore enumerate, sue me
+        table.scan(|(tuple_id, (_, tuple))| {
+            if mask[row].is_truthy() {
+                let mut new_tuple_values = tuple.get_values(&schema)?.clone();
+
+                new_tuple_values[updated_col_id] =
+                    self.assignments.1.clone().evaluate(&input).1[0].clone();
+
+                let new_tuple = Tuple::new(new_tuple_values, &schema);
+
+                new_tuples.push((*tuple_id, new_tuple));
+            }
+            row += 1;
+            Ok(())
+        })?;
+
+        for (tuple_id, new_tuple) in new_tuples {
+            table.update(Some(tuple_id), new_tuple)?;
+        }
+
+        Ok(ResultSet::default())
     }
 }
 
@@ -148,7 +199,7 @@ impl Executable for Filter {
 }
 
 impl LogicalExpr {
-    fn evaluate(self, input: &ResultSet) -> (Field, Vec<Value>) {
+    fn evaluate(&self, input: &ResultSet) -> (Field, Vec<Value>) {
         let size = input.size();
         match self {
             LogicalExpr::Literal(ref c) => {
@@ -187,7 +238,8 @@ impl BinaryExpr {
             BinaryOperator::Minus => left.sub(right),
             BinaryOperator::Multiply => left.mul(right),
             BinaryOperator::Divide => left.div(right),
-            e => todo!("{}", e),
+            BinaryOperator::Eq => value!(Bool, left.eq(right).to_string()),
+            e => todo!("{:?}", e),
         }
     }
 

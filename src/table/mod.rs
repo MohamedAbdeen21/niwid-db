@@ -91,7 +91,7 @@ impl Table {
         self.blob_page
     }
 
-    fn iter(&self) -> table_iterator::TableIterator {
+    pub fn iter(&self) -> table_iterator::TableIterator {
         table_iterator::TableIterator::new(self)
     }
 

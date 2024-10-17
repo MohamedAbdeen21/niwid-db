@@ -38,6 +38,13 @@ fn main() -> Result<()> {
     )?
     .show();
 
+    ctx.execute_sql("EXPLAIN ANALYZE UPDATE users SET msg = 'world' WHERE id = num;")?;
+    ctx.execute_sql(
+        "EXPLAIN ANALYZE SELECT num, id, msg
+        FROM users;",
+    )?
+    .show();
+
     ctx.commit_txn()?;
 
     Ok(())

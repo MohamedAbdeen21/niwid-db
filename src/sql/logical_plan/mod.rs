@@ -5,12 +5,12 @@ pub mod plan;
 use expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use plan::{
     CreateTable, DropTables, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Truncate,
-    Values,
+    Update, Values,
 };
 use sqlparser::ast::{
-    BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr, Ident, Insert as SqlInsert,
-    ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
-    TruncateTableTarget, Value as SqlValue, Values as SqlValues,
+    Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr,
+    Ident, Insert as SqlInsert, ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement,
+    TableFactor, TableWithJoins, TruncateTableTarget, Value as SqlValue, Values as SqlValues,
 };
 
 use anyhow::{anyhow, Result};
@@ -55,10 +55,9 @@ pub fn build_initial_plan(statement: Statement, txn_id: Option<TxnId>) -> Result
         Statement::Update {
             table,
             assignments,
-            from,
             selection,
             ..
-        } => build_update(),
+        } => build_update(table, assignments, selection, txn_id),
         Statement::CreateTable(SqlCreateTable {
             name,
             columns,
@@ -232,9 +231,64 @@ fn build_insert(
 
     Ok(root)
 }
-fn build_update() -> Result<LogicalPlan> {
-    todo!()
+fn build_update(
+    table: TableWithJoins,
+    assignments: Vec<Assignment>,
+    selection: Option<Expr>,
+    txn_id: Option<TxnId>,
+) -> Result<LogicalPlan> {
+    if assignments.len() > 1 {
+        return Err(anyhow!("Multiple assignments are not supported"));
+    };
+
+    let filter = match selection {
+        Some(expr) => build_expr(expr)?,
+        None => LogicalExpr::Literal(value!(Bool, "true".to_string())),
+    };
+
+    let table_name = match table.relation {
+        TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
+        e => todo!("{:?}", e),
+    };
+
+    let assignments = build_assignemnt(assignments.into_iter().next().unwrap())?;
+
+    let schema = Catalog::get()
+        .lock()
+        .get_schema(&table_name, txn_id)
+        .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
+
+    if schema
+        .fields
+        .iter()
+        .find(|f| *f.name == assignments.0)
+        .is_none()
+    {
+        return Err(anyhow!(
+            "Column {} does not exist in table {}",
+            assignments.0,
+            table_name
+        ));
+    }
+
+    let root = LogicalPlan::Scan(Scan::new(table_name.clone(), schema));
+
+    let root = LogicalPlan::Update(Box::new(Update::new(root, table_name, assignments, filter)));
+
+    Ok(root)
 }
+
+fn build_assignemnt(assignment: Assignment) -> Result<(String, LogicalExpr)> {
+    let Assignment { target, value } = assignment;
+
+    let col = match target {
+        AssignmentTarget::ColumnName(col) => col.0.first().unwrap().value.clone(),
+        AssignmentTarget::Tuple(_) => todo!(),
+    };
+
+    Ok((col, build_expr(value)?))
+}
+
 fn build_create(
     name: ObjectName,
     columns: Vec<ColumnDef>,

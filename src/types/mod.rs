@@ -214,6 +214,19 @@ impl Value {
             Value::Null => Types::Char, // FIXME:
         }
     }
+
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Value::Bool(Bool(v)) => *v,
+            Value::Null => false,
+            Value::UInt(UInt(v)) => *v != 0,
+            Value::Int(Int(v)) => *v != 0,
+            Value::Float(Float(v)) => *v != 0.0,
+            Value::Str(Str(v)) => !v.is_empty(),
+            Value::Char(Char(_)) => todo!(),
+            Value::StrAddr(_) => unreachable!(),
+        }
+    }
 }
 
 impl AsBytes for Value {
