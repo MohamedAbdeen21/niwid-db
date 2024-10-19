@@ -1,7 +1,6 @@
 use super::{latch::Latch, traits::Serialize, PageData, PageId};
-use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
-
 use super::{Page, PAGE_SIZE};
+use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
 use anyhow::{anyhow, Result};
 use std::{mem, slice, sync::Arc};
 

@@ -32,17 +32,34 @@ impl Types {
 
     pub fn to_sql(&self) -> String {
         match self {
-            Types::UInt => "INT UNSIGNED".to_string(),
+            Types::UInt => "UINT".to_string(),
             Types::Int => "INT".to_string(),
-            Types::Float => "FlOAT".to_string(),
+            Types::Float => "FLOAT".to_string(),
             Types::Bool => "BOOLEAN".to_string(),
             Types::Char => "CHAR".to_string(),
-            Types::Str => "VARCHAR".to_string(),
+            Types::Str => "TEXT".to_string(),
             Types::StrAddr => unreachable!(),
         }
     }
 
-    #[allow(unreachable_patterns)]
+    // used when checking inserted rows for compatibility
+    // it is the user's responsibility to ensure that values match
+    // the table's schema (inserting UINT value in an INT column)
+    pub fn is_compatible(&self, other: &Types) -> bool {
+        matches!(
+            (self, other),
+            (Types::UInt, Types::UInt)
+                | (Types::Int, Types::Int)
+                | (Types::Float, Types::Float)
+                | (Types::Bool, Types::Bool)
+                | (Types::Char, Types::Char)
+                | (Types::Str, Types::Str)
+                | (Types::UInt, Types::Int)
+                | (Types::Int, Types::UInt)
+                | (Types::StrAddr, Types::StrAddr)
+        )
+    }
+
     pub fn from_sql(s: &str) -> Self {
         match s {
             "UINT" | "INT UNSIGNED" => Types::UInt,
@@ -50,7 +67,7 @@ impl Types {
             "FLOAT" => Types::Float,
             "BOOLEAN" => Types::Bool,
             "CHAR" => Types::Char,
-            "VARCHAR" => Types::Str,
+            "VARCHAR" | "TEXT" => Types::Str,
             _ => panic!("Unsupported type: {}", s),
         }
     }

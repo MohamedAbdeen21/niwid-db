@@ -214,7 +214,11 @@ fn build_insert(
     let input_types: Vec<_> = input_schema.fields.iter().map(|f| &f.ty).collect();
     let table_types: Vec<_> = schema.fields.iter().map(|f| &f.ty).collect();
 
-    if input_types != table_types {
+    if input_types
+        .iter()
+        .zip(table_types.iter())
+        .any(|(a, b)| !a.is_compatible(b))
+    {
         return Err(anyhow!(
             "Schema mismatch: {:?} vs {:?}",
             input_types,

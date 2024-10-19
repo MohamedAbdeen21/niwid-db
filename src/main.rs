@@ -10,7 +10,7 @@ fn main() -> Result<()> {
 
     ctx.execute_sql(
         "CREATE TABLE IF NOT EXISTS users
-        (id UINT, num UINT, msg VARCHAR)",
+        (id UINT, num INT, msg TEXT)",
     )?;
 
     ctx.execute_sql("TRUNCATE TABLE users;")?;

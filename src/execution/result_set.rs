@@ -1,4 +1,5 @@
-use crate::{tuple::schema::Field, types::Value};
+use crate::tuple::schema::Field;
+use crate::types::Value;
 
 // TODO: move to a column-based result set (replace data with cols)
 #[derive(Default, Debug)]
