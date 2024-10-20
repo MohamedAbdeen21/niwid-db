@@ -425,7 +425,6 @@ impl Executable for Scan {
         let mut output = vec![];
         // TODO: pass the tuple_id as tuple for udpate to use
         // need to define a tuple type first though
-        println!("Scanning");
         table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
             let mut values = vec![
                 value!(UInt, page_id.to_string()),

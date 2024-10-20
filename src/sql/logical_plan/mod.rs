@@ -132,8 +132,6 @@ fn build_drop(
         .map(|n| n.0.first().unwrap().value.clone())
         .collect();
 
-    println!("names: {:?}", names);
-
     if !if_exists {
         let non_existant: Vec<String> = names
             .iter()

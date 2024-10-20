@@ -1,6 +1,7 @@
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
 use crate::pages::PageId;
+use crate::printdbg;
 use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
@@ -210,7 +211,7 @@ impl Table {
     }
 
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
-        println!("Starting txn {}", txn_id);
+        printdbg!("{} Starting txn {}", self.name, txn_id);
         if let Some(current) = self.active_txn {
             if txn_id != current {
                 return Err(anyhow!("Another transaction is active"));
@@ -223,7 +224,7 @@ impl Table {
 
     pub fn commit_txn(&mut self) -> Result<()> {
         if self.active_txn.is_some() {
-            println!("Committing txn {}", self.active_txn.unwrap());
+            printdbg!("{} Committing txn {}", self.name, self.active_txn.unwrap());
             self.active_txn = None;
             Ok(())
         } else {

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use idk::context::Context;
+use idk::printdbg;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::BufReader;
@@ -31,7 +32,7 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
         .await;
 
     loop {
-        println!("Awaiting query...");
+        printdbg!("Awaiting query...");
         buffer.clear();
         let bytes_read = reader.read_line(&mut buffer).await.unwrap();
 
@@ -53,7 +54,7 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
         match ctx.execute_sql(query) {
             Ok(result) => {
                 let data = result.data();
-                println!("Result: {:?}", data);
+                printdbg!("Result: {:?}", data);
                 if data.is_empty() {
                     let _ = writer.write_all(b"Ok\n").await; // Send the row data
                 }

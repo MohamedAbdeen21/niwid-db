@@ -1,6 +1,7 @@
 mod versioned_map;
 
 use crate::pages::PageId;
+use crate::printdbg;
 use crate::table::Table;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
@@ -148,7 +149,6 @@ impl Catalog {
         table_name: &str,
         txn: Option<TxnId>,
     ) -> Option<Result<&mut Table>> {
-        println!("Txn: {:?}", txn);
         if table_name == CATALOG_NAME {
             // Catalog table should be accessed through table() method
             // this should limit direct operations on the catalog
@@ -185,7 +185,7 @@ impl Catalog {
         let mut committed_keys = self.txn_tables.remove(&txn).unwrap_or_default();
         committed_keys.extend(self.tables.commit(txn));
 
-        println!("Committed keys: {:?}", committed_keys);
+        printdbg!("Txn {} Committed keys {:?}", txn, committed_keys);
 
         committed_keys
             .iter()

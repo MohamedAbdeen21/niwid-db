@@ -1,5 +1,6 @@
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
+use crate::printdbg;
 use crate::txn_manager::TxnId;
 use anyhow::{anyhow, Context, Result};
 use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
@@ -141,7 +142,7 @@ impl DiskManager {
     }
 
     pub fn shadow_page<T: DiskWritable>(&self, txn_id: TxnId, page_id: PageId) -> Result<T> {
-        println!("shadowing page {page_id} for {txn_id}");
+        printdbg!("shadowing page {page_id} for {txn_id}");
         let trans_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
 
         let to_path = Path::join(Path::new(&trans_cache), Path::new(&page_id.to_string()));

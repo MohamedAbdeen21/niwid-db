@@ -129,11 +129,6 @@ impl BufferPoolManager {
             frame_id
         };
 
-        println!(
-            "Fetching page {} in frame {} for txn {:?}",
-            page_id, frame_id, txn_id
-        );
-
         let frame = &mut self.frames[frame_id];
         frame.pin();
         self.replacer.record_access(frame_id);
@@ -239,7 +234,6 @@ impl BufferPoolManager {
         let shadowed_page = self.disk_manager.shadow_page(txn_id, page_id)?;
 
         let shadow_frame_id = self.find_free_frame()?;
-        println!("Shadowing page {page_id} for transaction {txn_id} in frame {shadow_frame_id}");
         let shadow_frame = &mut self.frames[shadow_frame_id];
 
         shadow_frame.set_page(shadowed_page);
