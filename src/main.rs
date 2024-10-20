@@ -25,13 +25,6 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
     let mut reader = BufReader::new(reader);
     let mut buffer = String::new();
 
-    if let Err(e) = ctx.start_txn() {
-        let _ = writer
-            .write_all(format!("Failed to start transaction: {}\n", e).as_bytes())
-            .await;
-        return;
-    }
-
     println!("Client {} connected!", client_id);
     let _ = writer
         .write_all(format!("Client {} connected!\n", client_id).as_bytes())
@@ -76,12 +69,5 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
                     .await;
             }
         }
-    }
-
-    // Commit transaction
-    if let Err(e) = ctx.commit_txn() {
-        let _ = writer
-            .write_all(format!("Failed to commit transaction: {}\n", e).as_bytes())
-            .await;
     }
 }

@@ -1,6 +1,7 @@
 pub mod result_set;
 
 use crate::catalog::Catalog;
+use crate::context::Context;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
@@ -9,7 +10,6 @@ use crate::sql::logical_plan::plan::{
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::Tuple;
-use crate::txn_manager::TxnId;
 use crate::types::Value;
 use crate::types::ValueFactory;
 use crate::types::{Types, UInt};
@@ -19,30 +19,49 @@ use result_set::ResultSet;
 use sqlparser::ast::BinaryOperator;
 
 pub trait Executable {
-    fn execute(self, txn: Option<TxnId>) -> Result<ResultSet>;
+    /// Context is passed for client controls like
+    /// start/commit/rollback transactions, most other
+    /// plans only need access to the active_txn id field, not the whole context
+    /// I'm aware that I can pass an Option<Context> and Option<TxnId> to each plan
+    /// and None to other plans, but that would make the API too ugly
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet>;
 }
 
 impl LogicalPlan {
-    pub fn execute(self, txn: Option<TxnId>) -> Result<ResultSet> {
+    pub fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         match self {
-            LogicalPlan::Projection(plan) => plan.execute(txn),
-            LogicalPlan::Scan(scan) => scan.execute(txn),
-            LogicalPlan::Filter(filter) => filter.execute(txn),
-            LogicalPlan::CreateTable(create) => create.execute(txn),
-            LogicalPlan::Explain(explain) => explain.execute(txn),
-            LogicalPlan::Insert(i) => i.execute(txn),
-            LogicalPlan::Values(v) => v.execute(txn),
-            LogicalPlan::DropTables(d) => d.execute(txn),
-            LogicalPlan::Truncate(t) => t.execute(txn),
-            LogicalPlan::Update(u) => u.execute(txn),
+            LogicalPlan::Projection(plan) => plan.execute(ctx),
+            LogicalPlan::Scan(scan) => scan.execute(ctx),
+            LogicalPlan::Filter(filter) => filter.execute(ctx),
+            LogicalPlan::CreateTable(create) => create.execute(ctx),
+            LogicalPlan::Explain(explain) => explain.execute(ctx),
+            LogicalPlan::Insert(i) => i.execute(ctx),
+            LogicalPlan::Values(v) => v.execute(ctx),
+            LogicalPlan::DropTables(d) => d.execute(ctx),
+            LogicalPlan::Truncate(t) => t.execute(ctx),
+            LogicalPlan::Update(u) => u.execute(ctx),
             LogicalPlan::Empty => Ok(ResultSet::default()),
+            LogicalPlan::StartTxn => {
+                ctx.start_txn()?;
+                Ok(ResultSet::default())
+            }
+            LogicalPlan::CommitTxn => {
+                ctx.commit_txn()?;
+                Ok(ResultSet::default())
+            }
+            LogicalPlan::RollbackTxn => {
+                ctx.rollback_txn()?;
+                Ok(ResultSet::default())
+            }
         }
     }
 }
 
 impl Executable for Update {
-    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
-        let input = self.input.execute(txn_id)?;
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
+
+        let input = self.input.execute(ctx)?;
 
         let c = Catalog::get();
         let mut catalog = c.lock();
@@ -93,7 +112,8 @@ impl Executable for Update {
 }
 
 impl Executable for Truncate {
-    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
         Catalog::get()
             .lock()
             .truncate_table(self.table_name, txn_id)?;
@@ -103,7 +123,8 @@ impl Executable for Truncate {
 }
 
 impl Executable for DropTables {
-    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
         for table_name in self.table_names {
             if Catalog::get()
                 .lock()
@@ -119,7 +140,7 @@ impl Executable for DropTables {
 }
 
 impl Executable for Values {
-    fn execute(self, _: Option<TxnId>) -> Result<ResultSet> {
+    fn execute(self, _: &mut Context) -> Result<ResultSet> {
         let input = ResultSet::with_capacity(1);
         let output = self
             .rows
@@ -139,8 +160,9 @@ impl Executable for Values {
 }
 
 impl Executable for Insert {
-    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
-        let input = self.input.execute(txn_id)?;
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
+        let input = self.input.execute(ctx)?;
 
         if input.fields.len() != self.table_schema.fields.len() {
             return Err(anyhow!("Column count mismatch"));
@@ -161,12 +183,12 @@ impl Executable for Insert {
 }
 
 impl Executable for Explain {
-    fn execute(self, _txn_id: Option<TxnId>) -> Result<ResultSet> {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         println!("Logical plan:\n{}", self.input.print());
         // time the execution time
         if self.analyze {
             let start = std::time::Instant::now();
-            let result = self.input.execute(_txn_id)?;
+            let result = self.input.execute(ctx)?;
             println!("Execution time: {:?}", start.elapsed());
             Ok(result)
         } else {
@@ -176,7 +198,8 @@ impl Executable for Explain {
 }
 
 impl Executable for CreateTable {
-    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
         let catalog = Catalog::get();
         catalog
             .lock()
@@ -186,8 +209,8 @@ impl Executable for CreateTable {
 }
 
 impl Executable for Filter {
-    fn execute(self, _txn_id: Option<TxnId>) -> Result<ResultSet> {
-        let input = self.input.execute(_txn_id)?;
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let input = self.input.execute(ctx)?;
         let mask = self.expr.evaluate(&input);
 
         let output = input
@@ -370,11 +393,11 @@ impl BooleanBinaryExpr {
 }
 
 impl Executable for Projection {
-    fn execute(self, _txn_id: Option<TxnId>) -> Result<ResultSet> {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let input = if matches!(self.input, LogicalPlan::Empty) {
             ResultSet::with_capacity(1)
         } else {
-            self.input.execute(_txn_id)?
+            self.input.execute(ctx)?
         };
 
         let output = self
@@ -391,7 +414,8 @@ impl Executable for Projection {
 }
 
 impl Executable for Scan {
-    fn execute(self, txn_id: Option<TxnId>) -> Result<ResultSet> {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
         let arc_catalog = Catalog::get();
         let mut catalog = arc_catalog.lock();
         let table = catalog.get_table(&self.table_name, txn_id).unwrap();

@@ -116,7 +116,7 @@ impl Catalog {
             return Err(anyhow!("Table {} already exists", table_name));
         }
 
-        let table = Table::new(table_name.to_string(), schema)?;
+        let mut table = Table::new(table_name.to_string(), schema)?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
             ValueFactory::from_string(&Types::Str, &table_name),
@@ -126,6 +126,10 @@ impl Catalog {
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);
         let tuple_id = self.table().insert(tuple)?;
+
+        if let Some(txn) = txn {
+            table.start_txn(txn)?;
+        }
 
         self.tables
             .insert(txn, table_name.to_string(), (tuple_id, table));
@@ -178,8 +182,8 @@ impl Catalog {
     }
 
     pub fn commit(&mut self, txn: TxnId) -> Result<()> {
-        let mut committed_keys = self.tables.commit(txn);
-        committed_keys.extend(self.txn_tables.remove(&txn).unwrap_or_default().into_iter());
+        let mut committed_keys = self.txn_tables.remove(&txn).unwrap_or_default();
+        committed_keys.extend(self.tables.commit(txn));
 
         println!("Committed keys: {:?}", committed_keys);
 

@@ -67,8 +67,23 @@ pub fn build_initial_plan(statement: Statement, txn_id: Option<TxnId>) -> Result
         Statement::Truncate {
             table_names, table, ..
         } => build_truncate(table_names, table, txn_id),
+        Statement::StartTransaction { .. } => build_start_transaction(),
+        Statement::Commit { .. } => build_commit_transaction(),
+        Statement::Rollback { .. } => build_rollback_transaction(),
         e => unimplemented!("{}", e),
     }
+}
+
+fn build_start_transaction() -> Result<LogicalPlan> {
+    Ok(LogicalPlan::StartTxn)
+}
+
+fn build_rollback_transaction() -> Result<LogicalPlan> {
+    Ok(LogicalPlan::RollbackTxn)
+}
+
+fn build_commit_transaction() -> Result<LogicalPlan> {
+    Ok(LogicalPlan::CommitTxn)
 }
 
 fn build_truncate(

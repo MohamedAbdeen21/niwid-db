@@ -227,12 +227,12 @@ impl Table {
             self.active_txn = None;
             Ok(())
         } else {
-            Err(anyhow!("No active transaction"))
+            Err(anyhow!("Table No active transaction"))
         }
     }
 
     #[allow(dead_code)]
-    pub fn abort_txn(&mut self) -> Result<()> {
+    pub fn rollback_txn(&mut self) -> Result<()> {
         self.commit_txn()
     }
 

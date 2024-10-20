@@ -87,8 +87,8 @@ impl<K: std::cmp::Eq + std::hash::Hash + Clone, V> VersionedMap<K, V> {
         refs
     }
 
-    /// Abort a version: discard all changes without applying them
-    pub fn abort(&mut self, version: u64) {
+    /// rollback a version: discard all changes without applying them
+    pub fn rollback(&mut self, version: u64) {
         self.versions.remove(&version);
     }
 }
@@ -111,11 +111,11 @@ mod tests {
     }
 
     #[test]
-    fn test_abort() -> Result<()> {
+    fn test_rollback() -> Result<()> {
         let mut map = VersionedMap::new();
         map.insert(None, "table1".to_string(), 42);
         map.insert(Some(1), "table1".to_string(), 100);
-        map.abort(1);
+        map.rollback(1);
         assert_eq!(map.get(None, &"table1".to_string()), Some(&42));
         Ok(())
     }

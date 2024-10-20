@@ -286,8 +286,8 @@ impl BufferPoolManager {
         Ok(())
     }
 
-    pub fn abort_txn(&mut self, txn_id: TxnId) -> Result<()> {
-        self.disk_manager.abort_txn(txn_id)?;
+    pub fn rollback_txn(&mut self, txn_id: TxnId) -> Result<()> {
+        self.disk_manager.rollback_txn(txn_id)?;
 
         for frame_id in self
             .txn_table

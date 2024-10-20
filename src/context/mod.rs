@@ -4,7 +4,7 @@ use crate::sql::logical_plan::build_initial_plan;
 use crate::sql::logical_plan::optimizer::optimize_logical_plan;
 use crate::sql::parser::parse;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 pub struct Context {
     catalog: ArcCatalog,
@@ -29,6 +29,10 @@ impl Context {
         Self::default()
     }
 
+    pub fn get_active_txn(&self) -> Option<TxnId> {
+        self.active_txn
+    }
+
     pub fn start_txn(&mut self) -> Result<()> {
         if self.active_txn.is_some() {
             return Ok(());
@@ -42,7 +46,7 @@ impl Context {
 
     pub fn commit_txn(&mut self) -> Result<()> {
         if self.active_txn.is_none() {
-            return Ok(());
+            return Err(anyhow!("Context: No active transaction"));
         }
 
         self.txn_manager.lock().commit(self.active_txn.unwrap())?;
@@ -58,14 +62,17 @@ impl Context {
         Ok(())
     }
 
-    pub fn abort_txn(&mut self) -> Result<()> {
+    pub fn rollback_txn(&mut self) -> Result<()> {
         if self.active_txn.is_none() {
             return Ok(());
         }
 
-        self.txn_manager.lock().abort(self.active_txn.unwrap())?;
+        self.txn_manager.lock().rollback(self.active_txn.unwrap())?;
 
-        self.catalog.lock().tables.abort(self.active_txn.unwrap());
+        self.catalog
+            .lock()
+            .tables
+            .rollback(self.active_txn.unwrap());
         self.active_txn = None;
 
         Ok(())
@@ -79,6 +86,6 @@ impl Context {
         let plan = build_initial_plan(statment, self.active_txn)?;
         let plan = optimize_logical_plan(plan);
 
-        plan.execute(self.active_txn)
+        plan.execute(self)
     }
 }

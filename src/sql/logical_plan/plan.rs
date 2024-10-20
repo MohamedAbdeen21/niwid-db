@@ -13,6 +13,9 @@ pub enum LogicalPlan {
     DropTables(DropTables),
     Truncate(Truncate),
     Update(Box<Update>),
+    StartTxn,
+    CommitTxn,
+    RollbackTxn,
     Empty,
 }
 
@@ -23,7 +26,6 @@ impl Default for LogicalPlan {
 }
 
 impl LogicalPlan {
-    #[allow(unused)]
     pub fn print(&self) -> String {
         self.print_indent(1)
     }
@@ -40,6 +42,9 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.print(indent),
             LogicalPlan::Truncate(t) => t.print(indent),
             LogicalPlan::Update(u) => u.print(indent),
+            LogicalPlan::StartTxn => format!("{} StartTransaction", "-".repeat(indent * 2)),
+            LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
+            LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
         }
     }
@@ -57,6 +62,9 @@ impl LogicalPlan {
             LogicalPlan::Truncate(t) => t.schema(),
             LogicalPlan::Update(u) => u.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
+            LogicalPlan::StartTxn => Schema::default(),
+            LogicalPlan::CommitTxn => Schema::default(),
+            LogicalPlan::RollbackTxn => Schema::default(),
         }
     }
 }

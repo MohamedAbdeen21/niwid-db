@@ -167,7 +167,7 @@ impl DiskManager {
         Path::join(Path::new(&self.path), Path::new("txn"))
     }
 
-    pub fn abort_txn(&self, txn_id: TxnId) -> Result<()> {
+    pub fn rollback_txn(&self, txn_id: TxnId) -> Result<()> {
         remove_dir_all(Path::join(
             Path::new(&self.txn_dir()),
             Path::new(&txn_id.to_string()),
