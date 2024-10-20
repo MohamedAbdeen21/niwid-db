@@ -61,7 +61,7 @@ impl Types {
     }
 
     pub fn from_sql(s: &str) -> Self {
-        match s {
+        match s.to_uppercase().as_str() {
             "UINT" | "INT UNSIGNED" => Types::UInt,
             "INT" => Types::Int,
             "FLOAT" => Types::Float,

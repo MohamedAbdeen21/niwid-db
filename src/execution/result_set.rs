@@ -70,6 +70,13 @@ impl ResultSet {
         }
     }
 
+    pub fn data(&self) -> Vec<Vec<String>> {
+        self.data
+            .iter()
+            .map(|row| row.iter().map(|v| format!("{}", v)).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    }
+
     pub fn show(&self) {
         let col_widths: Vec<usize> = self
             .fields

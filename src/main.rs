@@ -1,51 +1,87 @@
 use anyhow::Result;
 use idk::context::Context;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use tokio::io::BufReader;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
-fn main() -> Result<()> {
+#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
+async fn main() -> Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let next_client_id = Arc::new(AtomicUsize::new(1));
+
+    loop {
+        let (socket, _) = listener.accept().await?;
+        let client_id = next_client_id.fetch_add(1, Ordering::SeqCst);
+
+        tokio::spawn(handle_client(socket, client_id));
+    }
+}
+
+async fn handle_client(socket: TcpStream, client_id: usize) {
     let mut ctx = Context::new();
+    let (reader, mut writer) = socket.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut buffer = String::new();
 
-    ctx.start_txn()?;
+    if let Err(e) = ctx.start_txn() {
+        let _ = writer
+            .write_all(format!("Failed to start transaction: {}\n", e).as_bytes())
+            .await;
+        return;
+    }
 
-    // ctx.execute_sql("DROP TABLE IF EXISTS users;")?;
+    println!("Client {} connected!", client_id);
+    let _ = writer
+        .write_all(format!("Client {} connected!\n", client_id).as_bytes())
+        .await;
 
-    ctx.execute_sql(
-        "CREATE TABLE IF NOT EXISTS users
-        (id UINT, num INT, msg TEXT)",
-    )?;
+    loop {
+        println!("Awaiting query...");
+        buffer.clear();
+        let bytes_read = reader.read_line(&mut buffer).await.unwrap();
 
-    ctx.execute_sql("TRUNCATE TABLE users;")?;
+        if bytes_read == 0 {
+            let _ = writer
+                .write_all(format!("Client {} disconnected.\n", client_id).as_bytes())
+                .await;
+            break;
+        }
 
-    ctx.execute_sql(
-        "EXPLAIN ANALYZE INSERT INTO users
-        VALUES (1,1,'hello'), (2,3,'world');",
-    )?;
+        let query = buffer.trim();
+        if query.eq_ignore_ascii_case("quit") {
+            let _ = writer
+                .write_all(format!("Goodbye, Client {}!\n", client_id).as_bytes())
+                .await;
+            break;
+        }
 
-    ctx.execute_sql(
-        "EXPLAIN ANALYZE SELECT num, id, msg
-        FROM users;",
-    )?
-    .show();
+        match ctx.execute_sql(query) {
+            Ok(result) => {
+                let data = result.data();
+                println!("Result: {:?}", data);
+                if data.is_empty() {
+                    let _ = writer.write_all(b"Ok\n").await; // Send the row data
+                }
+                for row in data {
+                    let mut row_string = row.join(", ");
+                    row_string.push('\n');
+                    let _ = writer.write_all(row_string.as_bytes()).await; // Send the row data
+                }
+            }
+            Err(e) => {
+                let _ = writer
+                    .write_all(format!("Error executing query: {}\n", e).as_bytes())
+                    .await;
+            }
+        }
+    }
 
-    ctx.execute_sql(
-        "EXPLAIN ANALYZE SELECT num, id, msg
-        FROM users WHERE id = num;",
-    )?
-    .show();
-
-    ctx.execute_sql(
-        "EXPLAIN ANALYZE SELECT (num + 1) * 2 AS num, id, msg
-        FROM users WHERE num > 2;",
-    )?
-    .show();
-
-    ctx.execute_sql("EXPLAIN ANALYZE UPDATE users SET msg = 'world2';")?;
-    ctx.execute_sql(
-        "EXPLAIN ANALYZE SELECT num, id, msg
-        FROM users;",
-    )?
-    .show();
-
-    ctx.commit_txn()?;
-
-    Ok(())
+    // Commit transaction
+    if let Err(e) = ctx.commit_txn() {
+        let _ = writer
+            .write_all(format!("Failed to commit transaction: {}\n", e).as_bytes())
+            .await;
+    }
 }

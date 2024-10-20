@@ -17,11 +17,11 @@ pub(super) struct TableIterator {
 }
 
 impl TableIterator {
-    pub fn new(table: &Table) -> Self {
+    pub fn new(table: &Table, txn_id: Option<TxnId>) -> Self {
         let bpm = table.bpm.clone();
         let page: TablePage = bpm
             .lock()
-            .fetch_frame(table.first_page, table.active_txn)
+            .fetch_frame(table.first_page, txn_id)
             .unwrap()
             .reader()
             .into();
@@ -34,7 +34,7 @@ impl TableIterator {
             num_tuples: header.get_num_tuples(),
             page,
             bpm,
-            active_txn: table.active_txn,
+            active_txn: txn_id,
         }
     }
 }
@@ -143,7 +143,7 @@ mod tests {
             Ok(())
         };
 
-        TableIterator::new(&table).try_for_each(scanner)?;
+        TableIterator::new(&table, None).try_for_each(scanner)?;
 
         assert_eq!(counter, 2);
 
@@ -205,7 +205,7 @@ mod tests {
             0
         );
 
-        TableIterator::new(&table).try_for_each(scanner)?;
+        TableIterator::new(&table, None).try_for_each(scanner)?;
 
         assert_eq!(counter, tuples_per_page + 1);
 

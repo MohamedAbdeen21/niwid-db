@@ -7,7 +7,7 @@ pub struct VersionedMap<K, V> {
     versions: HashMap<u64, HashMap<K, Option<V>>>,
 }
 
-impl<K: std::cmp::Eq + std::hash::Hash + Clone, V: Clone> VersionedMap<K, V> {
+impl<K: std::cmp::Eq + std::hash::Hash + Clone, V> VersionedMap<K, V> {
     pub fn new() -> Self {
         VersionedMap {
             base: HashMap::new(),
@@ -23,7 +23,7 @@ impl<K: std::cmp::Eq + std::hash::Hash + Clone, V: Clone> VersionedMap<K, V> {
                 .or_default()
                 .insert(key, Some(value));
         } else {
-            self.base.insert(key.clone(), value.clone());
+            self.base.insert(key.clone(), value);
         }
     }
 
@@ -51,19 +51,11 @@ impl<K: std::cmp::Eq + std::hash::Hash + Clone, V: Clone> VersionedMap<K, V> {
             return self.base.get_mut(key);
         };
 
-        if changes.contains_key(key) {
-            match changes.get_mut(key) {
-                Some(Some(table)) => return Some(table),
-                Some(None) => return None,
-                None => (),
-            }
-        } else if let Some(base_value) = self.base.get(key) {
-            let cloned_value = base_value.clone();
-            changes.insert(key.clone(), Some(cloned_value));
-            return changes.get_mut(key).and_then(|entry| entry.as_mut());
+        match changes.get_mut(key) {
+            Some(Some(table)) => Some(table),
+            Some(None) => None,
+            None => self.base.get_mut(key),
         }
-
-        None
     }
 
     pub fn remove(&mut self, version: Option<u64>, key: &K) -> Option<V> {
@@ -77,15 +69,22 @@ impl<K: std::cmp::Eq + std::hash::Hash + Clone, V: Clone> VersionedMap<K, V> {
     }
 
     /// Commit a version: apply all changes to the base map
-    pub fn commit(&mut self, version: u64) {
+    pub fn commit(&mut self, version: u64) -> Vec<K> {
+        let mut refs = vec![];
+
         if let Some(changes) = self.versions.remove(&version) {
             for (key, value) in changes {
                 match value {
-                    Some(v) => self.base.insert(key, v), // Apply insert/update
-                    None => self.base.remove(&key),      // Apply deletion
+                    Some(v) => {
+                        refs.push(key.clone());
+                        self.base.insert(key, v) // Apply insert/update
+                    }
+                    None => self.base.remove(&key), // Apply deletion
                 };
             }
-        }
+        };
+
+        refs
     }
 
     /// Abort a version: discard all changes without applying them

@@ -48,8 +48,8 @@ impl Executable for Update {
         let mut catalog = c.lock();
 
         let table = catalog
-            .get_table(&self.table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))?;
+            .get_table_mut(&self.table_name, txn_id)
+            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
 
         let (_, mask) = self.selection.evaluate(&input);
 
@@ -151,8 +151,8 @@ impl Executable for Insert {
 
             let _tuple_id = Catalog::get()
                 .lock()
-                .get_table(&self.table_name, txn_id)
-                .unwrap()
+                .get_table_mut(&self.table_name, txn_id)
+                .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??
                 .insert(tuple);
         }
 
@@ -180,8 +180,7 @@ impl Executable for CreateTable {
         let catalog = Catalog::get();
         catalog
             .lock()
-            .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)
-            .unwrap();
+            .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
         Ok(ResultSet::default())
     }
 }
@@ -402,7 +401,8 @@ impl Executable for Scan {
         let mut output = vec![];
         // TODO: pass the tuple_id as tuple for udpate to use
         // need to define a tuple type first though
-        table.scan(|((page_id, slot_id), (_, tuple))| {
+        println!("Scanning");
+        table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
             let mut values = vec![
                 value!(UInt, page_id.to_string()),
                 value!(UInt, slot_id.to_string()),

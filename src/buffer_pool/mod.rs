@@ -113,8 +113,8 @@ impl BufferPoolManager {
                 .find(|f| self.frames[**f].get_page_id() == page_id)
             {
                 // default to the original page if the page was not touched/shadowed
-                // None => return self.fetch_frame(page_id, None),
-                None => unreachable!(),
+                None => return self.fetch_frame(page_id, None),
+                // None => unreachable!(),
                 Some(frame) => frame,
             }
         } else if let Some(frame_id) = self.page_table.get(&page_id) {
@@ -128,6 +128,11 @@ impl BufferPoolManager {
 
             frame_id
         };
+
+        println!(
+            "Fetching page {} in frame {} for txn {:?}",
+            page_id, frame_id, txn_id
+        );
 
         let frame = &mut self.frames[frame_id];
         frame.pin();
@@ -193,7 +198,7 @@ impl BufferPoolManager {
             Some(frames) => *frames
                 .iter()
                 .find(|f| self.frames[**f].get_page_id() == *page_id)
-                .unwrap(),
+                .unwrap_or(self.page_table.get(page_id).unwrap()),
             None => *self.page_table.get(page_id).unwrap(),
         };
 
@@ -234,6 +239,7 @@ impl BufferPoolManager {
         let shadowed_page = self.disk_manager.shadow_page(txn_id, page_id)?;
 
         let shadow_frame_id = self.find_free_frame()?;
+        println!("Shadowing page {page_id} for transaction {txn_id} in frame {shadow_frame_id}");
         let shadow_frame = &mut self.frames[shadow_frame_id];
 
         shadow_frame.set_page(shadowed_page);

@@ -9,6 +9,7 @@ use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use versioned_map::VersionedMap;
 
@@ -29,6 +30,7 @@ lazy_static! {
 pub struct Catalog {
     pub tables: VersionedMap<String, (TupleId, Table)>, // TODO: handle ownership
     schema: Schema,                                     // A catalog is itself a table
+    txn_tables: HashMap<TxnId, HashSet<String>>,
 }
 
 impl Catalog {
@@ -65,7 +67,9 @@ impl Catalog {
             Ok(())
         };
 
-        table.scan(table_builder).expect("Catalog scan failed");
+        table
+            .scan(None, table_builder)
+            .expect("Catalog scan failed");
 
         tables.insert(None, CATALOG_NAME.to_string(), ((CATALOG_PAGE, 0), table));
 
@@ -91,7 +95,11 @@ impl Catalog {
 
         let tables = Self::build_catalog(table, &schema);
 
-        Catalog { tables, schema }
+        Catalog {
+            tables,
+            schema,
+            txn_tables: HashMap::new(),
+        }
     }
 
     pub fn add_table(
@@ -101,10 +109,10 @@ impl Catalog {
         ignore_if_exists: bool,
         txn: Option<TxnId>,
     ) -> Result<()> {
-        if self.get_table(&table_name, txn).is_some() {
-            if ignore_if_exists {
-                return Ok(());
-            }
+        let exists = self.get_table_mut(&table_name, txn).is_some();
+        if exists && ignore_if_exists {
+            return Ok(());
+        } else if exists {
             return Err(anyhow!("Table {} already exists", table_name));
         }
 
@@ -131,27 +139,67 @@ impl Catalog {
             .map(|(_, table)| table.get_schema())
     }
 
-    pub fn get_table(&mut self, table_name: &str, txn: Option<TxnId>) -> Option<&mut Table> {
+    pub fn get_table_mut(
+        &mut self,
+        table_name: &str,
+        txn: Option<TxnId>,
+    ) -> Option<Result<&mut Table>> {
+        println!("Txn: {:?}", txn);
         if table_name == CATALOG_NAME {
             // Catalog table should be accessed through table() method
             // this should limit direct operations on the catalog
             return None;
         }
 
+        match self.tables.get_mut(txn, &table_name.to_string()) {
+            Some((_, table)) => {
+                if let Some(txn_id) = txn {
+                    if let Err(e) = table.start_txn(txn_id) {
+                        Some(Err(e))
+                    } else {
+                        self.txn_tables
+                            .entry(txn_id)
+                            .or_default()
+                            .insert(table_name.to_string());
+                        Some(Ok(table))
+                    }
+                } else {
+                    Some(Ok(table))
+                }
+            }
+            None => None,
+        }
+    }
+
+    pub fn get_table(&mut self, table_name: &str, txn: Option<TxnId>) -> Option<&Table> {
         self.tables
-            .get_mut(txn, &table_name.to_string())
+            .get(txn, &table_name.to_string())
             .map(|(_, table)| table)
     }
 
+    pub fn commit(&mut self, txn: TxnId) -> Result<()> {
+        let mut committed_keys = self.tables.commit(txn);
+        committed_keys.extend(self.txn_tables.remove(&txn).unwrap_or_default().into_iter());
+
+        println!("Committed keys: {:?}", committed_keys);
+
+        committed_keys
+            .iter()
+            .try_for_each(|key| self.tables.get_mut(None, key).unwrap().1.commit_txn())?;
+
+        Ok(())
+    }
+
     pub fn truncate_table(&mut self, table_name: String, txn: Option<TxnId>) -> Result<()> {
-        let table = match self.get_table(&table_name, txn) {
+        let table = match self.get_table_mut(&table_name, txn) {
             Some(table) => table,
             None => return Err(anyhow!("Table {} doesn't exist", table_name)),
         };
 
-        table.truncate()?;
-
-        self.update_pages(table_name.to_string(), txn)?;
+        let dup = table?.truncate()?;
+        let tuple_id = self.tables.get_mut(txn, &table_name).unwrap().0;
+        self.tables
+            .insert(txn, table_name.to_string(), (tuple_id, dup));
 
         Ok(())
     }
@@ -172,27 +220,5 @@ impl Catalog {
         self.tables.remove(txn, &table_name);
 
         Some(())
-    }
-
-    pub fn update_pages(&mut self, table_name: String, txn: Option<TxnId>) -> Result<()> {
-        let (tuple_id, table) = self.tables.get_mut(txn, &table_name).unwrap();
-
-        let schema = table.get_schema();
-
-        let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
-        let tuple_data: Vec<Value> = vec![
-            ValueFactory::from_string(&Types::Str, &table_name),
-            ValueFactory::from_string(&Types::UInt, table.get_first_page_id().to_string()),
-            ValueFactory::from_string(&Types::UInt, table.get_last_page_id().to_string()),
-            ValueFactory::from_string(&Types::Str, &serialized_schema),
-        ];
-
-        let tuple = Tuple::new(tuple_data, &self.schema);
-        let tuple_id = *tuple_id;
-        let new_tuple_id = self.table().update(Some(tuple_id), tuple)?;
-
-        self.tables.get_mut(txn, &table_name).unwrap().0 = new_tuple_id;
-
-        Ok(())
     }
 }

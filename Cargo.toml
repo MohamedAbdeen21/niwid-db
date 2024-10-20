@@ -12,4 +12,5 @@ parking_lot = "0.12.3"
 priority-queue = "2.1.0"
 serde = {version = "1.0.210", features = ["derive"]}
 sqlparser = "0.51.0"
+tokio = {version = "1.40.0", features = ["full"]}
 uuid = {version = "1.10.0", features = ["fast-rng", "v4", "macro-diagnostics"]}

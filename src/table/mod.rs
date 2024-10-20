@@ -1,6 +1,4 @@
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
-#[cfg(not(test))]
-use crate::catalog::Catalog;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
 use crate::pages::PageId;
 use crate::tuple::schema::Field;
@@ -12,7 +10,6 @@ use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
 
-#[derive(Clone)]
 pub struct Table {
     name: String,
     pub first_page: PageId,
@@ -31,6 +28,20 @@ impl PartialEq for Table {
 }
 
 impl Table {
+    /// Avoid accidentaly cloning the table later
+    fn clone_with_txn(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            first_page: self.first_page,
+            last_page: self.last_page,
+            blob_page: self.blob_page,
+            bpm: self.bpm.clone(),
+            txn_manager: self.txn_manager.clone(),
+            active_txn: self.active_txn,
+            schema: self.schema.clone(),
+        }
+    }
+
     pub fn new(name: String, schema: &Schema) -> Result<Self> {
         let bpm = BufferPoolManager::get();
         let txn_manager = TransactionManager::get();
@@ -91,8 +102,8 @@ impl Table {
         self.blob_page
     }
 
-    fn iter(&self) -> table_iterator::TableIterator {
-        table_iterator::TableIterator::new(self)
+    fn iter(&self, txn_id: Option<TxnId>) -> table_iterator::TableIterator {
+        table_iterator::TableIterator::new(self, txn_id)
     }
 
     fn insert_string(&mut self, bytes: &[u8]) -> Result<TupleId> {
@@ -199,16 +210,20 @@ impl Table {
     }
 
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
-        if self.active_txn.is_some() {
-            Err(anyhow!("Another transaction is active"))
+        println!("Starting txn {}", txn_id);
+        if let Some(current) = self.active_txn {
+            if txn_id != current {
+                return Err(anyhow!("Another transaction is active"));
+            }
         } else {
             self.active_txn = Some(txn_id);
-            Ok(())
         }
+        Ok(())
     }
 
     pub fn commit_txn(&mut self) -> Result<()> {
         if self.active_txn.is_some() {
+            println!("Committing txn {}", self.active_txn.unwrap());
             self.active_txn = None;
             Ok(())
         } else {
@@ -216,6 +231,7 @@ impl Table {
         }
     }
 
+    #[allow(dead_code)]
     pub fn abort_txn(&mut self) -> Result<()> {
         self.commit_txn()
     }
@@ -276,19 +292,17 @@ impl Table {
 
         last_page.set_next_page_id(page_id);
 
-        // FIXME: it works for now, but I don't like it
-        #[cfg(not(test))]
-        Catalog::get()
-            .lock()
-            .update_pages(self.name.clone(), self.active_txn)?;
-
         self.last_page = page_id;
 
         self.insert(tuple)
     }
 
-    pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>) -> Result<()> {
-        self.iter().try_for_each(|entry| f(&entry))
+    pub fn scan(
+        &self,
+        txn_id: Option<TxnId>,
+        mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>,
+    ) -> Result<()> {
+        self.iter(txn_id).try_for_each(|entry| f(&entry))
     }
 
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
@@ -327,11 +341,12 @@ impl Table {
         Ok(tuple_id)
     }
 
-    pub fn truncate(&mut self) -> Result<()> {
-        self.first_page = self.bpm.lock().new_page()?.reader().get_page_id();
-        self.last_page = self.first_page;
+    pub fn truncate(&self) -> Result<Table> {
+        let mut table = self.clone_with_txn();
+        table.first_page = self.bpm.lock().new_page()?.reader().get_page_id();
+        table.last_page = table.first_page;
 
-        Ok(())
+        Ok(table)
     }
 }
 
@@ -448,7 +463,7 @@ mod tests {
 
         // get count of tuples
         let mut count = 0;
-        table.scan(|_| {
+        table.scan(None, |_| {
             count += 1;
             Ok(())
         })?;
@@ -506,7 +521,7 @@ mod tests {
             Ok(())
         };
 
-        table.scan(assert_strings)?;
+        table.scan(None, assert_strings)?;
 
         Ok(())
     }
@@ -548,7 +563,7 @@ mod tests {
             Ok(())
         };
 
-        table.scan(assert_strings)?;
+        table.scan(None, assert_strings)?;
 
         Ok(())
     }
@@ -592,13 +607,13 @@ mod tests {
             Ok(())
         };
 
-        table.scan(scanner_1)?;
+        table.scan(None, scanner_1)?;
 
         table.delete(t2_id)?;
 
         let scanner_2 = |_: &(TupleId, Entry)| Err(anyhow!("Should not run")); // should never run
 
-        table.scan(scanner_2)?;
+        table.scan(None, scanner_2)?;
 
         Ok(())
     }
@@ -629,7 +644,7 @@ mod tests {
             Ok(())
         };
 
-        table.scan(validator)?;
+        table.scan(None, validator)?;
 
         Ok(())
     }

@@ -325,9 +325,8 @@ fn build_select(
 
             let schema = Catalog::get()
                 .lock()
-                .get_table(&name, txn_id)
-                .unwrap()
-                .get_schema();
+                .get_schema(&name, txn_id)
+                .ok_or(anyhow!("Table {} does not exist", name))?;
 
             LogicalPlan::Scan(Scan::new(name, schema.clone()))
         }
