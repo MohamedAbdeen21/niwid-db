@@ -9,6 +9,7 @@ pub(super) trait Replacer: Send + Sync + Debug {
     fn record_access(&mut self, frame_id: FrameId);
     fn set_evictable(&mut self, frame_id: FrameId, evictable: bool);
     fn can_evict(&self) -> bool;
+    fn remove(&mut self, frame_id: FrameId);
     fn evict(&mut self) -> FrameId;
     #[cfg(test)]
     fn peek(&self) -> Option<FrameId>;
@@ -45,6 +46,12 @@ impl Replacer for LRU {
         self.set_evictable(frame_id, false);
     }
 
+    /// Frame is tracked by the BPM, remove from replacer
+    fn remove(&mut self, frame_id: FrameId) {
+        self.heap.remove(&frame_id);
+        self.last_access.remove(&frame_id);
+    }
+
     /// Check if a frame can be evicted
     /// Must check before calling [`self.evict`]
     /// as evict just unwraps the value
@@ -69,7 +76,7 @@ impl Replacer for LRU {
             let ts = self.last_access.remove(&frame_id).unwrap();
             self.heap.push(frame_id, ts);
         } else {
-            let (frame_id, ts) = self.heap.remove(&frame_id).unwrap();
+            let (frame_id, ts) = self.heap.remove(&frame_id).expect("Already not evictable");
             self.last_access.insert(frame_id, ts);
         }
     }

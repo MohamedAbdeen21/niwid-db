@@ -64,7 +64,7 @@ impl Context {
 
     pub fn rollback_txn(&mut self) -> Result<()> {
         if self.active_txn.is_none() {
-            return Ok(());
+            return Err(anyhow!("Context: No active transaction"));
         }
 
         self.txn_manager.lock().rollback(self.active_txn.unwrap())?;

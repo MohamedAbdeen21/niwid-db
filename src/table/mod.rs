@@ -211,7 +211,7 @@ impl Table {
     }
 
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
-        printdbg!("{} Starting txn {}", self.name, txn_id);
+        printdbg!("Table {} Starting txn {}", self.name, txn_id);
         if let Some(current) = self.active_txn {
             if txn_id != current {
                 return Err(anyhow!("Another transaction is active"));
@@ -224,11 +224,15 @@ impl Table {
 
     pub fn commit_txn(&mut self) -> Result<()> {
         if self.active_txn.is_some() {
-            printdbg!("{} Committing txn {}", self.name, self.active_txn.unwrap());
+            printdbg!(
+                "Table {} Committing txn {}",
+                self.name,
+                self.active_txn.unwrap()
+            );
             self.active_txn = None;
             Ok(())
         } else {
-            Err(anyhow!("Table No active transaction"))
+            Err(anyhow!("Table: No active transaction"))
         }
     }
 
@@ -342,6 +346,7 @@ impl Table {
         Ok(tuple_id)
     }
 
+    /// Needs to return a duplicate because of how catalog handles ownership
     pub fn truncate(&self) -> Result<Table> {
         let mut table = self.clone_with_txn();
         table.first_page = self.bpm.lock().new_page()?.reader().get_page_id();

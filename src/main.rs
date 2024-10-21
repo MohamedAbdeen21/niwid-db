@@ -33,6 +33,8 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
 
     loop {
         printdbg!("Awaiting query...");
+        let _ = writer.write_all("> ".as_bytes()).await;
+
         buffer.clear();
         let bytes_read = reader.read_line(&mut buffer).await.unwrap();
 
@@ -44,6 +46,7 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
         }
 
         let query = buffer.trim();
+        printdbg!("Query: {}", query);
         if query.eq_ignore_ascii_case("quit") {
             let _ = writer
                 .write_all(format!("Goodbye, Client {}!\n", client_id).as_bytes())

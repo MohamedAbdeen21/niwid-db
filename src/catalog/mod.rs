@@ -185,7 +185,7 @@ impl Catalog {
         let mut committed_keys = self.txn_tables.remove(&txn).unwrap_or_default();
         committed_keys.extend(self.tables.commit(txn));
 
-        printdbg!("Txn {} Committed keys {:?}", txn, committed_keys);
+        printdbg!("Txn {} committed tables {:?}", txn, committed_keys);
 
         committed_keys
             .iter()

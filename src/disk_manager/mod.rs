@@ -142,7 +142,7 @@ impl DiskManager {
     }
 
     pub fn shadow_page<T: DiskWritable>(&self, txn_id: TxnId, page_id: PageId) -> Result<T> {
-        printdbg!("shadowing page {page_id} for {txn_id}");
+        printdbg!("DM: shadowing page {page_id} for {txn_id}");
         let trans_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
 
         let to_path = Path::join(Path::new(&trans_cache), Path::new(&page_id.to_string()));

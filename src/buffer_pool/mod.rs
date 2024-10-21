@@ -134,9 +134,8 @@ impl BufferPoolManager {
         self.replacer.record_access(frame_id);
 
         printdbg!(
-            "{} Fetched page {} with pin count {}",
+            "{} Fetched page {page_id} (frame: {frame_id}) with pin count {}",
             get_caller_name!(),
-            page_id,
             frame.get_pin_count()
         );
 
@@ -174,7 +173,7 @@ impl BufferPoolManager {
         self.page_table.remove(&page.get_page_id());
 
         printdbg!(
-            "Page {} chosen for eviction, is dirty: {}",
+            "Page {} (frame: {frame_id}) chosen for eviction, is dirty: {}",
             page.get_page_id(),
             page.is_dirty()
         );
@@ -188,23 +187,33 @@ impl BufferPoolManager {
     }
 
     pub fn unpin(&mut self, page_id: &PageId, txn_id: Option<TxnId>) {
-        // TODO: we expect all shadow frames to be dropped when txn ends, right? ...
-        let frame_id = match txn_id.and_then(|id| self.txn_table.get(&id)) {
-            Some(frames) => *frames
+        let frame_id = self.page_table[page_id];
+
+        // touched pages are reset after commit/rollback so we ignore unpin commands on them
+        // but pages that are read (not touched) should still be unpinned
+        if txn_id.is_some()
+            && self
+                .txn_table
+                .get(&txn_id.unwrap())
+                .unwrap()
                 .iter()
-                .find(|f| self.frames[**f].get_page_id() == *page_id)
-                .unwrap_or(self.page_table.get(page_id).unwrap()),
-            None => *self.page_table.get(page_id).unwrap(),
-        };
+                .any(|f| self.frames[*f].get_page_id() == *page_id)
+        {
+            return;
+        }
+
+        printdbg!(
+            "{} Unpinning page {page_id} (frame: {frame_id})",
+            get_caller_name!()
+        );
 
         let frame = &mut self.frames[frame_id];
         assert!(frame.get_pin_count() > 0);
         frame.unpin();
 
         printdbg!(
-            "{} frame {} unpinned, pin count: {}",
+            "{} page {page_id} (frame: {frame_id}) unpinned, pin count: {}",
             get_caller_name!(),
-            frame_id,
             frame.get_pin_count()
         );
 
@@ -243,7 +252,9 @@ impl BufferPoolManager {
             .unwrap()
             .insert(shadow_frame_id);
 
-        // pin original frame
+        // pin original frame to avoid eviction
+        // frames not created through bpm methods (fetch_frame, new_page) are not
+        // evictable by default (require access to be recorded)
         let original_frame = self.fetch_frame(page_id, None)?;
 
         Ok(original_frame)
@@ -261,7 +272,7 @@ impl BufferPoolManager {
 
         self.disk_manager.commit_txn(txn_id)?;
 
-        for shadow_frame_id in self.txn_table.remove(&txn_id).unwrap() {
+        for shadow_frame_id in self.txn_table.get(&txn_id).cloned().unwrap() {
             let shadow_frame = take(&mut self.frames[shadow_frame_id]);
 
             let shadow_page_id = shadow_frame.reader().get_page_id();
@@ -271,11 +282,14 @@ impl BufferPoolManager {
 
             old_frame.take_page(shadow_frame);
 
-            // unpin the original frame
+            // unpin the original
             self.unpin(&shadow_page_id, None);
 
+            self.replacer.remove(shadow_frame_id);
             self.free_frames.push_back(shadow_frame_id);
         }
+
+        self.txn_table.remove(&txn_id);
 
         Ok(())
     }
@@ -283,18 +297,23 @@ impl BufferPoolManager {
     pub fn rollback_txn(&mut self, txn_id: TxnId) -> Result<()> {
         self.disk_manager.rollback_txn(txn_id)?;
 
-        for frame_id in self
+        for shadow_frame_id in self
             .txn_table
-            .remove(&txn_id)
+            .get(&txn_id)
+            .cloned()
             .ok_or(anyhow!("Invalid txn id"))?
         {
-            let page_id = self.frames[frame_id].reader().get_page_id();
+            let _shadow_frame = take(&mut self.frames[shadow_frame_id]);
+            let page_id = self.frames[shadow_frame_id].reader().get_page_id();
 
             // unpin the original frame
             self.unpin(&page_id, None);
 
-            self.free_frames.push_back(frame_id);
+            self.replacer.remove(shadow_frame_id);
+            self.free_frames.push_back(shadow_frame_id);
         }
+
+        self.txn_table.remove(&txn_id);
 
         Ok(())
     }
