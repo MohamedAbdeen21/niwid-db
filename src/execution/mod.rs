@@ -83,11 +83,10 @@ impl Executable for Update {
             .ok_or_else(|| anyhow!("Column {} does not exist", selected_col))?;
 
         let selected_rows = input
-            .data
-            .iter()
+            .rows()
+            .into_iter()
             .enumerate()
-            .filter(|(i, _)| mask[*i].is_truthy())
-            .map(|(_, r)| r)
+            .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
             .collect::<Vec<_>>();
 
         for row in selected_rows {
@@ -164,11 +163,11 @@ impl Executable for Insert {
         let txn_id = ctx.get_active_txn();
         let input = self.input.execute(ctx)?;
 
-        if input.fields.len() != self.table_schema.fields.len() {
+        if input.fields().len() != self.table_schema.fields.len() {
             return Err(anyhow!("Column count mismatch"));
         }
 
-        for row in input.data {
+        for row in input.rows() {
             let tuple = Tuple::new(row, &self.schema);
 
             let _tuple_id = Catalog::get()
@@ -184,7 +183,9 @@ impl Executable for Insert {
 
 impl Executable for Explain {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
-        println!("Logical plan:\n{}", self.input.print());
+        let field = Field::new("Logical Plan", Types::Str, false);
+        let plan = value!(Str, self.input.print());
+        // println!("Logical plan:\n{}", self.input.print());
         // time the execution time
         if self.analyze {
             let start = std::time::Instant::now();
@@ -192,7 +193,7 @@ impl Executable for Explain {
             println!("Execution time: {:?}", start.elapsed());
             Ok(result)
         } else {
-            Ok(ResultSet::default())
+            Ok(ResultSet::from_col(field, vec![plan]))
         }
     }
 }
@@ -214,11 +215,11 @@ impl Executable for Filter {
         let mask = self.expr.evaluate(&input);
 
         let output = input
-            .data
+            .cols
             .into_iter()
-            .enumerate()
-            .filter(|(i, _)| mask[*i])
-            .map(|(_, r)| r)
+            .zip(mask)
+            .filter(|(_, mask)| *mask)
+            .map(|(col, _)| col)
             .collect::<Vec<_>>();
 
         Ok(ResultSet::new(input.fields, output))
@@ -230,27 +231,25 @@ impl LogicalExpr {
         let size = input.size();
         match self {
             LogicalExpr::Literal(ref c) => {
-                let input_schema = Schema::new(input.fields.clone());
+                let input_schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&input_schema);
                 let data = (0..size).map(|_| c.clone()).collect::<Vec<_>>();
                 (field, data)
             }
             LogicalExpr::Column(c) => {
-                let index = input.fields.iter().position(|col| col.name == *c).unwrap();
-                let data = (0..size)
-                    .map(|i| input.data[i][index].clone())
-                    .collect::<Vec<_>>();
-                (input.fields[index].clone(), data)
+                let fields = input.fields();
+                let index = fields.iter().position(|col| col.name == *c).unwrap();
+                (input.fields()[index].clone(), input.cols()[index].clone())
             }
             LogicalExpr::BinaryExpr(ref expr) => {
-                let schema = Schema::new(input.fields.clone());
+                let schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&schema);
                 (field, expr.evaluate(input))
             }
             LogicalExpr::AliasedExpr(ref expr, _) => {
                 let result = expr.clone().evaluate(input);
 
-                let schema = Schema::new(input.fields.clone());
+                let schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&schema);
 
                 (field, result.1)
@@ -274,32 +273,37 @@ impl BinaryExpr {
     pub(super) fn evaluate(&self, input: &ResultSet) -> Vec<Value> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
-                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
-                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
-                input
-                    .data
-                    .iter()
-                    .map(|row| self.eval_op(&row[index1], &row[index2]))
+                let fields = input.fields();
+                let index1 = fields.iter().position(|col| &col.name == c1).unwrap();
+                let index2 = fields.iter().position(|col| &col.name == c2).unwrap();
+                let col1 = &input.cols()[index1];
+                let col2 = &input.cols()[index2];
+                col1.iter()
+                    .zip(col2)
+                    .map(|(l, r)| self.eval_op(l, r))
                     .collect()
             }
-            (LogicalExpr::Literal(v1), LogicalExpr::Column(c2)) => {
-                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
-                input
-                    .data
+            (LogicalExpr::Literal(lit), LogicalExpr::Column(c2)) => {
+                let index = input
+                    .fields()
                     .iter()
-                    .map(|row| self.eval_op(v1, &row[index2]))
-                    .collect()
+                    .position(|col| &col.name == c2)
+                    .unwrap();
+                let col = &input.cols()[index];
+                col.iter().map(|val| self.eval_op(lit, val)).collect()
             }
-            (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
-                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
-                input
-                    .data
+            (LogicalExpr::Column(c1), LogicalExpr::Literal(lit)) => {
+                let index = input
+                    .fields()
                     .iter()
-                    .map(|row| self.eval_op(&row[index1], v2))
-                    .collect()
+                    .position(|col| &col.name == c1)
+                    .unwrap();
+                let col = &input.cols()[index];
+                col.iter().map(|val| self.eval_op(val, lit)).collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
-                input.data.iter().map(|_| self.eval_op(v1, v2)).collect()
+                let rows = input.size();
+                (0..rows).map(|_| self.eval_op(v1, v2)).collect()
             }
             (LogicalExpr::BinaryExpr(l), LogicalExpr::BinaryExpr(r)) => {
                 let left = l.evaluate(input);
@@ -314,21 +318,31 @@ impl BinaryExpr {
                 right.iter().map(|r| self.eval_op(value, r)).collect()
             }
             (LogicalExpr::Column(c), LogicalExpr::BinaryExpr(binary_expr)) => {
-                let index = input.fields.iter().position(|col| &col.name == c).unwrap();
+                let fields = input.fields();
+                let index = fields.iter().position(|col| &col.name == c).unwrap();
+                let left = &input.cols()[index];
+
                 let right = binary_expr.evaluate(input);
-                right
-                    .iter()
-                    .map(|r| self.eval_op(&input.data[0][index], r))
+
+                left.iter()
+                    .zip(right)
+                    .map(|(l, r)| self.eval_op(l, &r))
                     .collect()
             }
-            (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Literal(value)) => {
+            (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Literal(lit)) => {
                 let left = binary_expr.evaluate(input);
-                left.iter().map(|l| self.eval_op(l, value)).collect()
+                left.iter().map(|l| self.eval_op(l, lit)).collect()
             }
-            (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Column(_)) => {
+            (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Column(c)) => {
+                let fields = input.fields();
+                let index = fields.iter().position(|col| &col.name == c).unwrap();
+                let right = &input.cols()[index];
+
                 let left = binary_expr.evaluate(input);
+
                 left.iter()
-                    .map(|l| self.eval_op(l, &input.data[0][0]))
+                    .zip(right)
+                    .map(|(l, r)| self.eval_op(l, r))
                     .collect()
             }
             (LogicalExpr::AliasedExpr(expr, _), expr2)
@@ -360,29 +374,36 @@ impl BooleanBinaryExpr {
     fn evaluate(self, input: &ResultSet) -> Vec<bool> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
-                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
-                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
-                input
-                    .data
-                    .iter()
-                    .map(|row| self.eval_op(&row[index1], &row[index2]))
+                let fields = input.fields();
+                let index1 = fields.iter().position(|col| &col.name == c1).unwrap();
+                let index2 = fields.iter().position(|col| &col.name == c2).unwrap();
+
+                let left = &input.cols()[index1];
+                let right = &input.cols()[index2];
+
+                left.iter()
+                    .zip(right)
+                    .map(|(l, r)| self.eval_op(l, r))
                     .collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Column(c2)) => {
-                let index2 = input.fields.iter().position(|col| &col.name == c2).unwrap();
-                input
-                    .data
+                let index2 = input
+                    .fields()
                     .iter()
-                    .map(|row| self.eval_op(v1, &row[index2]))
-                    .collect()
+                    .position(|col| &col.name == c2)
+                    .unwrap();
+                let right = &input.cols()[index2];
+
+                right.iter().map(|r| self.eval_op(v1, r)).collect()
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
-                let index1 = input.fields.iter().position(|col| &col.name == c1).unwrap();
-                input
-                    .data
+                let index1 = input
+                    .fields()
                     .iter()
-                    .map(|row| self.eval_op(&row[index1], v2))
-                    .collect()
+                    .position(|col| &col.name == c1)
+                    .unwrap();
+                let left = &input.cols()[index1];
+                left.iter().map(|l| self.eval_op(l, v2)).collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
                 [self.eval_op(v1, v2)].repeat(input.size())
@@ -403,7 +424,6 @@ impl Executable for Projection {
         let output = self
             .projections
             .iter()
-            .cloned()
             .map(|p| p.evaluate(&input))
             .map(|(field, data)| ResultSet::from_col(field, data))
             .reduce(|a, b| a.concat(b))
@@ -422,7 +442,8 @@ impl Executable for Scan {
 
         let schema = table.get_schema();
 
-        let mut output = vec![];
+        let mut cols: Vec<Vec<Value>> = vec![vec![]; schema.fields.len() + 2];
+
         // TODO: pass the tuple_id as tuple for udpate to use
         // need to define a tuple type first though
         table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
@@ -433,18 +454,18 @@ impl Executable for Scan {
 
             values.extend(tuple.get_values(&schema)?);
 
-            let values = values
-                .into_iter()
-                .map(|v| {
-                    if matches!(v, Value::StrAddr(_)) {
-                        Value::Str(table.fetch_string(v.str_addr()))
-                    } else {
-                        v
-                    }
-                })
-                .collect();
+            let values = values.into_iter().map(|v| {
+                if matches!(v, Value::StrAddr(_)) {
+                    Value::Str(table.fetch_string(v.str_addr()))
+                } else {
+                    v
+                }
+            });
 
-            output.push(values);
+            values.enumerate().for_each(|(i, v)| {
+                cols[i].push(v);
+            });
+
             Ok(())
         })?;
 
@@ -455,6 +476,6 @@ impl Executable for Scan {
 
         fields.extend(schema.fields.clone());
 
-        Ok(ResultSet::new(fields, output))
+        Ok(ResultSet::new(fields, cols))
     }
 }

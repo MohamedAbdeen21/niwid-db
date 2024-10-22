@@ -1,37 +1,43 @@
 use crate::tuple::schema::Field;
 use crate::types::Value;
 
-// TODO: move to a column-based result set (replace data with cols)
 #[derive(Default, Debug)]
 pub struct ResultSet {
     pub fields: Vec<Field>,
-    pub data: Vec<Vec<Value>>,
-    cap: usize,
+    pub cols: Vec<Vec<Value>>, // Store data as columns
+    cap: usize,                // Capacity refers to the number of rows
 }
 
 impl ResultSet {
-    pub fn new(cols: Vec<Field>, data: Vec<Vec<Value>>) -> Self {
-        Self {
-            fields: cols,
-            cap: data.len(),
-            data,
-        }
+    pub fn new(fields: Vec<Field>, cols: Vec<Vec<Value>>) -> Self {
+        assert!(
+            cols.iter()
+                .map(|col| col.len())
+                .all(|len| len == cols[0].len()),
+            "Column length mismatch"
+        );
+
+        let cap = cols.first().map_or(0, Vec::len);
+        Self { fields, cap, cols }
+    }
+
+    pub fn fields(&self) -> &Vec<Field> {
+        &self.fields
     }
 
     pub fn from_col(field: Field, col: Vec<Value>) -> Self {
-        let rows: Vec<_> = col.into_iter().map(|value| vec![value]).collect();
-
+        let cap = col.len();
         Self {
             fields: vec![field],
-            cap: rows.len(),
-            data: rows,
+            cap,
+            cols: vec![col],
         }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             fields: Vec::with_capacity(capacity),
-            data: Vec::with_capacity(capacity),
+            cols: Vec::with_capacity(capacity),
             cap: capacity,
         }
     }
@@ -41,39 +47,43 @@ impl ResultSet {
     }
 
     pub fn union(mut self, other: ResultSet) -> Self {
-        if self.fields.iter().map(|c| c.ty.clone()).collect::<Vec<_>>()
+        // Ensure schema matches
+        if self.fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>()
             != other
                 .fields
                 .iter()
-                .map(|c| c.ty.clone())
+                .map(|f| f.ty.clone())
                 .collect::<Vec<_>>()
         {
             panic!("Schema mismatch");
         }
 
-        self.data.extend(other.data);
+        for (i, col) in other.cols.into_iter().enumerate() {
+            self.cols[i].extend(col);
+        }
+
+        self.cap = self.cols.first().map_or(0, Vec::len);
         self
     }
 
     pub fn concat(mut self, other: ResultSet) -> Self {
-        self.data
-            .iter_mut()
-            .zip(other.data)
-            .for_each(|(a, b)| a.extend(b));
-
-        let cols = self.fields.into_iter().chain(other.fields).collect();
-
-        Self {
-            fields: cols,
-            cap: self.data.len(),
-            data: self.data,
-        }
+        self.fields.extend(other.fields);
+        self.cols.extend(other.cols);
+        self
     }
 
-    pub fn data(&self) -> Vec<Vec<String>> {
-        self.data
-            .iter()
-            .map(|row| row.iter().map(|v| format!("{}", v)).collect::<Vec<_>>())
+    pub fn cols(&self) -> &Vec<Vec<Value>> {
+        &self.cols
+    }
+
+    pub fn rows(&self) -> Vec<Vec<Value>> {
+        (0..self.size())
+            .map(|i| {
+                self.cols()
+                    .iter()
+                    .map(|col| col[i].clone())
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>()
     }
 
@@ -84,10 +94,9 @@ impl ResultSet {
             .enumerate()
             .map(|(i, col)| {
                 let header_len = format!("{} ({})", col.name, col.ty.to_sql()).len();
-                let max_data_len = self
-                    .data
+                let max_data_len = self.cols[i]
                     .iter()
-                    .map(|row| format!("{}", row[i]).len())
+                    .map(|v| format!("{}", v).len())
                     .max()
                     .unwrap_or(0);
                 header_len.max(max_data_len)
@@ -107,9 +116,13 @@ impl ResultSet {
 
         print_row_divider(&col_widths);
 
-        for row in self.data.iter() {
-            for (i, value) in row.iter().enumerate() {
-                print!("| {:^width$} ", format!("{}", value), width = col_widths[i]);
+        for row_idx in 0..self.cap {
+            for (i, col) in self.cols.iter().enumerate() {
+                print!(
+                    "| {:^width$} ",
+                    format!("{}", col[row_idx]),
+                    width = col_widths[i]
+                );
             }
             println!("|");
 
