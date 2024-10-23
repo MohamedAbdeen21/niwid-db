@@ -39,7 +39,6 @@ impl Latch {
         unsafe { self.lock.raw().upgrade() }
     }
 
-    #[allow(unused)]
     pub fn release_upgradable(&self) {
         unsafe { self.lock.raw().unlock_upgradable() }
     }

@@ -112,7 +112,7 @@ impl TransactionManager {
                 .lock()
                 .fetch_frame(*page_id, None)?
                 .get_latch()
-                .wunlock();
+                .release_upgradable();
 
             self.bpm.lock().unpin(page_id, None);
         }

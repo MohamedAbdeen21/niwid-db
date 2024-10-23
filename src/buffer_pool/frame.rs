@@ -3,7 +3,10 @@ use std::sync::{
     Arc,
 };
 
-use crate::pages::{latch::Latch, Page, PageId};
+use crate::{
+    latch::Latch,
+    pages::{Page, PageId},
+};
 
 pub struct Frame {
     page: Page,

@@ -1,13 +1,11 @@
-pub mod latch;
 pub(crate) mod table_page;
 pub(crate) mod traits;
 
 use std::sync::Arc;
 
-use latch::Latch;
 use traits::Serialize;
 
-use crate::disk_manager::DiskWritable;
+use crate::{disk_manager::DiskWritable, latch::Latch};
 
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
 pub const INVALID_PAGE: PageId = 0;
