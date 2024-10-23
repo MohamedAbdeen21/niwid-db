@@ -3,6 +3,7 @@ use crate::types::Value;
 
 #[derive(Default, Debug)]
 pub struct ResultSet {
+    info: String,
     pub fields: Vec<Field>,
     pub cols: Vec<Vec<Value>>, // Store data as columns
     cap: usize,                // Capacity refers to the number of rows
@@ -18,7 +19,12 @@ impl ResultSet {
         );
 
         let cap = cols.first().map_or(0, Vec::len);
-        Self { fields, cap, cols }
+        Self {
+            fields,
+            cap,
+            cols,
+            info: String::new(),
+        }
     }
 
     pub fn fields(&self) -> &Vec<Field> {
@@ -29,8 +35,9 @@ impl ResultSet {
         let cap = col.len();
         Self {
             fields: vec![field],
-            cap,
             cols: vec![col],
+            cap,
+            info: String::new(),
         }
     }
 
@@ -39,7 +46,16 @@ impl ResultSet {
             fields: Vec::with_capacity(capacity),
             cols: Vec::with_capacity(capacity),
             cap: capacity,
+            info: String::new(),
         }
+    }
+
+    pub fn get_info(&self) -> &str {
+        &self.info
+    }
+
+    pub fn set_info(&mut self, info: String) {
+        self.info = info
     }
 
     pub fn size(&self) -> usize {
@@ -88,6 +104,10 @@ impl ResultSet {
     }
 
     pub fn show(&self) {
+        if !self.info.is_empty() {
+            println!("{}", self.info);
+            println!();
+        }
         let col_widths: Vec<usize> = self
             .fields
             .iter()

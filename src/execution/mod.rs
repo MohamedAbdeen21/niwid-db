@@ -9,9 +9,9 @@ use crate::sql::logical_plan::plan::{
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::Tuple;
+use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
-use crate::types::{Types, UInt};
 use crate::value;
 use anyhow::{anyhow, Result};
 use result_set::ResultSet;
@@ -96,10 +96,7 @@ impl Executable for Update {
         table.start_txn(txn_id)?;
 
         for row in selected_rows {
-            let tuple_id = match (&row[0], &row[1]) {
-                (Value::UInt(UInt(v)), Value::UInt(UInt(u))) => Some((*v, *u as usize)),
-                _ => unreachable!(),
-            };
+            let tuple_id = (row[0].u32(), row[1].u32() as usize);
 
             let mut new_tuple = row[2..].to_vec();
 
@@ -109,7 +106,7 @@ impl Executable for Update {
 
             let new_tuple = Tuple::new(new_tuple, &schema);
 
-            table.update(tuple_id, new_tuple)?;
+            table.update(Some(tuple_id), new_tuple)?;
         }
 
         table.commit_txn()?;
@@ -196,17 +193,23 @@ impl Executable for Insert {
 
 impl Executable for Explain {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
-        let field = Field::new("Logical Plan", Types::Str, false);
-        let plan = value!(Str, self.input.print());
+        let plan = self.input.print();
         // println!("Logical plan:\n{}", self.input.print());
         // time the execution time
         if self.analyze {
             let start = std::time::Instant::now();
-            let result = self.input.execute(ctx)?;
-            println!("Execution time: {:?}", start.elapsed());
+            let mut result = self.input.execute(ctx)?;
+            let info = format!(
+                "Execution time: {:?}\nLogical Plan:\n{}",
+                start.elapsed(),
+                plan
+            );
+            result.set_info(info);
             Ok(result)
         } else {
-            Ok(ResultSet::from_col(field, vec![plan]))
+            let mut empty = ResultSet::default();
+            empty.set_info(plan);
+            Ok(empty)
         }
     }
 }
