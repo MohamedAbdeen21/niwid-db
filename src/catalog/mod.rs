@@ -6,7 +6,7 @@ use crate::printdbg;
 use crate::table::Table;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
-use crate::txn_manager::TxnId;
+use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
@@ -22,7 +22,10 @@ pub const CATALOG_NAME: &str = "__CATALOG__";
 pub type ArcCatalog = Arc<Mutex<Catalog>>;
 
 lazy_static! {
-    static ref CATALOG: ArcCatalog = Arc::new(Mutex::new(Catalog::new(BufferPoolManager::get())));
+    static ref CATALOG: ArcCatalog = Arc::new(Mutex::new(Catalog::new(
+        BufferPoolManager::get(),
+        TransactionManager::get()
+    )));
 }
 
 // FIXME: Catalog is shared between contexts.
@@ -33,6 +36,8 @@ pub struct Catalog {
     pub tables: VersionedMap<String, (TupleId, Table)>, // TODO: handle ownership
     schema: Schema,                                     // A catalog is itself a table
     txn_tables: HashMap<TxnId, HashSet<String>>,
+    bpm: ArcBufferPool,
+    txn_manager: ArcTransactionManager,
 }
 
 impl Catalog {
@@ -52,6 +57,7 @@ impl Catalog {
 
     fn build_catalog(
         bpm: &mut ArcBufferPool,
+        txn_manager: &mut ArcTransactionManager,
         table: Table,
         schema: &Schema,
     ) -> VersionedMap<String, (TupleId, Table)> {
@@ -65,8 +71,15 @@ impl Catalog {
             let schema = table.fetch_string(values[3].str_addr());
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
-            let table = Table::fetch(bpm, name.clone(), &schema, first_page_id, last_page_id)
-                .expect("Fetch failed");
+            let table = Table::fetch(
+                bpm,
+                txn_manager,
+                name.clone(),
+                &schema,
+                first_page_id,
+                last_page_id,
+            )
+            .expect("Fetch failed");
 
             tables.insert(None, name, (*id, table));
 
@@ -83,8 +96,9 @@ impl Catalog {
     }
 
     #[allow(clippy::new_without_default)]
-    pub fn new(bpm: ArcBufferPool) -> Self {
+    pub fn new(bpm: ArcBufferPool, txn_manager: ArcTransactionManager) -> Self {
         let mut bpm = bpm.clone();
+        let mut txn_manager = txn_manager.clone();
 
         let schema = Schema::new(vec![
             Field::new("table_name", Types::Str, false),
@@ -95,6 +109,7 @@ impl Catalog {
 
         let table = Table::fetch(
             &mut bpm,
+            &mut txn_manager,
             CATALOG_NAME.to_string(),
             &schema,
             CATALOG_PAGE,
@@ -102,12 +117,14 @@ impl Catalog {
         )
         .expect("Catalog fetch failed");
 
-        let tables = Self::build_catalog(&mut bpm, table, &schema);
+        let tables = Self::build_catalog(&mut bpm, &mut txn_manager, table, &schema);
 
         Catalog {
             tables,
             schema,
             txn_tables: HashMap::new(),
+            bpm,
+            txn_manager,
         }
     }
 
@@ -125,7 +142,12 @@ impl Catalog {
             return Err(anyhow!("Table {} already exists", table_name));
         }
 
-        let mut table = Table::new(table_name.to_string(), schema)?;
+        let mut table = Table::new(
+            self.bpm.clone(),
+            self.txn_manager.clone(),
+            table_name.to_string(),
+            schema,
+        )?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
             ValueFactory::from_string(&Types::Str, &table_name),
@@ -239,7 +261,7 @@ impl Catalog {
 pub mod tests {
     use super::*;
 
-    pub fn test_arc_catalog(bpm: ArcBufferPool) -> ArcCatalog {
-        Arc::new(Mutex::new(Catalog::new(bpm)))
+    pub fn test_arc_catalog(bpm: ArcBufferPool, txn_manager: ArcTransactionManager) -> ArcCatalog {
+        Arc::new(Mutex::new(Catalog::new(bpm, txn_manager)))
     }
 }

@@ -32,6 +32,11 @@ impl Context {
         }
     }
 
+    #[cfg(test)]
+    fn clone_context(&self) -> Self {
+        Self::new(self.catalog.clone(), self.txn_manager.clone())
+    }
+
     pub fn get_catalog(&self) -> ArcCatalog {
         self.catalog.clone()
     }
@@ -112,8 +117,8 @@ mod tests {
 
     fn test_context() -> Context {
         let test_bpm = test_arc_bpm(50);
-        let test_catalog = test_arc_catalog(test_bpm.clone());
-        let test_txn_mngr = test_arc_transaction_manager(test_bpm);
+        let test_txn_mngr = test_arc_transaction_manager(test_bpm.clone());
+        let test_catalog = test_arc_catalog(test_bpm.clone(), test_txn_mngr.clone());
         Context::new(test_catalog, test_txn_mngr)
     }
 
@@ -156,6 +161,45 @@ mod tests {
         assert_eq!(result.rows()[0][1], value!(Int, *"2"));
         assert_eq!(result.rows()[1][0], value!(Int, *"3"));
         assert_eq!(result.rows()[1][1], value!(Int, *"4"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_isolation() -> Result<()> {
+        let mut ctx1 = test_context();
+        let mut ctx2 = ctx1.clone_context();
+
+        ctx1.execute_sql("BEGIN")?;
+        ctx1.execute_sql("CREATE TABLE test (a int, b int);")?;
+        ctx1.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
+
+        let result = ctx1.execute_sql("SELECT * FROM test;")?;
+
+        result.show();
+
+        let rows = result.rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], value!(Int, *"1"));
+        assert_eq!(rows[0][1], value!(Int, *"2"));
+        assert_eq!(rows[1][0], value!(Int, *"3"));
+        assert_eq!(rows[1][1], value!(Int, *"4"));
+
+        // doesn't exist for ctx2
+        assert!(ctx2.execute_sql("SELECT * FROM test").is_err());
+
+        ctx1.execute_sql("COMMIT")?;
+
+        let result = ctx2.execute_sql("SELECT * FROM test")?;
+
+        result.show();
+
+        let rows = result.rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], value!(Int, *"1"));
+        assert_eq!(rows[0][1], value!(Int, *"2"));
+        assert_eq!(rows[1][0], value!(Int, *"3"));
+        assert_eq!(rows[1][1], value!(Int, *"4"));
 
         Ok(())
     }

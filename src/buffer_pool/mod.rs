@@ -189,6 +189,8 @@ impl BufferPoolManager {
     pub fn unpin(&mut self, page_id: &PageId, txn_id: Option<TxnId>) {
         // touched pages are reset after commit/rollback so we ignore unpin commands on them
         // but pages that are read (not touched) should still be unpinned
+
+        // print self address
         if txn_id.is_some()
             && self
                 .txn_table
@@ -232,6 +234,7 @@ impl BufferPoolManager {
     }
 
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
+        printdbg!("Starting txn {txn_id}");
         // don't worry about atomicity, bpm is shared behind a mutex
         self.txn_table.insert(txn_id, HashSet::new());
 

@@ -1,11 +1,11 @@
-use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
+use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
 use crate::pages::PageId;
 use crate::printdbg;
 use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
-use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
+use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{Str, StrAddr, Types, ValueFactory};
 use anyhow::{anyhow, Result};
 
@@ -43,10 +43,12 @@ impl Table {
         }
     }
 
-    pub fn new(name: String, schema: &Schema) -> Result<Self> {
-        let bpm = BufferPoolManager::get();
-        let txn_manager = TransactionManager::get();
-
+    pub fn new(
+        bpm: ArcBufferPool,
+        txn_manager: ArcTransactionManager,
+        name: String,
+        schema: &Schema,
+    ) -> Result<Self> {
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
@@ -65,13 +67,12 @@ impl Table {
 
     pub fn fetch(
         bpm: &mut ArcBufferPool,
+        txn_manager: &mut ArcTransactionManager,
         name: String,
         schema: &Schema,
         first_page: PageId,
         last_page: PageId,
     ) -> Result<Self> {
-        let txn_manager = TransactionManager::get();
-
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
 
         Ok(Self {
@@ -80,7 +81,7 @@ impl Table {
             last_page,
             blob_page,
             bpm: bpm.clone(),
-            txn_manager,
+            txn_manager: txn_manager.clone(),
             active_txn: None,
             schema: schema.clone(),
         })
@@ -358,14 +359,12 @@ impl Table {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::buffer_pool::tests::test_arc_bpm;
     use crate::tuple::schema::{Field, Schema};
+    use crate::txn_manager::tests::test_arc_transaction_manager;
     use crate::types::*;
     use anyhow::Result;
-    use parking_lot::FairMutex;
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
         let bpm = test_arc_bpm(size);
@@ -376,7 +375,7 @@ mod tests {
 
         let blob_page = guard.new_page()?.reader().get_page_id();
 
-        let txn_manager = Arc::new(FairMutex::new(TransactionManager::new(bpm.clone())));
+        let txn_manager = test_arc_transaction_manager(bpm.clone());
 
         drop(guard);
 
