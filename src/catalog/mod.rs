@@ -128,6 +128,8 @@ impl Catalog {
         }
     }
 
+    // TODO: put catalog table into the txn too,
+    // ATM adding a table in a txn shows it in another txns catalog
     pub fn add_table(
         &mut self,
         table_name: String,
@@ -135,7 +137,7 @@ impl Catalog {
         ignore_if_exists: bool,
         txn: Option<TxnId>,
     ) -> Result<()> {
-        let exists = self.get_table_mut(&table_name, txn).is_some();
+        let exists = self.get_table(&table_name, txn).is_some();
         if exists && ignore_if_exists {
             return Ok(());
         } else if exists {
@@ -156,11 +158,17 @@ impl Catalog {
             ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);
-        let tuple_id = self.table().insert(tuple)?;
 
         if let Some(txn) = txn {
             table.start_txn(txn)?;
+            self.table().start_txn(txn)?;
+            self.txn_tables
+                .entry(txn)
+                .or_default()
+                .insert(CATALOG_NAME.to_string());
         }
+
+        let tuple_id = self.table().insert(tuple)?;
 
         self.tables
             .insert(txn, table_name.to_string(), (tuple_id, table));

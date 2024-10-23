@@ -57,17 +57,20 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
         match ctx.execute_sql(query) {
             Ok(result) => {
                 let info = result.get_info();
-                let data = result.rows();
 
                 if !info.is_empty() {
                     let _ = writer.write_all(format!("{}\n", info).as_bytes()).await;
                 }
 
-                printdbg!("Result: {:?}", data);
-                if data.is_empty() {
+                if result.is_empty() && info.is_empty() {
                     let _ = writer.write_all(b"Ok\n").await;
                 }
-                for row in data {
+
+                let rows = result.rows();
+
+                printdbg!("Result: {:?}", rows);
+
+                for row in rows {
                     let mut row_string = row
                         .iter()
                         .map(|v| format!("{}", v))

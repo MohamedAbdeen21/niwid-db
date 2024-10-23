@@ -256,7 +256,6 @@ mod tests {
         page.set_page_id(page_id);
         let mut table_page: TablePage = page.into();
 
-        // let dummy_schema = Schema::new(vec!["str"], vec![Types::Str]);
         let dummy_schema = Schema::new(vec![Field::new("str", Types::Str, false)]);
 
         let tuple = Tuple::new(

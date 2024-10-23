@@ -19,13 +19,7 @@ use crate::catalog::ArcCatalog;
 use crate::tuple::schema::Schema;
 use crate::txn_manager::TxnId;
 use crate::types::{Types, ValueFactory};
-
-#[macro_export]
-macro_rules! value {
-    ($t:ident, $s:expr) => {
-        ValueFactory::from_string(&Types::$t, &$s)
-    };
-}
+use crate::value;
 
 pub struct LogicalPlanBuilder {
     catalog: ArcCatalog,

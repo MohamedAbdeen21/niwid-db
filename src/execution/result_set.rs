@@ -58,8 +58,12 @@ impl ResultSet {
         self.info = info
     }
 
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.cap
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn union(mut self, other: ResultSet) -> Self {
@@ -93,7 +97,7 @@ impl ResultSet {
     }
 
     pub fn rows(&self) -> Vec<Vec<Value>> {
-        (0..self.size())
+        (0..self.len())
             .map(|i| {
                 self.cols()
                     .iter()

@@ -489,6 +489,13 @@ impl_display!(Bool);
 impl_display!(Str);
 impl_display!(Char);
 
+#[macro_export]
+macro_rules! value {
+    ($t:ident, $s:expr) => {
+        ValueFactory::from_string(&Types::$t, &$s)
+    };
+}
+
 pub struct ValueFactory {}
 
 impl ValueFactory {

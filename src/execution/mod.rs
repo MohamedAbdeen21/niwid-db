@@ -244,7 +244,7 @@ impl Executable for Filter {
 
 impl LogicalExpr {
     fn evaluate(&self, input: &ResultSet) -> (Field, Vec<Value>) {
-        let size = input.size();
+        let size = input.len();
         match self {
             LogicalExpr::Literal(ref c) => {
                 let input_schema = Schema::new(input.fields().clone());
@@ -318,7 +318,7 @@ impl BinaryExpr {
                 col.iter().map(|val| self.eval_op(val, lit)).collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
-                let rows = input.size();
+                let rows = input.len();
                 (0..rows).map(|_| self.eval_op(v1, v2)).collect()
             }
             (LogicalExpr::BinaryExpr(l), LogicalExpr::BinaryExpr(r)) => {
@@ -422,7 +422,7 @@ impl BooleanBinaryExpr {
                 left.iter().map(|l| self.eval_op(l, v2)).collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
-                [self.eval_op(v1, v2)].repeat(input.size())
+                [self.eval_op(v1, v2)].repeat(input.len())
             }
             e => todo!("{:?}", e),
         }

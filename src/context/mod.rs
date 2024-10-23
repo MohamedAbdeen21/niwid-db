@@ -115,6 +115,15 @@ mod tests {
     use crate::value;
     use anyhow::Result;
 
+    fn assert_result_sample(result: &ResultSet) {
+        let rows = result.rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], value!(Int, *"1"));
+        assert_eq!(rows[0][1], value!(Int, *"2"));
+        assert_eq!(rows[1][0], value!(Int, *"3"));
+        assert_eq!(rows[1][1], value!(Int, *"4"));
+    }
+
     fn test_context() -> Context {
         let test_bpm = test_arc_bpm(50);
         let test_txn_mngr = test_arc_transaction_manager(test_bpm.clone());
@@ -156,11 +165,7 @@ mod tests {
         ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4)")?;
         let result = ctx.execute_sql("SELECT * FROM test")?;
 
-        assert_eq!(result.rows().len(), 2);
-        assert_eq!(result.rows()[0][0], value!(Int, *"1"));
-        assert_eq!(result.rows()[0][1], value!(Int, *"2"));
-        assert_eq!(result.rows()[1][0], value!(Int, *"3"));
-        assert_eq!(result.rows()[1][1], value!(Int, *"4"));
+        assert_result_sample(&result);
 
         Ok(())
     }
@@ -172,34 +177,44 @@ mod tests {
 
         ctx1.execute_sql("BEGIN")?;
         ctx1.execute_sql("CREATE TABLE test (a int, b int);")?;
+        let catalog = ctx1.execute_sql("SELECT * FROM __CATALOG__")?;
+        assert!(!catalog.is_empty()); // TODO: Check actual values
         ctx1.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
 
         let result = ctx1.execute_sql("SELECT * FROM test;")?;
 
-        result.show();
-
-        let rows = result.rows();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, *"1"));
-        assert_eq!(rows[0][1], value!(Int, *"2"));
-        assert_eq!(rows[1][0], value!(Int, *"3"));
-        assert_eq!(rows[1][1], value!(Int, *"4"));
+        assert_result_sample(&result);
 
         // doesn't exist for ctx2
         assert!(ctx2.execute_sql("SELECT * FROM test").is_err());
+        let catalog = ctx2.execute_sql("SELECT * FROM __CATALOG__")?;
+        assert!(catalog.is_empty());
 
         ctx1.execute_sql("COMMIT")?;
 
         let result = ctx2.execute_sql("SELECT * FROM test")?;
 
-        result.show();
+        assert_result_sample(&result);
 
-        let rows = result.rows();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, *"1"));
-        assert_eq!(rows[0][1], value!(Int, *"2"));
-        assert_eq!(rows[1][0], value!(Int, *"3"));
-        assert_eq!(rows[1][1], value!(Int, *"4"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_txn_rollback() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("BEGIN")?;
+        ctx.execute_sql("CREATE TABLE test (a int, b int);")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
+        let result = ctx.execute_sql("SELECT * FROM test;")?;
+
+        assert_result_sample(&result);
+
+        ctx.execute_sql("ROLLBACK")?;
+
+        // create was rolled back, so table should be not found
+        assert!(ctx.execute_sql("SELECT * FROM test;").is_err());
+        let catalog = ctx.execute_sql("SELECT * FROM __CATALOG__")?;
+        assert!(catalog.is_empty());
 
         Ok(())
     }
