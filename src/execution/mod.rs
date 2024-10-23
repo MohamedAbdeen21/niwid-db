@@ -89,6 +89,13 @@ impl Executable for Update {
             .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
             .collect::<Vec<_>>();
 
+        let (txn_id, is_temp) = match txn_id {
+            Some(id) => (id, false),
+            None => (ctx.start_txn()?, true),
+        };
+
+        table.start_txn(txn_id)?;
+
         for row in selected_rows {
             let tuple_id = match (&row[0], &row[1]) {
                 (Value::UInt(UInt(v)), Value::UInt(UInt(u))) => Some((*v, *u as usize)),
@@ -104,6 +111,11 @@ impl Executable for Update {
             let new_tuple = Tuple::new(new_tuple, &schema);
 
             table.update(tuple_id, new_tuple)?;
+        }
+
+        table.commit_txn()?;
+        if is_temp {
+            ctx.commit_txn()?;
         }
 
         Ok(ResultSet::default())

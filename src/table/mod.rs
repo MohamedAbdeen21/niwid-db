@@ -332,16 +332,16 @@ impl Table {
     }
 
     pub fn update(&mut self, tuple_id: Option<TupleId>, new_tuple: Tuple) -> Result<TupleId> {
+        if self.active_txn.is_none() {
+            panic!("Table: No active transaction");
+        }
+
         match tuple_id {
             None => todo!(),
             Some(id) => self.delete(id)?,
         }
 
         let tuple_id = self.insert(new_tuple)?;
-
-        if self.active_txn.is_none() {
-            self.bpm.lock().flush(Some(self.last_page))?;
-        }
 
         Ok(tuple_id)
     }

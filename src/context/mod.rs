@@ -33,15 +33,15 @@ impl Context {
         self.active_txn
     }
 
-    pub fn start_txn(&mut self) -> Result<()> {
-        if self.active_txn.is_some() {
-            return Ok(());
+    pub fn start_txn(&mut self) -> Result<TxnId> {
+        if let Some(id) = self.active_txn {
+            return Ok(id);
         }
 
         let id = self.txn_manager.lock().start()?;
         self.active_txn = Some(id);
 
-        Ok(())
+        Ok(id)
     }
 
     pub fn commit_txn(&mut self) -> Result<()> {

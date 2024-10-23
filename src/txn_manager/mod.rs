@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{anyhow, Result};
@@ -10,7 +11,7 @@ use crate::pages::PageId;
 pub type TxnId = u64;
 
 pub struct TransactionManager {
-    next_txn_id: TxnId,
+    next_txn_id: AtomicU64,
     bpm: ArcBufferPool,
     locked_pages: HashMap<TxnId, Vec<PageId>>,
 }
@@ -28,15 +29,14 @@ impl TransactionManager {
 
     pub fn new() -> Self {
         Self {
-            next_txn_id: 0,
+            next_txn_id: AtomicU64::new(0),
             bpm: BufferPoolManager::get(),
             locked_pages: HashMap::new(),
         }
     }
 
     pub fn start(&mut self) -> Result<TxnId> {
-        let id = self.next_txn_id;
-        self.next_txn_id += 1;
+        let id = self.next_txn_id.fetch_add(1, Ordering::Relaxed);
 
         self.bpm.lock().start_txn(id)?;
         self.locked_pages.insert(id, vec![]);
