@@ -105,15 +105,58 @@ mod tests {
     use crate::buffer_pool::tests::test_arc_bpm;
     use crate::catalog::tests::test_arc_catalog;
     use crate::txn_manager::tests::test_arc_transaction_manager;
+    use crate::types::Types;
+    use crate::types::ValueFactory;
+    use crate::value;
     use anyhow::Result;
 
-    #[test]
-    fn test_context() -> Result<()> {
+    fn test_context() -> Context {
         let test_bpm = test_arc_bpm(50);
         let test_catalog = test_arc_catalog(test_bpm.clone());
         let test_txn_mngr = test_arc_transaction_manager(test_bpm);
-        let mut ctx = Context::new(test_catalog, test_txn_mngr);
-        ctx.execute_sql("CREATE TABLE t (a int, b int)")?;
+        Context::new(test_catalog, test_txn_mngr)
+    }
+
+    #[test]
+    fn test_single_txn_per_context() -> Result<()> {
+        let mut ctx = test_context();
+        let id = ctx.start_txn()?;
+
+        assert_eq!(id, ctx.start_txn()?);
+
+        ctx.commit_txn()?;
+
+        assert_ne!(id, ctx.start_txn()?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_manage_txns_with_sql() -> Result<()> {
+        let first_txn_id = 0;
+
+        let mut ctx = test_context();
+        ctx.execute_sql("begin")?;
+        assert_eq!(ctx.start_txn()?, first_txn_id);
+        ctx.execute_sql("commit")?;
+        assert_ne!(ctx.start_txn()?, first_txn_id);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_simple_sql() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("CREATE TABLE test (a int, b int)")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4)")?;
+        let result = ctx.execute_sql("SELECT * FROM test")?;
+
+        assert_eq!(result.rows().len(), 2);
+        assert_eq!(result.rows()[0][0], value!(Int, *"1"));
+        assert_eq!(result.rows()[0][1], value!(Int, *"2"));
+        assert_eq!(result.rows()[1][0], value!(Int, *"3"));
+        assert_eq!(result.rows()[1][1], value!(Int, *"4"));
+
         Ok(())
     }
 }

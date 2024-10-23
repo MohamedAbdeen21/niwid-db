@@ -1,7 +1,7 @@
 use parking_lot::lock_api::{RawRwLock, RawRwLockUpgrade};
 use parking_lot::{RwLock, RwLockReadGuard};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Latch {
     lock: RwLock<()>,
 }

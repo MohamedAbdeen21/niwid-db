@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct VersionedMap<K, V> {
     /// Base version of the data
     base: HashMap<K, V>,

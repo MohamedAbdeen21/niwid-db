@@ -169,28 +169,13 @@ impl LogicalPlanBuilder {
         Ok(LogicalPlan::Explain(Box::new(Explain::new(root, analyze))))
     }
 
-    fn build_expr(&self, expr: Expr) -> Result<LogicalExpr> {
-        match expr {
-            Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
-            Expr::Value(SqlValue::SingleQuotedString(s)) => {
-                Ok(LogicalExpr::Literal(value!(Str, s)))
-            }
-            Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value)),
-            Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
-                BinaryExpr::new(self.build_expr(*left)?, op, self.build_expr(*right)?),
-            ))),
-            Expr::Nested(e) => self.build_expr(*e),
-            e => todo!("{:?}", e),
-        }
-    }
-
     fn build_values(&self, rows: Vec<Vec<Expr>>) -> Result<LogicalPlan> {
         let rows = rows
             .into_iter()
             .map(|row| {
                 row.into_iter()
                     .map(|expr| match expr {
-                        Expr::Value(_) => self.build_expr(expr),
+                        Expr::Value(_) => build_expr(expr),
                         e => todo!("{}", e),
                     })
                     .collect::<Result<Vec<_>>>()
@@ -276,7 +261,7 @@ impl LogicalPlanBuilder {
         };
 
         let filter = match selection {
-            Some(expr) => self.build_expr(expr)?,
+            Some(expr) => build_expr(expr)?,
             None => LogicalExpr::Literal(value!(Bool, "true".to_string())),
         };
 
@@ -317,7 +302,7 @@ impl LogicalPlanBuilder {
             AssignmentTarget::Tuple(_) => todo!(),
         };
 
-        Ok((col, self.build_expr(value)?))
+        Ok((col, build_expr(value)?))
     }
 
     fn build_create(
@@ -427,11 +412,11 @@ impl LogicalPlanBuilder {
                     })
                     .collect(),
                 SelectItem::UnnamedExpr(Expr::BinaryOp { left, right, op }) => {
-                    let left = match self.build_expr(*left.clone()) {
+                    let left = match build_expr(*left.clone()) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
-                    let right = match self.build_expr(*right.clone()) {
+                    let right = match build_expr(*right.clone()) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
@@ -442,7 +427,7 @@ impl LogicalPlanBuilder {
                     ))))]
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    let expr = match self.build_expr(expr.clone()) {
+                    let expr = match build_expr(expr.clone()) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
@@ -509,5 +494,20 @@ impl From<Expr> for LogicalExpr {
 impl From<bool> for LogicalExpr {
     fn from(b: bool) -> LogicalExpr {
         LogicalExpr::Literal(value!(Bool, b.to_string()))
+    }
+}
+
+// moved outside the impl to satisfy Clippy
+// https://rust-lang.github.io/rust-clippy/master/index.html#only_used_in_recursion
+fn build_expr(expr: Expr) -> Result<LogicalExpr> {
+    match expr {
+        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
+        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, s))),
+        Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value)),
+        Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
+            BinaryExpr::new(build_expr(*left)?, op, build_expr(*right)?),
+        ))),
+        Expr::Nested(e) => build_expr(*e),
+        e => todo!("{:?}", e),
     }
 }
