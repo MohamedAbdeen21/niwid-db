@@ -19,7 +19,9 @@ pub struct TransactionManager {
 pub type ArcTransactionManager = Arc<FairMutex<TransactionManager>>;
 
 lazy_static! {
-    static ref TM: ArcTransactionManager = Arc::new(FairMutex::new(TransactionManager::new()));
+    static ref TM: ArcTransactionManager = Arc::new(FairMutex::new(TransactionManager::new(
+        BufferPoolManager::get()
+    )));
 }
 
 impl TransactionManager {
@@ -27,10 +29,10 @@ impl TransactionManager {
         TM.clone()
     }
 
-    pub fn new() -> Self {
+    pub fn new(bpm: ArcBufferPool) -> Self {
         Self {
             next_txn_id: AtomicU64::new(0),
-            bpm: BufferPoolManager::get(),
+            bpm,
             locked_pages: HashMap::new(),
         }
     }
@@ -111,9 +113,19 @@ impl TransactionManager {
                 .fetch_frame(*page_id, None)?
                 .get_latch()
                 .wunlock();
+
             self.bpm.lock().unpin(page_id, None);
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub fn test_arc_transaction_manager(bpm: ArcBufferPool) -> ArcTransactionManager {
+        Arc::new(FairMutex::new(TransactionManager::new(bpm)))
     }
 }

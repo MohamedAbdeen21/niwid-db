@@ -1,5 +1,6 @@
 mod versioned_map;
 
+use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
 use crate::pages::PageId;
 use crate::printdbg;
 use crate::table::Table;
@@ -21,7 +22,7 @@ pub const CATALOG_NAME: &str = "__CATALOG__";
 pub type ArcCatalog = Arc<Mutex<Catalog>>;
 
 lazy_static! {
-    static ref CATALOG: ArcCatalog = Arc::new(Mutex::new(Catalog::new()));
+    static ref CATALOG: ArcCatalog = Arc::new(Mutex::new(Catalog::new(BufferPoolManager::get())));
 }
 
 // FIXME: Catalog is shared between contexts.
@@ -49,7 +50,11 @@ impl Catalog {
             .unwrap()
     }
 
-    fn build_catalog(table: Table, schema: &Schema) -> VersionedMap<String, (TupleId, Table)> {
+    fn build_catalog(
+        bpm: &mut ArcBufferPool,
+        table: Table,
+        schema: &Schema,
+    ) -> VersionedMap<String, (TupleId, Table)> {
         let mut tables = VersionedMap::new();
 
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
@@ -60,7 +65,7 @@ impl Catalog {
             let schema = table.fetch_string(values[3].str_addr());
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
-            let table = Table::fetch(name.clone(), &schema, first_page_id, last_page_id)
+            let table = Table::fetch(bpm, name.clone(), &schema, first_page_id, last_page_id)
                 .expect("Fetch failed");
 
             tables.insert(None, name, (*id, table));
@@ -78,7 +83,9 @@ impl Catalog {
     }
 
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub fn new(bpm: ArcBufferPool) -> Self {
+        let mut bpm = bpm.clone();
+
         let schema = Schema::new(vec![
             Field::new("table_name", Types::Str, false),
             Field::new("first_page", Types::UInt, false),
@@ -87,6 +94,7 @@ impl Catalog {
         ]);
 
         let table = Table::fetch(
+            &mut bpm,
             CATALOG_NAME.to_string(),
             &schema,
             CATALOG_PAGE,
@@ -94,7 +102,7 @@ impl Catalog {
         )
         .expect("Catalog fetch failed");
 
-        let tables = Self::build_catalog(table, &schema);
+        let tables = Self::build_catalog(&mut bpm, table, &schema);
 
         Catalog {
             tables,
@@ -224,5 +232,14 @@ impl Catalog {
         self.tables.remove(txn, &table_name);
 
         Some(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub fn test_arc_catalog(bpm: ArcBufferPool) -> ArcCatalog {
+        Arc::new(Mutex::new(Catalog::new(bpm)))
     }
 }

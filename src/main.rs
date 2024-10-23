@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_client(socket: TcpStream, client_id: usize) {
-    let mut ctx = Context::new();
+    let mut ctx = Context::default();
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
     let mut buffer = String::new();

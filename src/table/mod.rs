@@ -64,12 +64,12 @@ impl Table {
     }
 
     pub fn fetch(
+        bpm: &mut ArcBufferPool,
         name: String,
         schema: &Schema,
         first_page: PageId,
         last_page: PageId,
     ) -> Result<Self> {
-        let bpm = BufferPoolManager::get();
         let txn_manager = TransactionManager::get();
 
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
@@ -79,7 +79,7 @@ impl Table {
             first_page,
             last_page,
             blob_page,
-            bpm,
+            bpm: bpm.clone(),
             txn_manager,
             active_txn: None,
             schema: schema.clone(),
@@ -361,15 +361,14 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::disk_manager::test_path;
+    use crate::buffer_pool::tests::test_arc_bpm;
     use crate::tuple::schema::{Field, Schema};
     use crate::types::*;
     use anyhow::Result;
     use parking_lot::FairMutex;
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
-        let path = test_path();
-        let bpm = Arc::new(FairMutex::new(BufferPoolManager::new(size, &path)));
+        let bpm = test_arc_bpm(size);
 
         let mut guard = bpm.lock();
 
@@ -377,7 +376,7 @@ mod tests {
 
         let blob_page = guard.new_page()?.reader().get_page_id();
 
-        let txn_manager = Arc::new(FairMutex::new(TransactionManager::new()));
+        let txn_manager = Arc::new(FairMutex::new(TransactionManager::new(bpm.clone())));
 
         drop(guard);
 

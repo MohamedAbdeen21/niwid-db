@@ -1,6 +1,5 @@
 pub mod result_set;
 
-use crate::catalog::Catalog;
 use crate::context::Context;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
@@ -21,7 +20,7 @@ use sqlparser::ast::BinaryOperator;
 pub trait Executable {
     /// Context is passed for client controls like
     /// start/commit/rollback transactions, most other
-    /// plans only need access to the active_txn id field, not the whole context
+    /// plans only need access to the active_txn id field or catalog, not the whole context
     /// I'm aware that I can pass an Option<Context> and Option<TxnId> to each plan
     /// and None to other plans, but that would make the API too ugly
     fn execute(self, ctx: &mut Context) -> Result<ResultSet>;
@@ -63,7 +62,7 @@ impl Executable for Update {
 
         let input = self.input.execute(ctx)?;
 
-        let c = Catalog::get();
+        let c = ctx.get_catalog();
         let mut catalog = c.lock();
 
         let table = catalog
@@ -125,7 +124,7 @@ impl Executable for Update {
 impl Executable for Truncate {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
-        Catalog::get()
+        ctx.get_catalog()
             .lock()
             .truncate_table(self.table_name, txn_id)?;
 
@@ -137,7 +136,8 @@ impl Executable for DropTables {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         for table_name in self.table_names {
-            if Catalog::get()
+            if ctx
+                .get_catalog()
                 .lock()
                 .drop_table(table_name.clone(), self.if_exists, txn_id)
                 .is_none()
@@ -182,7 +182,8 @@ impl Executable for Insert {
         for row in input.rows() {
             let tuple = Tuple::new(row, &self.schema);
 
-            let _tuple_id = Catalog::get()
+            let _tuple_id = ctx
+                .get_catalog()
                 .lock()
                 .get_table_mut(&self.table_name, txn_id)
                 .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??
@@ -213,7 +214,7 @@ impl Executable for Explain {
 impl Executable for CreateTable {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
-        let catalog = Catalog::get();
+        let catalog = ctx.get_catalog();
         catalog
             .lock()
             .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
@@ -448,7 +449,7 @@ impl Executable for Projection {
 impl Executable for Scan {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
-        let arc_catalog = Catalog::get();
+        let arc_catalog = ctx.get_catalog();
         let mut catalog = arc_catalog.lock();
         let table = catalog.get_table(&self.table_name, txn_id).unwrap();
 

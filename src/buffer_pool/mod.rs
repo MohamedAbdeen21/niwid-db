@@ -187,8 +187,6 @@ impl BufferPoolManager {
     }
 
     pub fn unpin(&mut self, page_id: &PageId, txn_id: Option<TxnId>) {
-        let frame_id = self.page_table[page_id];
-
         // touched pages are reset after commit/rollback so we ignore unpin commands on them
         // but pages that are read (not touched) should still be unpinned
         if txn_id.is_some()
@@ -201,6 +199,10 @@ impl BufferPoolManager {
         {
             return;
         }
+
+        printdbg!("{} Unpinning page {page_id}", get_caller_name!());
+
+        let frame_id = self.page_table[page_id];
 
         printdbg!(
             "{} Unpinning page {page_id} (frame: {frame_id})",
@@ -303,8 +305,8 @@ impl BufferPoolManager {
             .cloned()
             .ok_or(anyhow!("Invalid txn id"))?
         {
-            let _shadow_frame = take(&mut self.frames[shadow_frame_id]);
-            let page_id = self.frames[shadow_frame_id].reader().get_page_id();
+            let shadow_frame = take(&mut self.frames[shadow_frame_id]);
+            let page_id = shadow_frame.get_page_id();
 
             // unpin the original frame
             self.unpin(&page_id, None);
@@ -349,13 +351,21 @@ lazy_static! {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::{
         disk_manager::test_path,
         pages::table_page::{TablePage, PAGE_END},
     };
     use anyhow::Result;
+
+    fn test_bpm(size: usize, path: &str) -> BufferPoolManager {
+        BufferPoolManager::new(size, path)
+    }
+
+    pub fn test_arc_bpm(size: usize) -> ArcBufferPool {
+        Arc::new(FairMutex::new(test_bpm(size, &test_path())))
+    }
 
     fn cleanup(bpm: BufferPoolManager, path: &str) -> Result<()> {
         drop(bpm);
@@ -367,7 +377,7 @@ mod tests {
     fn test_dont_evict_pinned() -> Result<()> {
         let path = test_path();
 
-        let mut bpm = BufferPoolManager::new(2, &path);
+        let mut bpm = test_bpm(2, &path);
 
         let p1 = bpm.new_page()?.reader().get_page_id();
         let p2 = bpm.new_page()?.reader().get_page_id();
@@ -395,7 +405,7 @@ mod tests {
     fn test_shared_latch() -> Result<()> {
         let path = test_path();
 
-        let mut bpm = BufferPoolManager::new(2, &path);
+        let mut bpm = test_bpm(2, &path);
 
         let frame = bpm.new_page()?;
         let page = frame.reader();
@@ -420,7 +430,7 @@ mod tests {
     fn test_shadow_pages() -> Result<()> {
         let path = test_path();
 
-        let mut bpm = BufferPoolManager::new(2, &path);
+        let mut bpm = test_bpm(2, &path);
 
         let txn_id = 1;
 
