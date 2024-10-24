@@ -276,7 +276,11 @@ impl LogicalPlanBuilder {
 
         if !schema.fields.iter().any(|f| *f.name == assignments.0) {
             return if schema.is_qualified() {
-                Err(anyhow!("Ambigious column name: {}", assignments.0))
+                Err(anyhow!(
+                    "Please use qualified column names {}.{}",
+                    table_name,
+                    assignments.0
+                ))
             } else {
                 Err(anyhow!(
                     "Column {} does not exist in table {}",
