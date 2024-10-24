@@ -1,10 +1,12 @@
-use crate::tuple::schema::Field;
+use std::mem::take;
+
+use crate::tuple::schema::{Field, Schema};
 use crate::types::Value;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct ResultSet {
     info: String,
-    pub fields: Vec<Field>,
+    pub schema: Schema,
     pub cols: Vec<Vec<Value>>, // Store data as columns
     cap: usize,                // Capacity refers to the number of rows
 }
@@ -18,9 +20,11 @@ impl ResultSet {
             "Column length mismatch"
         );
 
+        let schema = Schema::new(fields);
+
         let cap = cols.first().map_or(0, Vec::len);
         Self {
-            fields,
+            schema,
             cap,
             cols,
             info: String::new(),
@@ -28,26 +32,39 @@ impl ResultSet {
     }
 
     pub fn fields(&self) -> &Vec<Field> {
-        &self.fields
+        &self.schema.fields
     }
 
-    pub fn from_col(field: Field, col: Vec<Value>) -> Self {
-        let cap = col.len();
+    pub fn from_rows(fields: Vec<Field>, rows: Vec<Vec<Value>>) -> Self {
+        let cols = (0..fields.len())
+            .map(|i| rows.iter().map(|row| row[i].clone()).collect())
+            .collect();
+
+        let schema = Schema::new(fields);
+
         Self {
-            fields: vec![field],
-            cols: vec![col],
-            cap,
+            schema,
+            cols,
+            cap: rows.len(),
             info: String::new(),
         }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            fields: Vec::with_capacity(capacity),
+            schema: Schema::new(Vec::with_capacity(capacity)),
             cols: Vec::with_capacity(capacity),
             cap: capacity,
             info: String::new(),
         }
+    }
+
+    pub fn from_tuple(field: Vec<Field>, tuple: Vec<Value>, cap: usize) -> Self {
+        let cols = (0..field.len())
+            .map(|i| (0..cap).map(|_| tuple[i].clone()).collect())
+            .collect();
+
+        Self::new(field, cols)
     }
 
     pub fn get_info(&self) -> &str {
@@ -67,10 +84,13 @@ impl ResultSet {
     }
 
     pub fn union(mut self, other: ResultSet) -> Self {
-        // Ensure schema matches
-        if self.fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>()
+        if self
+            .fields()
+            .iter()
+            .map(|f| f.ty.clone())
+            .collect::<Vec<_>>()
             != other
-                .fields
+                .fields()
                 .iter()
                 .map(|f| f.ty.clone())
                 .collect::<Vec<_>>()
@@ -86,8 +106,25 @@ impl ResultSet {
         self
     }
 
+    pub fn select(mut self, indexes: Vec<usize>) -> Self {
+        self.schema = Schema::new(
+            indexes
+                .iter()
+                .map(|i| take(&mut self.schema.fields[*i]))
+                .collect(),
+        );
+        self.cols = indexes.iter().map(|i| take(&mut self.cols[*i])).collect();
+        self
+    }
+
     pub fn concat(mut self, other: ResultSet) -> Self {
-        self.fields.extend(other.fields);
+        self.schema = Schema::new(
+            self.schema
+                .fields
+                .into_iter()
+                .chain(other.schema.fields)
+                .collect(),
+        );
         self.cols.extend(other.cols);
         self
     }
@@ -113,7 +150,7 @@ impl ResultSet {
             println!();
         }
         let col_widths: Vec<usize> = self
-            .fields
+            .fields()
             .iter()
             .enumerate()
             .map(|(i, col)| {
@@ -129,7 +166,7 @@ impl ResultSet {
 
         print_row_divider(&col_widths);
 
-        for (i, col) in self.fields.iter().enumerate() {
+        for (i, col) in self.fields().iter().enumerate() {
             print!(
                 "| {:^width$} ",
                 format!("{} ({})", col.name, col.ty.to_sql()),

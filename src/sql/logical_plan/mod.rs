@@ -4,13 +4,14 @@ pub mod plan;
 
 use expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use plan::{
-    CreateTable, DropTables, Explain, Filter, Insert, LogicalPlan, Projection, Scan, Truncate,
-    Update, Values,
+    CreateTable, DropTables, Explain, Filter, Insert, Join, LogicalPlan, Projection, Scan,
+    Truncate, Update, Values,
 };
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr,
-    Ident, Insert as SqlInsert, ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement,
-    TableFactor, TableWithJoins, TruncateTableTarget, Value as SqlValue, Values as SqlValues,
+    Ident, Insert as SqlInsert, Join as SqlJoin, JoinConstraint, JoinOperator, ObjectName,
+    ObjectType, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
+    TruncateTableTarget, Value as SqlValue, Values as SqlValues,
 };
 
 use anyhow::{anyhow, Result};
@@ -169,7 +170,7 @@ impl LogicalPlanBuilder {
             .map(|row| {
                 row.into_iter()
                     .map(|expr| match expr {
-                        Expr::Value(_) => build_expr(expr),
+                        Expr::Value(_) => build_expr(&expr),
                         e => todo!("{}", e),
                     })
                     .collect::<Result<Vec<_>>>()
@@ -243,6 +244,7 @@ impl LogicalPlanBuilder {
 
         Ok(root)
     }
+
     fn build_update(
         &self,
         table: TableWithJoins,
@@ -255,7 +257,7 @@ impl LogicalPlanBuilder {
         };
 
         let filter = match selection {
-            Some(expr) => build_expr(expr)?,
+            Some(expr) => build_expr(&expr)?,
             None => LogicalExpr::Literal(value!(Bool, "true".to_string())),
         };
 
@@ -273,11 +275,15 @@ impl LogicalPlanBuilder {
             .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
 
         if !schema.fields.iter().any(|f| *f.name == assignments.0) {
-            return Err(anyhow!(
-                "Column {} does not exist in table {}",
-                assignments.0,
-                table_name
-            ));
+            return if schema.is_qualified() {
+                Err(anyhow!("Ambigious column name: {}", assignments.0))
+            } else {
+                Err(anyhow!(
+                    "Column {} does not exist in table {}",
+                    assignments.0,
+                    table_name
+                ))
+            };
         }
 
         let root = LogicalPlan::Scan(Scan::new(table_name.clone(), schema));
@@ -296,7 +302,7 @@ impl LogicalPlanBuilder {
             AssignmentTarget::Tuple(_) => todo!(),
         };
 
-        Ok((col, build_expr(value)?))
+        Ok((col, build_expr(&value)?))
     }
 
     fn build_create(
@@ -317,6 +323,86 @@ impl LogicalPlanBuilder {
         Ok(LogicalPlan::CreateTable(Box::new(create)))
     }
 
+    fn build_source(
+        &self,
+        table: Option<&TableWithJoins>,
+        txn_id: Option<TxnId>,
+    ) -> Result<LogicalPlan> {
+        match &table {
+            None => Ok(LogicalPlan::Empty),
+            Some(TableWithJoins { relation, joins }) => {
+                let left_name = match relation {
+                    TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
+                    _ => todo!(),
+                };
+
+                if joins.len() > 1 {
+                    unimplemented!("Multiple joins not supported");
+                }
+
+                let mut left_schema = self
+                    .catalog
+                    .lock()
+                    .get_schema(&left_name, txn_id)
+                    .ok_or(anyhow!("Table {} does not exist", left_name))?;
+
+                let root = LogicalPlan::Scan(Scan::new(left_name.clone(), left_schema.clone()));
+
+                let root = match &joins.first() {
+                    Some(SqlJoin {
+                        relation,
+                        join_operator,
+                        ..
+                    }) => match relation {
+                        TableFactor::Table { name, .. } => {
+                            let right_name = name.0.first().unwrap().value.clone();
+                            let mut right_schema = self
+                                .catalog
+                                .lock()
+                                .get_schema(&right_name, txn_id)
+                                .ok_or(anyhow!("Table {} does not exist", right_name))?;
+
+                            let right_scan = LogicalPlan::Scan(Scan::new(
+                                right_name.clone(),
+                                right_schema.clone(),
+                            ));
+                            let operator = match join_operator {
+                                JoinOperator::Inner(e) => match e {
+                                    JoinConstraint::On(expr) => match build_expr(expr)? {
+                                        LogicalExpr::BinaryExpr(expr) => expr,
+                                        e => unimplemented!("{:?}", e),
+                                    },
+                                    e => unimplemented!("{:?}", e),
+                                },
+                                _ => unimplemented!("Only inner join is supported"),
+                            };
+
+                            let join_schema = match left_schema.join(right_schema.clone()) {
+                                Ok(s) => s,
+                                Err(_) => {
+                                    left_schema = left_schema.add_qualifier(&left_name);
+                                    right_schema = right_schema.add_qualifier(&right_name);
+                                    left_schema.join(right_schema).unwrap()
+                                }
+                            };
+
+                            LogicalPlan::Join(Box::new(Join::new(
+                                root,
+                                right_scan,
+                                *operator,
+                                join_schema,
+                            )))
+                        }
+                        _ => todo!(),
+                    },
+                    None => root,
+                };
+
+                Ok(root)
+            }
+        }
+    }
+
     fn build_select(
         &self,
         body: Box<SetExpr>,
@@ -328,23 +414,7 @@ impl LogicalPlanBuilder {
             _ => unimplemented!(),
         };
 
-        let mut root = match &select.from.first() {
-            None => LogicalPlan::Empty,
-            Some(TableWithJoins { relation, .. }) => {
-                let name = match relation {
-                    TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-                    _ => todo!(),
-                };
-
-                let schema = self
-                    .catalog
-                    .lock()
-                    .get_schema(&name, txn_id)
-                    .ok_or(anyhow!("Table {} does not exist", name))?;
-
-                LogicalPlan::Scan(Scan::new(name, schema.clone()))
-            }
-        };
+        let mut root = self.build_source(select.from.first(), txn_id)?;
 
         let filters = select.selection.clone().map(|e| match e {
             Expr::BinaryOp { left, right, op } => self.parse_boolean_expr(*left, op, *right),
@@ -406,11 +476,11 @@ impl LogicalPlanBuilder {
                     })
                     .collect(),
                 SelectItem::UnnamedExpr(Expr::BinaryOp { left, right, op }) => {
-                    let left = match build_expr(*left.clone()) {
+                    let left = match build_expr(left) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
-                    let right = match build_expr(*right.clone()) {
+                    let right = match build_expr(right) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
@@ -421,7 +491,7 @@ impl LogicalPlanBuilder {
                     ))))]
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    let expr = match build_expr(expr.clone()) {
+                    let expr = match build_expr(expr) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
@@ -431,7 +501,23 @@ impl LogicalPlanBuilder {
                         alias.value.clone(),
                     ))]
                 }
-
+                SelectItem::UnnamedExpr(expr) => {
+                    let expr = build_expr(expr);
+                    match expr {
+                        Ok(expr) => {
+                            let name = match expr {
+                                LogicalExpr::Column(ref name) => name,
+                                _ => unreachable!(),
+                            };
+                            if !root.schema().fields.iter().any(|f| &f.name == name) {
+                                vec![Err(anyhow!("Column {} doesn't exist", name))]
+                            } else {
+                                vec![Ok(expr)]
+                            }
+                        }
+                        Err(e) => vec![Err(e)],
+                    }
+                }
                 e => todo!("{:?}", e),
             })
             .collect::<Result<Vec<_>>>()?;
@@ -493,15 +579,29 @@ impl From<bool> for LogicalExpr {
 
 // moved outside the impl to satisfy Clippy
 // https://rust-lang.github.io/rust-clippy/master/index.html#only_used_in_recursion
-fn build_expr(expr: Expr) -> Result<LogicalExpr> {
+fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
     match expr {
-        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
-        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, s))),
-        Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value)),
+        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, *n))),
+        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, *s))),
+        Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value.clone())),
         Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
-            BinaryExpr::new(build_expr(*left)?, op, build_expr(*right)?),
+            BinaryExpr::new(build_expr(left)?, op.clone(), build_expr(right)?),
         ))),
-        Expr::Nested(e) => build_expr(*e),
+        Expr::Nested(e) => build_expr(e),
+        Expr::CompoundIdentifier(i) => {
+            if i.len() > 2 {
+                return Err(anyhow!(
+                    "Databases are not supported (only table.col or col)"
+                ));
+            }
+
+            Ok(LogicalExpr::Column(
+                i.iter()
+                    .map(|i| i.value.clone())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            ))
+        }
         e => todo!("{:?}", e),
     }
 }

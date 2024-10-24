@@ -206,7 +206,7 @@ impl Table {
             })
             .collect::<Vec<_>>();
 
-        let mut new_tuple = Tuple::new(values, &Schema { fields });
+        let mut new_tuple = Tuple::new(values, &Schema::new(fields));
         new_tuple._null_bitmap = tuple._null_bitmap;
         Ok(new_tuple)
     }

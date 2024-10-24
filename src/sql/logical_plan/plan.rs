@@ -1,10 +1,11 @@
 use crate::tuple::schema::Schema;
 
-use super::expr::{BooleanBinaryExpr, LogicalExpr};
+use super::expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 
 pub enum LogicalPlan {
     Projection(Box<Projection>),
     Scan(Scan),
+    Join(Box<Join>),
     Filter(Box<Filter>),
     CreateTable(Box<CreateTable>),
     Explain(Box<Explain>),
@@ -42,6 +43,7 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.print(indent),
             LogicalPlan::Truncate(t) => t.print(indent),
             LogicalPlan::Update(u) => u.print(indent),
+            LogicalPlan::Join(j) => j.print(indent),
             LogicalPlan::StartTxn => format!("{} StartTransaction", "-".repeat(indent * 2)),
             LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
             LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
@@ -61,11 +63,44 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.schema(),
             LogicalPlan::Truncate(t) => t.schema(),
             LogicalPlan::Update(u) => u.schema(),
+            LogicalPlan::Join(j) => j.schema(),
             LogicalPlan::Empty => Schema::new(vec![]),
             LogicalPlan::StartTxn => Schema::default(),
             LogicalPlan::CommitTxn => Schema::default(),
             LogicalPlan::RollbackTxn => Schema::default(),
         }
+    }
+}
+
+pub struct Join {
+    pub left: LogicalPlan,
+    pub right: LogicalPlan,
+    pub on: BinaryExpr,
+    pub schema: Schema,
+}
+
+impl Join {
+    pub fn new(left: LogicalPlan, right: LogicalPlan, on: BinaryExpr, schema: Schema) -> Self {
+        Self {
+            left,
+            right,
+            on,
+            schema,
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    pub fn print(&self, indent: usize) -> String {
+        format!(
+            "{} Join: {}\n{}{}",
+            "-".repeat(indent * 2),
+            self.on.print(),
+            self.left.print_indent(indent + 1),
+            self.right.print_indent(indent + 1),
+        )
     }
 }
 

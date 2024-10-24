@@ -218,4 +218,47 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_joins() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("CREATE TABLE t1 (a int, b int);")?;
+        ctx.execute_sql("INSERT INTO t1 VALUES (1, 3), (2, 4);")?;
+
+        ctx.execute_sql("CREATE TABLE t2 (c int, d int);")?;
+        ctx.execute_sql("INSERT INTO t2 VALUES (1, 5), (2, 6);")?;
+
+        let result = ctx.execute_sql("SELECT b, d FROM t1 JOIN t2 ON a = c;")?;
+
+        let rows = result.rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], value!(Int, *"3"));
+        assert_eq!(rows[0][1], value!(Int, *"5"));
+        assert_eq!(rows[1][0], value!(Int, *"4"));
+        assert_eq!(rows[1][1], value!(Int, *"6"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_qualified_joins() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("CREATE TABLE t1 (a int, b int);")?;
+        ctx.execute_sql("INSERT INTO t1 VALUES (1, 3), (2, 4);")?;
+
+        ctx.execute_sql("CREATE TABLE t2 (a int, b int);")?;
+        ctx.execute_sql("INSERT INTO t2 VALUES (1, 5), (2, 6);")?;
+
+        let result = ctx.execute_sql("SELECT t1.b, t2.b FROM t1 JOIN t2 ON t1.a = t2.a;")?;
+        result.show();
+
+        let rows = result.rows();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][0], value!(Int, *"3"));
+        assert_eq!(rows[0][1], value!(Int, *"5"));
+        assert_eq!(rows[1][0], value!(Int, *"4"));
+        assert_eq!(rows[1][1], value!(Int, *"6"));
+
+        Ok(())
+    }
 }

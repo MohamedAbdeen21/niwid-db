@@ -5,12 +5,14 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.86"
-backtrace = "0.3.74"
 bincode = "1.3.3"
 lazy_static = "1.5.0"
 parking_lot = "0.12.3"
 priority-queue = "2.1.0"
 serde = {version = "1.0.210", features = ["derive"]}
 sqlparser = "0.51.0"
+backtrace = "0.3.74"
 tokio = {version = "1.40.0", features = ["full"]}
+
+[dev-dependencies]
 uuid = {version = "1.10.0", features = ["fast-rng", "v4", "macro-diagnostics"]}

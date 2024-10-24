@@ -4,7 +4,7 @@ use crate::context::Context;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, DropTables, Filter, Insert, LogicalPlan, Scan, Truncate, Update, Values,
+    CreateTable, DropTables, Filter, Insert, Join, LogicalPlan, Scan, Truncate, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::schema::{Field, Schema};
@@ -40,6 +40,7 @@ impl LogicalPlan {
             LogicalPlan::Truncate(t) => t.execute(ctx),
             LogicalPlan::Update(u) => u.execute(ctx),
             LogicalPlan::Empty => Ok(ResultSet::default()),
+            LogicalPlan::Join(j) => j.execute(ctx),
             LogicalPlan::StartTxn => {
                 ctx.start_txn()?;
                 Ok(ResultSet::default())
@@ -53,6 +54,51 @@ impl LogicalPlan {
                 Ok(ResultSet::default())
             }
         }
+    }
+}
+
+impl Executable for Join {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let left_name = match self.left {
+            LogicalPlan::Scan(Scan { ref table_name, .. }) => table_name.clone(),
+            _ => unreachable!(),
+        };
+        let right_name = match self.right {
+            LogicalPlan::Scan(Scan { ref table_name, .. }) => table_name.clone(),
+            _ => unreachable!(),
+        };
+        let left = self.left.execute(ctx)?;
+        let right = self.right.execute(ctx)?;
+
+        // drop the first page_id and slot_id cols from each table
+        let left_fields = left.fields().len();
+        let right_fields = right.fields().len();
+        let mut left = left.select((2..left_fields).collect());
+        let mut right = right.select((2..right_fields).collect());
+
+        let join_schema = match left.schema.join(right.schema.clone()) {
+            Ok(schema) => schema,
+            Err(_) => {
+                left.schema = left.schema.add_qualifier(&left_name);
+                right.schema = right.schema.add_qualifier(&right_name);
+                left.schema.join(right.schema.clone()).unwrap()
+            }
+        };
+
+        let mut output_rows: Vec<Vec<Value>> = vec![];
+
+        for left_row in left.rows() {
+            let ll = ResultSet::from_tuple(left.fields().clone(), left_row.to_vec(), right.len());
+            let input = ll.concat(right.clone());
+            let mask = self.on.evaluate(&input);
+            for (i, row) in input.rows().into_iter().enumerate() {
+                if mask[i].is_truthy() {
+                    output_rows.push(row);
+                }
+            }
+        }
+
+        Ok(ResultSet::from_rows(join_schema.fields, output_rows))
     }
 }
 
@@ -156,7 +202,7 @@ impl Executable for Values {
             .map(|row| {
                 row.into_iter()
                     .map(|expr| expr.evaluate(&input))
-                    .map(|(field, data)| ResultSet::from_col(field, data))
+                    .map(|(field, data)| ResultSet::new(vec![field], vec![data]))
                     .reduce(|a, b| a.concat(b))
                     .unwrap() // TODO: ?
             })
@@ -238,7 +284,7 @@ impl Executable for Filter {
             .map(|(col, _)| col)
             .collect::<Vec<_>>();
 
-        Ok(ResultSet::new(input.fields, output))
+        Ok(ResultSet::new(input.schema.fields, output))
     }
 }
 
@@ -290,8 +336,8 @@ impl BinaryExpr {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
                 let fields = input.fields();
-                let index1 = fields.iter().position(|col| &col.name == c1).unwrap();
-                let index2 = fields.iter().position(|col| &col.name == c2).unwrap();
+                let index1 = fields.iter().position(|col| &col.name == c1).expect(c1);
+                let index2 = fields.iter().position(|col| &col.name == c2).expect(c2);
                 let col1 = &input.cols()[index1];
                 let col2 = &input.cols()[index2];
                 col1.iter()
@@ -441,7 +487,7 @@ impl Executable for Projection {
             .projections
             .iter()
             .map(|p| p.evaluate(&input))
-            .map(|(field, data)| ResultSet::from_col(field, data))
+            .map(|(field, data)| ResultSet::new(vec![field], vec![data]))
             .reduce(|a, b| a.concat(b))
             .unwrap();
 

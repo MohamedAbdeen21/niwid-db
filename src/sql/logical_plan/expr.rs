@@ -78,7 +78,6 @@ pub struct BooleanBinaryExpr {
 }
 
 impl BooleanBinaryExpr {
-    #[allow(unused)]
     pub fn new(left: LogicalExpr, op: BinaryOperator, right: LogicalExpr) -> Self {
         Self { left, op, right }
     }

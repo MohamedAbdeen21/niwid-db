@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use crate::types::Types;
+use anyhow::{anyhow, Result};
 use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::ColumnDef;
@@ -33,11 +36,20 @@ impl Field {
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Schema {
     pub fields: Vec<Field>,
+    is_qualified: bool,
 }
 
 impl Schema {
     pub fn new(fields: Vec<Field>) -> Self {
-        Self { fields }
+        let is_qualified = fields.iter().any(|f| f.name.contains('.'));
+        Self {
+            fields,
+            is_qualified,
+        }
+    }
+
+    pub fn is_qualified(&self) -> bool {
+        self.is_qualified
     }
 
     #[allow(unused)]
@@ -55,6 +67,19 @@ impl Schema {
             }
         }
         sql
+    }
+
+    pub fn join(&self, schema: Schema) -> Result<Self> {
+        let mut fields = self.fields.clone();
+        let left_set: HashSet<&str> =
+            HashSet::from_iter(self.fields.iter().map(|f| f.name.as_str()));
+        let right_set = HashSet::from_iter(schema.fields.iter().map(|f| f.name.as_str()));
+        if left_set.intersection(&right_set).count() > 0 {
+            return Err(anyhow!("Ambiguous column name"));
+        } else {
+            fields.extend(schema.fields);
+        }
+        Ok(Schema::new(fields))
     }
 
     pub fn from_sql(cols: Vec<ColumnDef>) -> Self {
@@ -79,6 +104,14 @@ impl Schema {
             })
             .collect();
 
+        Schema::new(fields)
+    }
+
+    pub fn add_qualifier(&self, name: &str) -> Self {
+        let mut fields = self.fields.clone();
+        fields
+            .iter_mut()
+            .for_each(|f| f.name = format!("{}.{}", name, f.name));
         Schema::new(fields)
     }
 }
