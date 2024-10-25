@@ -447,10 +447,10 @@ impl LogicalPlanBuilder {
             .iter()
             .flat_map(|e| match e {
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
-                    vec![Ok(LogicalExpr::Literal(value!(UInt, *s)))]
+                    vec![Ok(LogicalExpr::Literal(value!(UInt, s)))]
                 }
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                    vec![Ok(LogicalExpr::Literal(value!(Str, *s)))]
+                    vec![Ok(LogicalExpr::Literal(value!(Str, s)))]
                 }
                 SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                     let name = ident.value.clone();
@@ -471,10 +471,10 @@ impl LogicalPlanBuilder {
                     .iter()
                     .map(|e| match e {
                         Expr::Value(SqlValue::Number(s, _)) => {
-                            Ok(LogicalExpr::Literal(value!(UInt, *s)))
+                            Ok(LogicalExpr::Literal(value!(UInt, s)))
                         }
                         Expr::Value(SqlValue::SingleQuotedString(s)) => {
-                            Ok(LogicalExpr::Literal(value!(Str, *s)))
+                            Ok(LogicalExpr::Literal(value!(Str, s)))
                         }
                         e => todo!("{}", e),
                     })
@@ -585,8 +585,8 @@ impl From<bool> for LogicalExpr {
 // https://rust-lang.github.io/rust-clippy/master/index.html#only_used_in_recursion
 fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
     match expr {
-        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, *n))),
-        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, *s))),
+        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
+        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, s))),
         Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value.clone())),
         Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
             BinaryExpr::new(build_expr(left)?, op.clone(), build_expr(right)?),

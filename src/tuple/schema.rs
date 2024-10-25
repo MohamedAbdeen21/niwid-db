@@ -163,4 +163,33 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_from_sql() -> Result<()> {
+        let sql = "CREATE TABLE users (
+            a int NOT NULL,
+            b text,
+            c uint
+        )";
+
+        let statment = Parser::new(&GenericDialect)
+            .try_with_sql(sql)?
+            .parse_statement()?;
+
+        match statment {
+            Statement::CreateTable(CreateTable { columns, .. }) => {
+                assert_eq!(
+                    Schema::from_sql(columns),
+                    Schema::new(vec![
+                        Field::new("a", Types::Int, false),
+                        Field::new("b", Types::Str, true),
+                        Field::new("c", Types::UInt, true),
+                    ])
+                );
+            }
+            _ => unreachable!(),
+        }
+
+        Ok(())
+    }
 }

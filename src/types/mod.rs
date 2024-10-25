@@ -492,7 +492,7 @@ impl_display!(Char);
 #[macro_export]
 macro_rules! value {
     ($t:ident, $s:expr) => {
-        ValueFactory::from_string(&Types::$t, &$s)
+        ValueFactory::from_string(&Types::$t, $s)
     };
 }
 

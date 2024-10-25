@@ -118,10 +118,10 @@ mod tests {
     fn assert_result_sample(result: &ResultSet) {
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, *"1"));
-        assert_eq!(rows[0][1], value!(Int, *"2"));
-        assert_eq!(rows[1][0], value!(Int, *"3"));
-        assert_eq!(rows[1][1], value!(Int, *"4"));
+        assert_eq!(rows[0][0], value!(Int, "1"));
+        assert_eq!(rows[0][1], value!(Int, "2"));
+        assert_eq!(rows[1][0], value!(Int, "3"));
+        assert_eq!(rows[1][1], value!(Int, "4"));
     }
 
     fn test_context() -> Context {
@@ -232,10 +232,10 @@ mod tests {
 
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, *"3"));
-        assert_eq!(rows[0][1], value!(Int, *"5"));
-        assert_eq!(rows[1][0], value!(Int, *"4"));
-        assert_eq!(rows[1][1], value!(Int, *"6"));
+        assert_eq!(rows[0][0], value!(Int, "3"));
+        assert_eq!(rows[0][1], value!(Int, "5"));
+        assert_eq!(rows[1][0], value!(Int, "4"));
+        assert_eq!(rows[1][1], value!(Int, "6"));
 
         Ok(())
     }
@@ -253,10 +253,10 @@ mod tests {
 
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, *"3"));
-        assert_eq!(rows[0][1], value!(Int, *"5"));
-        assert_eq!(rows[1][0], value!(Int, *"4"));
-        assert_eq!(rows[1][1], value!(Int, *"6"));
+        assert_eq!(rows[0][0], value!(Int, "3"));
+        assert_eq!(rows[0][1], value!(Int, "5"));
+        assert_eq!(rows[1][0], value!(Int, "4"));
+        assert_eq!(rows[1][1], value!(Int, "6"));
 
         Ok(())
     }

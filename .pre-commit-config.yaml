@@ -14,3 +14,10 @@ repos:
         language: rust
         types: [rust]
         pass_filenames: false
+
+      - id: test
+        name: Run tests
+        entry: cargo test --all
+        language: rust
+        types: [rust]
+        pass_filenames: false

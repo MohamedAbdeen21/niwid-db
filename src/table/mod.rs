@@ -264,10 +264,21 @@ impl Table {
         Str::from_raw_bytes(tuple.get_data())
     }
 
+    fn check_nullability(&self, tuple: &Tuple) -> Result<()> {
+        for (i, field) in self.schema.fields.iter().enumerate() {
+            if !field.nullable && tuple.get_value_at(i as u8, &self.schema).unwrap().is_none() {
+                return Err(anyhow!("Null value in non-nullable field {}", field.name));
+            }
+        }
+        Ok(())
+    }
+
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
         if tuple.len() > PAGE_END - (SLOT_SIZE + META_SIZE) {
             return Err(anyhow!("Tuple is too long"));
         }
+
+        self.check_nullability(&tuple)?;
 
         let tuple = self.insert_strings(tuple)?;
 
@@ -649,6 +660,19 @@ mod tests {
         };
 
         table.scan(None, validator)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_nullability() -> Result<()> {
+        let schema = Schema::new(vec![Field::new("a", Types::Int, false)]);
+
+        let mut table = test_table(4, &schema)?;
+
+        let tuple = Tuple::new(vec![Value::Null], &schema);
+
+        assert!(table.insert(tuple).is_err());
 
         Ok(())
     }

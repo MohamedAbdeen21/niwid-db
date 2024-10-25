@@ -151,10 +151,10 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_pages() -> Result<()> {
+    fn test_multiple_pages_iter() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::Int, false),
-            Field::new("b", Types::Int, false),
+            Field::new("a", Types::Int, true),
+            Field::new("b", Types::Int, true),
         ]);
 
         let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 8);

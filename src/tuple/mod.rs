@@ -106,15 +106,15 @@ impl Tuple {
     }
 
     pub fn get_value_at(&self, id: u8, schema: &Schema) -> Result<Option<Value>> {
+        if id as usize >= schema.fields.len() {
+            return Err(anyhow!("field id out of bounds"));
+        }
+
         if (self._null_bitmap >> id) & 1 == 1 {
             return Ok(None);
         }
 
         let types: Vec<_> = schema.fields.iter().map(|f| &f.ty).collect();
-
-        if id as usize >= schema.fields.len() {
-            return Err(anyhow!("field id out of bounds"));
-        }
 
         let dtype = match types[id as usize] {
             Types::Str => &Types::StrAddr,
