@@ -320,7 +320,7 @@ impl LogicalPlanBuilder {
         let create = CreateTable::new(
             root,
             name.0.first().unwrap().value.clone(),
-            Schema::from_sql(columns),
+            Schema::from_sql(columns)?,
             if_not_exists,
         );
 

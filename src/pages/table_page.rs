@@ -3,6 +3,7 @@ use super::{Page, PAGE_SIZE};
 use crate::latch::Latch;
 use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
 use anyhow::{anyhow, Result};
+use core::panic;
 use std::{mem, slice, sync::Arc};
 
 /// The part of the header that persists on disk (num_tuples (2) and next_page (4)).
@@ -206,13 +207,14 @@ impl TablePage {
         }
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
-        let mut deleted_meta = TupleMetaData::default(); // TODO: Copy null bitmap
-        deleted_meta.mark_deleted();
-
         let data = unsafe { self.data.as_mut().unwrap() };
 
-        data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
-            .copy_from_slice(deleted_meta.to_bytes());
+        let slice = &mut data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)];
+
+        let mut meta = TupleMetaData::from_bytes(slice);
+        meta.mark_deleted();
+
+        slice.copy_from_slice(meta.to_bytes());
         self.header_mut().mark_dirty();
     }
 

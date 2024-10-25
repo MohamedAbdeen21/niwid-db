@@ -4,7 +4,7 @@ use crate::types::Types;
 use anyhow::{anyhow, Result};
 use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
-use sqlparser::ast::ColumnDef;
+use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Field {
@@ -82,7 +82,7 @@ impl Schema {
         Ok(Schema::new(fields))
     }
 
-    pub fn from_sql(cols: Vec<ColumnDef>) -> Self {
+    pub fn from_sql(cols: Vec<ColumnDef>) -> Result<Self> {
         let fields = cols
             .iter()
             .map(|col| {
@@ -93,18 +93,27 @@ impl Schema {
                     ..
                 } = col;
 
-                // TODO: actually check the vec of structs for the value
-                let nullable = options.is_empty();
+                if options.len() > 1 {
+                    return Err(anyhow!("Only supported constraint is NOT NULL"));
+                };
 
-                Field::new(
+                let nullable = !matches!(
+                    options.first(),
+                    Some(ColumnOptionDef {
+                        option: ColumnOption::NotNull,
+                        ..
+                    }),
+                );
+
+                Ok(Field::new(
                     &name.value,
                     Types::from_sql(&data_type.to_string()),
                     nullable,
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
-        Schema::new(fields)
+        Ok(Schema::new(fields))
     }
 
     pub fn add_qualifier(&self, name: &str) -> Self {
@@ -156,7 +165,7 @@ mod tests {
 
         match statment {
             Statement::CreateTable(CreateTable { columns, .. }) => {
-                assert_eq!(Schema::from_sql(columns), schema);
+                assert_eq!(Schema::from_sql(columns)?, schema);
             }
             _ => panic!(),
         }
@@ -179,7 +188,7 @@ mod tests {
         match statment {
             Statement::CreateTable(CreateTable { columns, .. }) => {
                 assert_eq!(
-                    Schema::from_sql(columns),
+                    Schema::from_sql(columns)?,
                     Schema::new(vec![
                         Field::new("a", Types::Int, false),
                         Field::new("b", Types::Str, true),
