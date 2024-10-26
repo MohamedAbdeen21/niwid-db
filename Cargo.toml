@@ -13,6 +13,7 @@ serde = {version = "1.0.210", features = ["derive"]}
 sqlparser = "0.51.0"
 backtrace = "0.3.74"
 tokio = {version = "1.40.0", features = ["full"]}
+arrayvec = "0.7.6"
 
 [dev-dependencies]
 uuid = {version = "1.10.0", features = ["fast-rng", "v4", "macro-diagnostics"]}

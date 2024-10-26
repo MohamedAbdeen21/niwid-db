@@ -1,4 +1,4 @@
-pub(crate) mod index_page;
+pub(crate) mod btree_index_page;
 pub(crate) mod table_page;
 pub(crate) mod traits;
 
