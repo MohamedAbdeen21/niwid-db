@@ -1,5 +1,5 @@
 use super::{traits::Serialize, PageData, PageId};
-use super::{Page, PAGE_SIZE};
+use super::{Page, SlotId, PAGE_SIZE};
 use crate::latch::Latch;
 use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
 use anyhow::{anyhow, Result};
@@ -24,7 +24,7 @@ pub struct TablePageHeader {
     // These two fields are part of the physical page
     // the above two don't persist on disk (yes, even
     // though they are part of the header)
-    num_tuples: u16,
+    num_tuples: SlotId,
     /// INVALID_PAGE (-1) if there are no more pages
     next_page: PageId,
 }
@@ -88,7 +88,7 @@ impl TablePage {
     }
 
     fn last_slot_offset(&self) -> Option<usize> {
-        let num_tuples = self.header().get_num_tuples();
+        let num_tuples = self.header().get_num_tuples() as usize;
         if num_tuples == 0 {
             None
         } else {
@@ -97,12 +97,12 @@ impl TablePage {
     }
 
     #[inline]
-    fn get_slot(&self, slot: usize) -> Option<TablePageSlot> {
+    fn get_slot(&self, slot: SlotId) -> Option<TablePageSlot> {
         if slot >= self.header().get_num_tuples() {
             return None;
         }
 
-        let offset = slot * SLOT_SIZE;
+        let offset = slot as usize * SLOT_SIZE;
         Some(TablePageSlot::from_bytes(
             &unsafe { self.data.as_ref() }.unwrap().bytes[offset..offset + SLOT_SIZE],
         ))
@@ -127,7 +127,7 @@ impl TablePage {
 
     #[inline]
     fn free_space(&self) -> usize {
-        let slots = self.header().get_num_tuples() * SLOT_SIZE;
+        let slots = self.header().get_num_tuples() as usize * SLOT_SIZE;
         let offset = self.last_tuple_offset();
         offset - slots
     }
@@ -201,7 +201,7 @@ impl TablePage {
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
 
-    pub fn delete_tuple(&mut self, slot: usize) {
+    pub fn delete_tuple(&mut self, slot: SlotId) {
         if self.read_only {
             panic!("Cannot modify read only page");
         }
@@ -218,7 +218,7 @@ impl TablePage {
         self.header_mut().mark_dirty();
     }
 
-    pub fn read_tuple(&self, slot: usize) -> Entry {
+    pub fn read_tuple(&self, slot: SlotId) -> Entry {
         let _rguard = self.latch.rguard();
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
@@ -239,7 +239,7 @@ impl TablePage {
 
     /// Read tuple data without the metadata
     /// or setting the bitmap
-    pub fn read_raw(&self, slot: usize) -> Tuple {
+    pub fn read_raw(&self, slot: SlotId) -> Tuple {
         let _rguard = self.latch.rguard();
         let slot = self.get_slot(slot).unwrap_or_else(|| {
             panic!(
@@ -304,8 +304,8 @@ impl TablePageHeader {
         self.mark_dirty();
     }
 
-    pub fn get_num_tuples(&self) -> usize {
-        self.num_tuples as usize
+    pub fn get_num_tuples(&self) -> SlotId {
+        self.num_tuples as SlotId
     }
 }
 

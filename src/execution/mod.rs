@@ -142,7 +142,7 @@ impl Executable for Update {
         table.start_txn(txn_id)?;
 
         for row in selected_rows {
-            let tuple_id = (row[0].u32(), row[1].u32() as usize);
+            let tuple_id = (row[0].u32(), row[1].u32() as u16);
 
             let mut new_tuple = row[2..].to_vec();
 

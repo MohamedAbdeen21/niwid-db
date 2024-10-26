@@ -1,6 +1,6 @@
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::TablePage;
-use crate::pages::{PageId, INVALID_PAGE};
+use crate::pages::{PageId, SlotId, INVALID_PAGE};
 use crate::tuple::{Entry, TupleId};
 use crate::txn_manager::TxnId;
 
@@ -9,10 +9,10 @@ use super::Table;
 // TODO: try to iterate over pages not tuples
 pub(super) struct TableIterator {
     page: TablePage,
-    current_slot: usize,
+    current_slot: SlotId,
     next_page: PageId,
     bpm: ArcBufferPool,
-    num_tuples: usize,
+    num_tuples: SlotId,
     active_txn: Option<TxnId>,
 }
 
