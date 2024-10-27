@@ -212,7 +212,11 @@ impl BufferPoolManager {
         );
 
         let frame = &mut self.frames[frame_id];
-        assert!(frame.get_pin_count() > 0);
+        assert!(
+            frame.get_pin_count() > 0,
+            "frame {} has pin count 0, but an unpin was attempted",
+            frame_id
+        );
         frame.unpin();
 
         printdbg!(

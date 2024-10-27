@@ -46,10 +46,14 @@ impl Replacer for LRU {
         self.set_evictable(frame_id, false);
     }
 
-    /// Frame is tracked by the BPM, remove from replacer
-    fn remove(&mut self, frame_id: FrameId) {
-        self.heap.remove(&frame_id);
-        self.last_access.remove(&frame_id);
+    fn set_evictable(&mut self, frame_id: FrameId, evictable: bool) {
+        if evictable {
+            let ts = self.last_access.remove(&frame_id).unwrap();
+            self.heap.push(frame_id, ts);
+        } else {
+            let (frame_id, ts) = self.heap.remove(&frame_id).expect("Already not evictable");
+            self.last_access.insert(frame_id, ts);
+        }
     }
 
     /// Check if a frame can be evicted
@@ -57,6 +61,12 @@ impl Replacer for LRU {
     /// as evict just unwraps the value
     fn can_evict(&self) -> bool {
         !self.heap.is_empty()
+    }
+
+    /// Frame is tracked by the BPM, remove from replacer
+    fn remove(&mut self, frame_id: FrameId) {
+        self.heap.remove(&frame_id);
+        self.last_access.remove(&frame_id);
     }
 
     /// Get the LRU frame to evict.
@@ -69,16 +79,6 @@ impl Replacer for LRU {
     #[cfg(test)]
     fn peek(&self) -> Option<FrameId> {
         self.heap.peek().map(|(frame_id, _)| *frame_id)
-    }
-
-    fn set_evictable(&mut self, frame_id: FrameId, evictable: bool) {
-        if evictable {
-            let ts = self.last_access.remove(&frame_id).unwrap();
-            self.heap.push(frame_id, ts);
-        } else {
-            let (frame_id, ts) = self.heap.remove(&frame_id).expect("Already not evictable");
-            self.last_access.insert(frame_id, ts);
-        }
     }
 }
 
