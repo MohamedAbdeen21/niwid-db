@@ -47,6 +47,10 @@ pub struct IndexPage {
 
 #[allow(unused)]
 impl IndexPage {
+    fn mark_dirty(&mut self) {
+        self.data_mut().is_dirty = true;
+    }
+
     pub fn insert(&mut self, key: Key, value: LeafValue) -> Result<()> {
         if self.is_full() {
             return Err(anyhow!("Page is full"));
@@ -66,6 +70,8 @@ impl IndexPage {
             data.values.insert(pos + 1, value);
         }
 
+        self.mark_dirty();
+
         Ok(())
     }
 
@@ -79,6 +85,8 @@ impl IndexPage {
 
         data.keys.remove(pos);
         data.values.remove(pos);
+
+        self.mark_dirty();
 
         Ok(())
     }
@@ -109,6 +117,7 @@ impl IndexPage {
         self.data_mut().values.insert(0, left);
         self.data_mut().values.insert(1, right);
         self.data_mut().keys.insert(0, key);
+        self.mark_dirty();
     }
 
     pub fn split_internal(&mut self, mut new_page: IndexPage) -> (Self, Key) {
@@ -128,10 +137,14 @@ impl IndexPage {
         self.data_mut().keys.truncate(mid_index);
         self.data_mut().values.truncate(mid_index + 1);
 
-        new_page.set_type(self.get_type().clone());
+        assert!(self.get_type() == &PageType::Internal);
+        new_page.set_type(PageType::Internal);
 
         self.data_mut().next = new_page.get_page_id();
         new_page.data_mut().prev = self.get_page_id();
+
+        self.mark_dirty();
+        new_page.mark_dirty();
 
         (new_page, median)
     }
@@ -153,10 +166,14 @@ impl IndexPage {
         self.data_mut().keys.truncate(mid_index);
         self.data_mut().values.truncate(mid_index);
 
-        new_page.set_type(self.get_type().clone());
+        assert!(self.get_type() == &PageType::Leaf);
+        new_page.set_type(PageType::Leaf);
 
         self.data_mut().next = new_page.get_page_id();
         new_page.data_mut().prev = self.get_page_id();
+
+        self.mark_dirty();
+        new_page.mark_dirty();
 
         (new_page, median)
     }
@@ -228,6 +245,7 @@ impl IndexPage {
     pub fn is_half_full(&self) -> bool {
         self.len() == KEYS_PER_NODE / 2
     }
+
     pub fn get_parent_id(&self) -> PageId {
         assert_ne!(self.parent_page_id, INVALID_PAGE);
         self.parent_page_id

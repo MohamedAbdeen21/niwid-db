@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::btree_index_page::{IndexPage, PageType};
 use crate::tuple::TupleId;
@@ -29,34 +27,11 @@ impl BPlusTree {
     }
 
     pub fn search(&self, key: Key) -> Option<TupleId> {
-        let page: IndexPage = self
-            .bpm
-            .lock()
-            .fetch_frame(self.root_page_id, None)
-            .unwrap()
-            .reader()
-            .into();
+        let page: IndexPage = self.load_page(self.root_page_id, None).unwrap();
 
-        let ret = match page.get_type() {
-            PageType::Internal => {
-                let child_id = page.find_leaf(key);
-                let child: IndexPage = self
-                    .bpm
-                    .lock()
-                    .fetch_frame(child_id, None)
-                    .unwrap()
-                    .reader()
-                    .into();
-                let ret = self.search_page(child, key);
+        let ret = self.search_page(page, key);
 
-                self.bpm.lock().unpin(&page.get_page_id(), None);
-                ret
-            }
-            PageType::Leaf => page.search(key),
-            PageType::Invalid => unreachable!("Page type was not initialized properly"),
-        };
-
-        // self.bpm.lock().unpin(&self.root_page_id, None);
+        self.bpm.lock().unpin(&self.root_page_id, None);
         ret
     }
 
@@ -64,33 +39,27 @@ impl BPlusTree {
         match page.get_type() {
             PageType::Internal => {
                 let child_id = page.find_leaf(key);
-                let child: IndexPage = self
-                    .bpm
-                    .lock()
-                    .fetch_frame(child_id, None)
-                    .unwrap()
-                    .reader()
-                    .into();
+                let child: IndexPage = self.load_page(child_id, None).unwrap();
                 let ret = self.search_page(child, key);
 
                 self.bpm.lock().unpin(&child_id, None);
                 ret
             }
             PageType::Leaf => page.search(key),
-            _ => None,
+            PageType::Invalid => unreachable!("Page type was not initialized properly"),
         }
     }
 
     fn new_leaf_page(&self) -> Result<IndexPage> {
-        let mut new_page: IndexPage = self.bpm.lock().new_page()?.writer().into();
-        self.bpm.lock().fetch_frame(new_page.get_page_id(), None)?;
+        let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
+        let mut new_page = self.load_page(new_page_id, None)?; // increment pin count
         new_page.set_type(PageType::Leaf);
         Ok(new_page)
     }
 
     fn new_inner_page(&self) -> Result<IndexPage> {
-        let mut new_page: IndexPage = self.bpm.lock().new_page()?.writer().into();
-        self.bpm.lock().fetch_frame(new_page.get_page_id(), None)?;
+        let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
+        let mut new_page = self.load_page(new_page_id, None)?; // increment pin count
         new_page.set_type(PageType::Internal);
         Ok(new_page)
     }
@@ -136,6 +105,7 @@ impl BPlusTree {
                     Some((new_page, new_key)) => {
                         let mut value = [0; 6];
                         value[..4].copy_from_slice(&new_page.get_page_id().to_ne_bytes());
+                        self.bpm.lock().unpin(&new_page.get_page_id(), None);
 
                         if page.is_almost_full() {
                             let new_page = self.new_inner_page()?;
@@ -185,12 +155,7 @@ impl BPlusTree {
     }
 
     pub fn insert(&mut self, key: Key, value: LeafValue) -> Result<()> {
-        let mut page: IndexPage = self
-            .bpm
-            .lock()
-            .fetch_frame(self.root_page_id, None)?
-            .writer()
-            .into();
+        let mut page = self.load_page(self.root_page_id, None)?;
 
         let ret = match self.insert_into_page(&mut page, key, value) {
             Ok(Some((split_page, median))) => self.new_root(page, split_page, median),
@@ -204,21 +169,6 @@ impl BPlusTree {
     }
 }
 
-impl Debug for BPlusTree {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let root: IndexPage = self
-            .bpm
-            .lock()
-            .fetch_frame(self.root_page_id, None)
-            .unwrap()
-            .writer()
-            .into();
-        let x = f.debug_struct("BPlusTree").field("root", &root).finish();
-        self.bpm.lock().unpin(&self.root_page_id, None);
-        x
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,8 +178,8 @@ mod tests {
     use anyhow::Result;
 
     fn setup_bplus_tree() -> BPlusTree {
-        let bpm = test_arc_bpm(100_000);
-        let mut root_page: IndexPage = bpm.lock().new_page().unwrap().reader().into();
+        let bpm = test_arc_bpm(5);
+        let mut root_page: IndexPage = bpm.lock().new_page().unwrap().writer().into();
         root_page.set_type(PageType::Leaf);
         BPlusTree::new(root_page.get_page_id(), bpm)
     }
@@ -242,7 +192,6 @@ mod tests {
 
         // Insert a single key-value pair and verify search
         btree.insert(key, value).expect("Insert failed");
-        dbg!(&btree);
         let found_value = btree.search(key);
         assert_eq!(found_value, Some(TupleId::from_bytes(&value)));
     }
@@ -290,12 +239,7 @@ mod tests {
         }
 
         // Check if the root split by confirming the B+ tree structure
-        let root: IndexPage = btree
-            .bpm
-            .lock()
-            .fetch_frame(btree.root_page_id, None)?
-            .reader()
-            .into();
+        let root = btree.load_page(btree.root_page_id, None)?;
         assert_eq!(root.get_type(), &PageType::Internal);
         assert!(root.len() == 1);
         btree.bpm.lock().unpin(&btree.root_page_id, None);
@@ -338,12 +282,7 @@ mod tests {
         }
 
         // Verify promoted keys are in the right nodes
-        let root: IndexPage = btree
-            .bpm
-            .lock()
-            .fetch_frame(btree.root_page_id, None)?
-            .reader()
-            .into();
+        let root = btree.load_page(btree.root_page_id, None)?;
         assert_eq!(root.get_type(), &PageType::Internal);
         assert!(root.len() == 3); // Root should have promoted keys
 
@@ -368,18 +307,15 @@ mod tests {
         }
 
         // Check if the root is an internal node (indicating height > 1)
-        let root: IndexPage = btree
-            .bpm
-            .lock()
-            .fetch_frame(btree.root_page_id, None)?
-            .reader()
-            .into();
+        let root: IndexPage = btree.load_page(btree.root_page_id, None)?;
         assert_eq!(root.get_type(), &PageType::Internal);
         assert!(root.len() == 3);
         btree.bpm.lock().unpin(&btree.root_page_id, None);
 
         for i in 0..key_count as Key {
-            assert_eq!(btree.search(i).unwrap().0, i, "Key {} not found", i);
+            let found = btree.search(i);
+            assert!(found.is_some(), "Key {} not found", i);
+            assert_eq!(found.unwrap().0, i, "Key {} not found", i);
         }
 
         Ok(())

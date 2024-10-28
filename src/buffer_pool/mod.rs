@@ -177,6 +177,7 @@ impl BufferPoolManager {
             page.get_page_id(),
             page.is_dirty()
         );
+
         if page.is_dirty() {
             printdbg!("Writing dirty page to disk before eviction");
             self.disk_manager.write_to_file(page, None).unwrap();
@@ -202,14 +203,7 @@ impl BufferPoolManager {
             return;
         }
 
-        printdbg!("{} Unpinning page {page_id}", get_caller_name!());
-
         let frame_id = self.page_table[page_id];
-
-        printdbg!(
-            "{} Unpinning page {page_id} (frame: {frame_id})",
-            get_caller_name!()
-        );
 
         let frame = &mut self.frames[frame_id];
         assert!(
@@ -228,6 +222,7 @@ impl BufferPoolManager {
         if frame.get_pin_count() == 0 {
             printdbg!("frame {} marked as evictable", frame_id);
             self.replacer.set_evictable(frame_id, true);
+            // printdbg!("Next: {}", self.replacer.peek().unwrap());
         }
     }
 
@@ -357,6 +352,30 @@ lazy_static! {
     )));
 }
 
+/// static items are never dropped, this is mainly for testing
+impl Drop for BufferPoolManager {
+    fn drop(&mut self) {
+        println!("Checking pages.. ");
+        self.frames
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| {
+                if f.get_pin_count() != 0 {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .for_each(|i| {
+                println!(
+                    "Frame {} has pin count {}",
+                    i,
+                    self.frames[i].get_pin_count()
+                );
+            });
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -402,6 +421,9 @@ pub mod tests {
         let _ = bpm.fetch_frame(p1, None);
 
         assert!(bpm.new_page().is_err());
+
+        bpm.unpin(&p2, None);
+        bpm.unpin(&p1, None);
 
         cleanup(bpm, &path)?;
 
@@ -458,6 +480,8 @@ pub mod tests {
         let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
         shadow_page.write_bytes(PAGE_END - data.len(), PAGE_END, &data);
 
+        bpm.unpin(&page_id, Some(txn_id));
+
         // shadow allocates a new frame
         // pins first page and doesn't record access to shadow page
         // effectively temporarily "pining" it.
@@ -476,6 +500,8 @@ pub mod tests {
         assert_eq!(new_page.read_bytes(PAGE_END - data.len(), PAGE_END), data);
 
         assert!(bpm.new_page().is_ok());
+
+        bpm.unpin(&page_id, None);
 
         cleanup(bpm, &path)?;
 
