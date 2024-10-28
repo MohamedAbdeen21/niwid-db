@@ -5,6 +5,8 @@ use crate::txn_manager::TxnId;
 use crate::{pages::PageId, tuple::TUPLE_ID_SIZE};
 use anyhow::Result;
 
+use super::btree_index_iterator::IndexPageIterator;
+
 // TupleId is u32 + u16 (4 + 2 = 6), but rust pads tuples
 // so we store them directly as bytes
 pub type LeafValue = [u8; TUPLE_ID_SIZE];
@@ -13,12 +15,19 @@ pub type Key = u32; // currently numeric types are 4 bytes
 #[allow(unused)]
 pub struct BPlusTree {
     root_page_id: PageId,
-    bpm: ArcBufferPool,
+    pub bpm: ArcBufferPool,
 }
 
 #[allow(dead_code)]
 impl BPlusTree {
     pub fn new(root_page_id: PageId, bpm: ArcBufferPool) -> Self {
+        let mut page: IndexPage = bpm
+            .lock()
+            .fetch_frame(root_page_id, None)
+            .unwrap()
+            .writer()
+            .into();
+        page.set_type(PageType::Leaf);
         Self { root_page_id, bpm }
     }
 
@@ -31,7 +40,7 @@ impl BPlusTree {
 
         let ret = self.search_page(page, key);
 
-        self.bpm.lock().unpin(&self.root_page_id, None);
+        self.unpin_page(self.root_page_id, None);
         ret
     }
 
@@ -42,7 +51,7 @@ impl BPlusTree {
                 let child: IndexPage = self.load_page(child_id, None).unwrap();
                 let ret = self.search_page(child, key);
 
-                self.bpm.lock().unpin(&child_id, None);
+                self.unpin_page(child_id, None);
                 ret
             }
             PageType::Leaf => page.search(key),
@@ -71,6 +80,10 @@ impl BPlusTree {
             .fetch_frame(page_id, txn_id)?
             .writer()
             .into())
+    }
+
+    fn unpin_page(&self, page_id: PageId, txn_id: Option<TxnId>) {
+        self.bpm.lock().unpin(&page_id, txn_id);
     }
 
     /// Inserts key-value pair to a page. If a split happens, return the page id of the new page
@@ -105,7 +118,7 @@ impl BPlusTree {
                     Some((new_page, new_key)) => {
                         let mut value = [0; 6];
                         value[..4].copy_from_slice(&new_page.get_page_id().to_ne_bytes());
-                        self.bpm.lock().unpin(&new_page.get_page_id(), None);
+                        self.unpin_page(new_page.get_page_id(), None);
 
                         if page.is_almost_full() {
                             let new_page = self.new_inner_page()?;
@@ -123,7 +136,7 @@ impl BPlusTree {
                     }
                 };
 
-                self.bpm.lock().unpin(&child_id, None);
+                self.unpin_page(child_id, None);
 
                 ret
             }
@@ -147,8 +160,8 @@ impl BPlusTree {
         let mut right_value = [0; 6];
         right_value[..4].copy_from_slice(&right_page.get_page_id().to_ne_bytes());
 
-        self.bpm.lock().unpin(&left_page.get_page_id(), None);
-        self.bpm.lock().unpin(&right_page.get_page_id(), None);
+        self.unpin_page(left_page.get_page_id(), None);
+        self.unpin_page(right_page.get_page_id(), None);
 
         new_page.insert_first_pair(left_value, right_value, median);
         Ok(())
@@ -163,9 +176,36 @@ impl BPlusTree {
             Err(e) => Err(e),
         };
 
-        self.bpm.lock().unpin(&self.root_page_id, None);
+        self.unpin_page(self.root_page_id, None);
 
         ret
+    }
+
+    fn first_leaf_page_iter(&self, txn_id: Option<TxnId>) -> Result<IndexPageIterator> {
+        let mut page_id = self.root_page_id;
+        let mut page = self.load_page(page_id, txn_id)?;
+
+        while page.get_type() == &PageType::Internal {
+            let (_, value) = page.get_pair_at(0);
+            self.unpin_page(page.get_page_id(), txn_id);
+            page_id = PageId::from_ne_bytes(value[..4].try_into().unwrap());
+            page = self.load_page(page_id, txn_id)?;
+        }
+
+        Ok(IndexPageIterator::new(page, 0, self.bpm.clone(), txn_id))
+    }
+
+    pub fn scan(
+        &self,
+        txn_id: Option<TxnId>,
+        mut f: impl FnMut(&(Key, TupleId)) -> Result<()>,
+    ) -> Result<()> {
+        self.first_leaf_page_iter(txn_id)?
+            .try_for_each(|entry| f(&entry))
+    }
+
+    pub fn get_root_page_id(&self) -> PageId {
+        self.root_page_id
     }
 }
 
@@ -179,8 +219,7 @@ mod tests {
 
     fn setup_bplus_tree() -> BPlusTree {
         let bpm = test_arc_bpm(5);
-        let mut root_page: IndexPage = bpm.lock().new_page().unwrap().writer().into();
-        root_page.set_type(PageType::Leaf);
+        let root_page: IndexPage = bpm.lock().new_page().unwrap().writer().into();
         BPlusTree::new(root_page.get_page_id(), bpm)
     }
 
@@ -242,7 +281,7 @@ mod tests {
         let root = btree.load_page(btree.root_page_id, None)?;
         assert_eq!(root.get_type(), &PageType::Internal);
         assert!(root.len() == 1);
-        btree.bpm.lock().unpin(&btree.root_page_id, None);
+        btree.unpin_page(btree.root_page_id, None);
 
         Ok(())
     }
@@ -290,7 +329,7 @@ mod tests {
             assert_eq!(btree.search(i).unwrap().0, i);
         }
 
-        btree.bpm.lock().unpin(&btree.root_page_id, None);
+        btree.unpin_page(btree.root_page_id, None);
         Ok(())
     }
 
@@ -310,7 +349,7 @@ mod tests {
         let root: IndexPage = btree.load_page(btree.root_page_id, None)?;
         assert_eq!(root.get_type(), &PageType::Internal);
         assert!(root.len() == 3);
-        btree.bpm.lock().unpin(&btree.root_page_id, None);
+        btree.unpin_page(btree.root_page_id, None);
 
         for i in 0..key_count as Key {
             let found = btree.search(i);
@@ -319,5 +358,55 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_single_page_iteration() {
+        let mut btree = setup_bplus_tree();
+        let key: Key = 1;
+        let value: LeafValue = [1, 2, 3, 4, 5, 6];
+
+        btree.insert(key, value).expect("Insert failed");
+
+        let mut iter = btree
+            .first_leaf_page_iter(None)
+            .expect("Iterator failed to initialize");
+        assert_eq!(iter.next(), Some((key, TupleId::from_bytes(&value))));
+        assert_eq!(iter.next(), None); // No more items
+    }
+
+    #[test]
+    fn test_multiple_page_iteration() -> Result<()> {
+        let mut btree = setup_bplus_tree();
+
+        let key_count = KEYS_PER_NODE * KEYS_PER_NODE;
+        for i in key_count..=0 {
+            let mut value: LeafValue = [0; 6];
+            value[..4].copy_from_slice(&i.to_ne_bytes());
+            btree.insert(i as u32, value)?;
+        }
+
+        let iter = btree
+            .first_leaf_page_iter(None)
+            .expect("Iterator failed to initialize");
+
+        // Verify iterator moves across pages correctly
+        iter.enumerate().for_each(|(i, (key, value))| {
+            assert_eq!(key, i as Key);
+            assert_eq!(value.0, i as u32);
+        });
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_page_iteration() {
+        let btree = setup_bplus_tree();
+        let mut iter = btree
+            .first_leaf_page_iter(None)
+            .expect("Iterator failed to initialize");
+
+        // Ensure the iterator produces no results for an empty page
+        assert_eq!(iter.next(), None);
     }
 }

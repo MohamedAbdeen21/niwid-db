@@ -37,7 +37,6 @@ pub struct IndexPageData {
     __padding: [u8; 4],
 }
 
-#[allow(unused)]
 pub struct IndexPage {
     pub data: *mut IndexPageData,
     latch: Arc<Latch>,
@@ -45,7 +44,6 @@ pub struct IndexPage {
     parent_page_id: PageId,
 }
 
-#[allow(unused)]
 impl IndexPage {
     fn mark_dirty(&mut self) {
         self.data_mut().is_dirty = true;
@@ -75,6 +73,7 @@ impl IndexPage {
         Ok(())
     }
 
+    #[allow(unused)]
     pub fn delete(&mut self, key: Key) -> Result<()> {
         let data = self.data_mut();
 
@@ -105,7 +104,7 @@ impl IndexPage {
         assert_eq!(self.get_type(), &PageType::Internal);
         let data = self.data();
 
-        let mut pos = match data.keys.binary_search(&key) {
+        let pos = match data.keys.binary_search(&key) {
             Ok(pos) => pos + 1,
             Err(pos) => pos,
         };
@@ -178,6 +177,7 @@ impl IndexPage {
         (new_page, median)
     }
 
+    #[allow(unused)]
     pub fn merge(mut self, mut old_page: IndexPage) {
         unimplemented!("Merge is not implemented yet")
     }
@@ -230,6 +230,11 @@ impl<'a> From<&'a mut Page> for IndexPage {
 
 #[allow(unused)]
 impl IndexPage {
+    pub fn get_pair_at(&self, index: usize) -> (Key, LeafValue) {
+        let data = self.data();
+        (data.keys[index], data.values[index])
+    }
+
     pub fn is_almost_full(&self) -> bool {
         self.len() == KEYS_PER_NODE - 1
     }
