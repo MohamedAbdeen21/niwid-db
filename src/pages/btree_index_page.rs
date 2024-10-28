@@ -10,7 +10,7 @@ use super::{Page, PageData, PageId, INVALID_PAGE};
 use std::fmt::Debug;
 
 /// B+ Branching Factor
-const FACTOR: usize = 408;
+const FACTOR: usize = 407;
 // Leaf node pages can actually hold 340 keys
 // but it's ok for the sake of simplicity
 pub const KEYS_PER_NODE: usize = FACTOR - 1;
@@ -33,7 +33,8 @@ pub struct IndexPageData {
     prev: PageId,
     next: PageId,
     pub keys: ArrayVec<Key, KEYS_PER_NODE>,
-    pub values: ArrayVec<LeafValue, { KEYS_PER_NODE + 1 }>,
+    pub values: ArrayVec<LeafValue, { FACTOR + 1 }>,
+    __padding: [u8; 4],
 }
 
 #[allow(unused)]
@@ -59,7 +60,11 @@ impl IndexPage {
         };
 
         data.keys.insert(pos, key);
-        data.values.insert(pos, value);
+        if matches!(data.page_type, PageType::Leaf) {
+            data.values.insert(pos, value);
+        } else {
+            data.values.insert(pos + 1, value);
+        }
 
         Ok(())
     }
@@ -82,11 +87,6 @@ impl IndexPage {
         assert_eq!(self.get_type(), &PageType::Leaf);
         let data = self.data();
 
-        println!(
-            "Keys: {:?}, Values: {:?}, Key: {}",
-            data.keys, data.values, key
-        );
-
         match data.keys.binary_search(&key) {
             Ok(pos) => Some(TupleId::from_bytes(&data.values[pos])),
             Err(_) => None,
@@ -102,8 +102,6 @@ impl IndexPage {
             Err(pos) => pos,
         };
 
-        pos = if pos == self.len() { pos - 1 } else { pos };
-
         TupleId::from_bytes(&data.values[pos]).0
     }
 
@@ -113,7 +111,7 @@ impl IndexPage {
         self.data_mut().keys.insert(0, key);
     }
 
-    pub fn split(&mut self, mut new_page: IndexPage) -> (Self, Key) {
+    pub fn split_internal(&mut self, mut new_page: IndexPage) -> (Self, Key) {
         let mid_index = self.len() / 2;
 
         let median = self.data().keys[mid_index];
@@ -123,6 +121,31 @@ impl IndexPage {
         }
 
         for value in &self.data().values[mid_index + 1..] {
+            new_page.data_mut().values.push(*value);
+        }
+
+        // Move remaining keys/values to the original node
+        self.data_mut().keys.truncate(mid_index);
+        self.data_mut().values.truncate(mid_index + 1);
+
+        new_page.set_type(self.get_type().clone());
+
+        self.data_mut().next = new_page.get_page_id();
+        new_page.data_mut().prev = self.get_page_id();
+
+        (new_page, median)
+    }
+
+    pub fn split_leaf(&mut self, mut new_page: IndexPage) -> (Self, Key) {
+        let mid_index = self.len() / 2;
+
+        let median = self.data().keys[mid_index];
+
+        for key in &self.data().keys[mid_index..] {
+            new_page.data_mut().keys.push(*key);
+        }
+
+        for value in &self.data().values[mid_index..] {
             new_page.data_mut().values.push(*value);
         }
 
@@ -190,6 +213,10 @@ impl<'a> From<&'a mut Page> for IndexPage {
 
 #[allow(unused)]
 impl IndexPage {
+    pub fn is_almost_full(&self) -> bool {
+        self.len() == KEYS_PER_NODE - 1
+    }
+
     pub fn is_full(&self) -> bool {
         self.len() == KEYS_PER_NODE
     }

@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::btree_index_page::{IndexPage, PageType};
 use crate::tuple::TupleId;
+use crate::txn_manager::TxnId;
 use crate::{pages::PageId, tuple::TUPLE_ID_SIZE};
 use anyhow::Result;
 
@@ -94,6 +95,15 @@ impl BPlusTree {
         Ok(new_page)
     }
 
+    fn load_page(&self, page_id: PageId, txn_id: Option<TxnId>) -> Result<IndexPage> {
+        Ok(self
+            .bpm
+            .lock()
+            .fetch_frame(page_id, txn_id)?
+            .writer()
+            .into())
+    }
+
     /// Inserts key-value pair to a page. If a split happens, return the page id of the new page
     /// and the median value to be used by parent (caller function) or None if no split happens
     fn insert_into_page(
@@ -106,8 +116,12 @@ impl BPlusTree {
             PageType::Leaf => {
                 if page.is_full() {
                     let new_page = self.new_leaf_page()?;
-                    let (right, median) = page.split(new_page);
-                    page.insert(key, value)?;
+                    let (mut right, median) = page.split_leaf(new_page);
+                    if key < median {
+                        page.insert(key, value)?;
+                    } else {
+                        right.insert(key, value)?;
+                    }
                     Ok(Some((right, median)))
                 } else {
                     page.insert(key, value)?;
@@ -116,22 +130,24 @@ impl BPlusTree {
             }
             PageType::Internal => {
                 let child_id = page.find_leaf(key);
-                let mut child: IndexPage =
-                    self.bpm.lock().fetch_frame(child_id, None)?.writer().into();
+                let mut child = self.load_page(child_id, None)?;
                 let ret = match self.insert_into_page(&mut child, key, value)? {
                     None => Ok(None),
                     Some((new_page, new_key)) => {
                         let mut value = [0; 6];
                         value[..4].copy_from_slice(&new_page.get_page_id().to_ne_bytes());
 
-                        if page.is_full() {
+                        if page.is_almost_full() {
                             let new_page = self.new_inner_page()?;
-                            let (right, median) = page.split(new_page);
-
-                            page.insert(new_key, value)?;
+                            let (mut right, median) = page.split_internal(new_page);
+                            if key < median {
+                                page.insert(new_key, value)?;
+                            } else {
+                                right.insert(new_key, value)?;
+                            }
                             Ok(Some((right, median)))
                         } else {
-                            page.insert(key, value)?;
+                            page.insert(new_key, value)?;
                             Ok(None)
                         }
                     }
@@ -321,7 +337,6 @@ mod tests {
             btree.insert(i, value)?;
         }
 
-        // println!("Root: {}", btree.root_page_id);
         // Verify promoted keys are in the right nodes
         let root: IndexPage = btree
             .bpm
@@ -330,46 +345,43 @@ mod tests {
             .reader()
             .into();
         assert_eq!(root.get_type(), &PageType::Internal);
-        assert!(root.len() > 1); // Root should have promoted keys
+        assert!(root.len() == 3); // Root should have promoted keys
+
+        for i in 0..=(KEYS_PER_NODE * 2) as Key {
+            assert_eq!(btree.search(i).unwrap().0, i);
+        }
 
         btree.bpm.lock().unpin(&btree.root_page_id, None);
         Ok(())
     }
 
-    // #[test]
-    // fn test_insert_and_verify_height_three_tree() -> Result<()> {
-    //     let mut btree = setup_bplus_tree();
-    //
-    //     // Insert keys up to height 3 threshold
-    //     let key_count = 408 * 408 + 1;
-    //     for i in 0i32..key_count {
-    //         let mut value: LeafValue = [0; 6];
-    //         value[..4].copy_from_slice(&i.to_ne_bytes());
-    //         btree.insert(i as u32, value)?;
-    //     }
-    //
-    //     // Check if the root is an internal node (indicating height > 1)
-    //     let root: IndexPage = btree
-    //         .bpm
-    //         .lock()
-    //         .fetch_frame(btree.root_page_id, None)?
-    //         .reader()
-    //         .into();
-    //     assert_eq!(root.get_type(), &PageType::Internal);
-    //     assert!(root.len() == 2);
-    //     btree.bpm.lock().unpin(&btree.root_page_id, None);
-    //
-    //     // Verify search on specific keys
-    //     let keys_to_check = [
-    //         0,         // first key
-    //         408 * 204, // approximate median key
-    //         408 * 408, // last key
-    //     ];
-    //     for &key in &keys_to_check {
-    //         let found_value = btree.search(key);
-    //         assert!(found_value.is_some(), "Key {} should be present", key);
-    //     }
-    //
-    //     Ok(())
-    // }
+    #[test]
+    fn test_insert_and_verify_height_three_tree() -> Result<()> {
+        let mut btree = setup_bplus_tree();
+
+        // Insert keys up to height 3 threshold
+        let key_count = 408 * 408 + 1;
+        for i in 0i32..key_count {
+            let mut value: LeafValue = [0; 6];
+            value[..4].copy_from_slice(&i.to_ne_bytes());
+            btree.insert(i as u32, value)?;
+        }
+
+        // Check if the root is an internal node (indicating height > 1)
+        let root: IndexPage = btree
+            .bpm
+            .lock()
+            .fetch_frame(btree.root_page_id, None)?
+            .reader()
+            .into();
+        assert_eq!(root.get_type(), &PageType::Internal);
+        assert!(root.len() == 3);
+        btree.bpm.lock().unpin(&btree.root_page_id, None);
+
+        for i in 0..key_count as Key {
+            assert_eq!(btree.search(i).unwrap().0, i, "Key {} not found", i);
+        }
+
+        Ok(())
+    }
 }
