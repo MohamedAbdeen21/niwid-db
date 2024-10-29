@@ -1,13 +1,17 @@
 use std::sync::Arc;
 
-use crate::index::btree::{Key, LeafValue};
 use crate::latch::Latch;
-use crate::tuple::{TupleExt, TupleId};
+use crate::pages::{Page, PageData, PageId, INVALID_PAGE};
+use crate::tuple::{TupleExt, TupleId, TUPLE_ID_SIZE};
 use anyhow::{anyhow, Result};
 use arrayvec::ArrayVec;
 
-use super::{Page, PageData, PageId, INVALID_PAGE};
 use std::fmt::Debug;
+
+// TupleId is u32 + u16 (4 + 2 = 6), but rust pads tuples
+// so we store them directly as bytes
+pub type LeafValue = [u8; TUPLE_ID_SIZE];
+pub type Key = u32; // currently numeric types are 4 bytes
 
 /// B+ Branching Factor
 const FACTOR: usize = 407;
@@ -15,10 +19,13 @@ const FACTOR: usize = 407;
 // but it's ok for the sake of simplicity
 pub const KEYS_PER_NODE: usize = FACTOR - 1;
 
-#[allow(unused)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PageType {
     /// page initialized without type
+    /// note that this variant is not initialized
+    /// new empty pages (all zeroes) will automatically
+    /// be read as this variant
+    #[allow(unused)]
     Invalid,
     Leaf,
     Internal,

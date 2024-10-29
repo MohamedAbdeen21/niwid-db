@@ -17,7 +17,7 @@ pub const META_SIZE: usize = mem::size_of::<TupleMetaData>();
 pub const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
 
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct TablePageHeader {
     _padding: [u8; 3],
     is_dirty: bool,
@@ -33,7 +33,7 @@ pub struct TablePageHeader {
 /// all other fields are helpers (pointers and flags)
 /// that are computed on the fly
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct TablePageData {
     header: TablePageHeader,
     bytes: [u8; PAGE_END],
@@ -310,7 +310,7 @@ impl TablePageHeader {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct TablePageSlot {
     offset: u16,
     size: u16,

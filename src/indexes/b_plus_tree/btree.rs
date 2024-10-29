@@ -1,16 +1,11 @@
 use crate::buffer_pool::ArcBufferPool;
-use crate::pages::btree_index_page::{IndexPage, PageType};
+use crate::pages::indexes::b_plus_tree::{IndexPage, Key, LeafValue, PageType};
+use crate::pages::PageId;
 use crate::tuple::TupleId;
 use crate::txn_manager::TxnId;
-use crate::{pages::PageId, tuple::TUPLE_ID_SIZE};
 use anyhow::Result;
 
 use super::btree_index_iterator::IndexPageIterator;
-
-// TupleId is u32 + u16 (4 + 2 = 6), but rust pads tuples
-// so we store them directly as bytes
-pub type LeafValue = [u8; TUPLE_ID_SIZE];
-pub type Key = u32; // currently numeric types are 4 bytes
 
 #[allow(unused)]
 pub struct BPlusTree {
@@ -213,7 +208,7 @@ impl BPlusTree {
 mod tests {
     use super::*;
     use crate::buffer_pool::tests::test_arc_bpm;
-    use crate::pages::btree_index_page::KEYS_PER_NODE;
+    use crate::pages::indexes::b_plus_tree::KEYS_PER_NODE;
     use crate::tuple::{TupleExt, TupleId};
     use anyhow::Result;
 

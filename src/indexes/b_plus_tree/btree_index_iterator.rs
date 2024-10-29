@@ -1,9 +1,8 @@
 use crate::buffer_pool::ArcBufferPool;
-use crate::pages::{btree_index_page::IndexPage, INVALID_PAGE};
+use crate::pages::indexes::b_plus_tree::{IndexPage, Key};
+use crate::pages::INVALID_PAGE;
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::TxnId;
-
-use super::btree::Key;
 
 pub struct IndexPageIterator {
     page: IndexPage,
