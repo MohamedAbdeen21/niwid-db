@@ -152,7 +152,13 @@ impl Executable for Update {
 
             let new_tuple = Tuple::new(new_tuple, &schema);
 
-            table.update(Some(tuple_id), new_tuple)?;
+            if let Err(err) = table.update(Some(tuple_id), new_tuple) {
+                table.rollback_txn()?;
+                if is_temp {
+                    ctx.rollback_txn()?;
+                }
+                return Err(err);
+            }
         }
 
         table.commit_txn()?;
