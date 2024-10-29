@@ -20,6 +20,7 @@ const FACTOR: usize = 407;
 pub const KEYS_PER_NODE: usize = FACTOR - 1;
 
 #[derive(Debug, Clone, PartialEq)]
+#[repr(u32)] // avoid manual padding in IndexPageData
 pub enum PageType {
     /// page initialized without type
     /// note that this variant is not initialized
@@ -28,7 +29,7 @@ pub enum PageType {
     #[allow(unused)]
     Invalid,
     Leaf,
-    Internal,
+    Inner,
 }
 
 // shared between leaves and inner nodes for simplicity
@@ -40,8 +41,8 @@ pub struct IndexPageData {
     prev: PageId,
     next: PageId,
     pub keys: ArrayVec<Key, KEYS_PER_NODE>,
-    pub values: ArrayVec<LeafValue, { FACTOR + 1 }>,
-    __padding: [u8; 4],
+    pub values: ArrayVec<LeafValue, FACTOR>,
+    ____padding: [u8; 8],
 }
 
 pub struct IndexPage {
@@ -97,6 +98,7 @@ impl IndexPage {
         Ok(())
     }
 
+    /// Find a key in a leaf page
     pub fn search(&self, key: Key) -> Option<TupleId> {
         assert_eq!(self.get_type(), &PageType::Leaf);
         let data = self.data();
@@ -107,8 +109,17 @@ impl IndexPage {
         }
     }
 
+    /// find the index of a key in a leaf page
+    pub fn find_index(&self, key: Key) -> Result<usize, usize> {
+        assert_eq!(self.get_type(), &PageType::Leaf);
+        let data = self.data();
+
+        data.keys.binary_search(&key)
+    }
+
+    /// find the leaf page that contains a key
     pub fn find_leaf(&self, key: Key) -> PageId {
-        assert_eq!(self.get_type(), &PageType::Internal);
+        assert_eq!(self.get_type(), &PageType::Inner);
         let data = self.data();
 
         let pos = match data.keys.binary_search(&key) {
@@ -119,6 +130,7 @@ impl IndexPage {
         TupleId::from_bytes(&data.values[pos]).0
     }
 
+    /// helper to populate a new inner page
     pub fn insert_first_pair(&mut self, left: LeafValue, right: LeafValue, key: Key) {
         self.data_mut().values.insert(0, left);
         self.data_mut().values.insert(1, right);
@@ -126,7 +138,7 @@ impl IndexPage {
         self.mark_dirty();
     }
 
-    pub fn split_internal(&mut self, mut new_page: IndexPage) -> (Self, Key) {
+    pub fn split_inner(&mut self, mut new_page: IndexPage) -> (Self, Key) {
         let mid_index = self.len() / 2;
 
         let median = self.data().keys[mid_index];
@@ -143,8 +155,8 @@ impl IndexPage {
         self.data_mut().keys.truncate(mid_index);
         self.data_mut().values.truncate(mid_index + 1);
 
-        assert!(self.get_type() == &PageType::Internal);
-        new_page.set_type(PageType::Internal);
+        assert!(self.get_type() == &PageType::Inner);
+        new_page.set_type(PageType::Inner);
 
         self.data_mut().next = new_page.get_page_id();
         new_page.data_mut().prev = self.get_page_id();
@@ -240,10 +252,6 @@ impl IndexPage {
     pub fn get_pair_at(&self, index: usize) -> (Key, LeafValue) {
         let data = self.data();
         (data.keys[index], data.values[index])
-    }
-
-    pub fn is_almost_full(&self) -> bool {
-        self.len() == KEYS_PER_NODE - 1
     }
 
     pub fn is_full(&self) -> bool {

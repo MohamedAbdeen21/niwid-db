@@ -5,7 +5,7 @@ use crate::tuple::TupleId;
 use crate::txn_manager::TxnId;
 use anyhow::Result;
 
-use super::btree_index_iterator::IndexPageIterator;
+use super::btree_iterator::IndexPageIterator;
 
 #[allow(unused)]
 pub struct BPlusTree {
@@ -16,44 +16,51 @@ pub struct BPlusTree {
 #[allow(dead_code)]
 impl BPlusTree {
     pub fn new(root_page_id: PageId, bpm: ArcBufferPool) -> Self {
-        let mut page: IndexPage = bpm
-            .lock()
-            .fetch_frame(root_page_id, None)
-            .unwrap()
-            .writer()
-            .into();
+        let tree = Self { root_page_id, bpm };
+
+        let mut page = tree.load_page(root_page_id, None).unwrap();
         page.set_type(PageType::Leaf);
-        Self { root_page_id, bpm }
+        tree.unpin_page(root_page_id, None);
+
+        tree
     }
 
     pub fn delete(&mut self, _key: Key) -> Result<()> {
         unimplemented!()
     }
 
+    /// Helper that create a LeafValue from a page id as this is a common operation
+    fn to_value(&self, page_id: PageId) -> LeafValue {
+        let mut value = [0; 6];
+        value[..4].copy_from_slice(&page_id.to_ne_bytes());
+        value
+    }
+
     pub fn search(&self, key: Key) -> Option<TupleId> {
         let page: IndexPage = self.load_page(self.root_page_id, None).unwrap();
 
-        let ret = self.search_page(page, key);
+        let leaf = self.find_leaf(page, key);
+        let ret = leaf.search(key);
 
-        self.unpin_page(self.root_page_id, None);
+        self.unpin_page(leaf.get_page_id(), None);
         ret
     }
 
-    fn search_page(&self, page: IndexPage, key: Key) -> Option<TupleId> {
+    /// unpins the input page once the search is done
+    fn find_leaf(&self, page: IndexPage, key: Key) -> IndexPage {
         match page.get_type() {
-            PageType::Internal => {
+            PageType::Inner => {
                 let child_id = page.find_leaf(key);
+                self.unpin_page(page.get_page_id(), None);
                 let child: IndexPage = self.load_page(child_id, None).unwrap();
-                let ret = self.search_page(child, key);
-
-                self.unpin_page(child_id, None);
-                ret
+                self.find_leaf(child, key)
             }
-            PageType::Leaf => page.search(key),
+            PageType::Leaf => page,
             PageType::Invalid => unreachable!("Page type was not initialized properly"),
         }
     }
 
+    /// returns a new pinned leaf page
     fn new_leaf_page(&self) -> Result<IndexPage> {
         let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
         let mut new_page = self.load_page(new_page_id, None)?; // increment pin count
@@ -61,10 +68,11 @@ impl BPlusTree {
         Ok(new_page)
     }
 
+    /// returns a new pinned inner page
     fn new_inner_page(&self) -> Result<IndexPage> {
         let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
         let mut new_page = self.load_page(new_page_id, None)?; // increment pin count
-        new_page.set_type(PageType::Internal);
+        new_page.set_type(PageType::Inner);
         Ok(new_page)
     }
 
@@ -90,44 +98,44 @@ impl BPlusTree {
         value: LeafValue,
     ) -> Result<Option<(IndexPage, Key)>> {
         match page.get_type() {
-            PageType::Leaf => {
-                if page.is_full() {
-                    let new_page = self.new_leaf_page()?;
-                    let (mut right, median) = page.split_leaf(new_page);
-                    if key < median {
-                        page.insert(key, value)?;
-                    } else {
-                        right.insert(key, value)?;
-                    }
-                    Ok(Some((right, median)))
-                } else {
+            PageType::Leaf if page.is_full() => {
+                let new_page = self.new_leaf_page()?;
+                let (mut right, median) = page.split_leaf(new_page);
+                if key < median {
                     page.insert(key, value)?;
-                    Ok(None)
+                } else {
+                    right.insert(key, value)?;
                 }
+                Ok(Some((right, median)))
             }
-            PageType::Internal => {
+            PageType::Leaf => {
+                page.insert(key, value)?;
+                Ok(None)
+            }
+            PageType::Inner => {
                 let child_id = page.find_leaf(key);
                 let mut child = self.load_page(child_id, None)?;
                 let ret = match self.insert_into_page(&mut child, key, value)? {
                     None => Ok(None),
-                    Some((new_page, new_key)) => {
-                        let mut value = [0; 6];
-                        value[..4].copy_from_slice(&new_page.get_page_id().to_ne_bytes());
+                    Some((new_page, new_key)) if page.is_full() => {
+                        let value = self.to_value(new_page.get_page_id());
                         self.unpin_page(new_page.get_page_id(), None);
 
-                        if page.is_almost_full() {
-                            let new_page = self.new_inner_page()?;
-                            let (mut right, median) = page.split_internal(new_page);
-                            if key < median {
-                                page.insert(new_key, value)?;
-                            } else {
-                                right.insert(new_key, value)?;
-                            }
-                            Ok(Some((right, median)))
-                        } else {
+                        let new_page = self.new_inner_page()?;
+                        let (mut right, median) = page.split_inner(new_page);
+                        if key < median {
                             page.insert(new_key, value)?;
-                            Ok(None)
+                        } else {
+                            right.insert(new_key, value)?;
                         }
+                        Ok(Some((right, median)))
+                    }
+                    Some((new_page, new_key)) => {
+                        let value = self.to_value(new_page.get_page_id());
+                        self.unpin_page(new_page.get_page_id(), None);
+
+                        page.insert(new_key, value)?;
+                        Ok(None)
                     }
                 };
 
@@ -147,13 +155,12 @@ impl BPlusTree {
     ) -> Result<()> {
         let mut new_page = self.new_inner_page()?;
         self.root_page_id = new_page.get_page_id();
+
         left_page.set_parent_id(self.root_page_id);
         right_page.set_parent_id(self.root_page_id);
 
-        let mut left_value = [0; 6];
-        left_value[..4].copy_from_slice(&left_page.get_page_id().to_ne_bytes());
-        let mut right_value = [0; 6];
-        right_value[..4].copy_from_slice(&right_page.get_page_id().to_ne_bytes());
+        let left_value = self.to_value(left_page.get_page_id());
+        let right_value = self.to_value(right_page.get_page_id());
 
         self.unpin_page(left_page.get_page_id(), None);
         self.unpin_page(right_page.get_page_id(), None);
@@ -176,18 +183,37 @@ impl BPlusTree {
         ret
     }
 
-    fn first_leaf_page_iter(&self, txn_id: Option<TxnId>) -> Result<IndexPageIterator> {
+    fn iter(&self, txn_id: Option<TxnId>) -> Result<IndexPageIterator> {
         let mut page_id = self.root_page_id;
         let mut page = self.load_page(page_id, txn_id)?;
 
-        while page.get_type() == &PageType::Internal {
+        while page.get_type() == &PageType::Inner {
             let (_, value) = page.get_pair_at(0);
             self.unpin_page(page.get_page_id(), txn_id);
             page_id = PageId::from_ne_bytes(value[..4].try_into().unwrap());
             page = self.load_page(page_id, txn_id)?;
         }
 
+        // iterator expects an already pinned page
         Ok(IndexPageIterator::new(page, 0, self.bpm.clone(), txn_id))
+    }
+
+    pub fn scan_from(
+        &self,
+        txn_id: Option<TxnId>,
+        key: Key,
+        mut f: impl FnMut(&(Key, TupleId)) -> Result<()>,
+    ) -> Result<()> {
+        // unpinned by search
+        let root = self.load_page(self.root_page_id, txn_id)?;
+        let page = self.find_leaf(root, key);
+        let index = match page.find_index(key) {
+            Ok(pos) => pos,
+            Err(pos) => pos,
+        };
+
+        IndexPageIterator::new(page, index, self.bpm.clone(), txn_id)
+            .try_for_each(|entry| f(&entry))
     }
 
     pub fn scan(
@@ -195,8 +221,7 @@ impl BPlusTree {
         txn_id: Option<TxnId>,
         mut f: impl FnMut(&(Key, TupleId)) -> Result<()>,
     ) -> Result<()> {
-        self.first_leaf_page_iter(txn_id)?
-            .try_for_each(|entry| f(&entry))
+        self.iter(txn_id)?.try_for_each(|entry| f(&entry))
     }
 
     pub fn get_root_page_id(&self) -> PageId {
@@ -274,7 +299,7 @@ mod tests {
 
         // Check if the root split by confirming the B+ tree structure
         let root = btree.load_page(btree.root_page_id, None)?;
-        assert_eq!(root.get_type(), &PageType::Internal);
+        assert_eq!(root.get_type(), &PageType::Inner);
         assert!(root.len() == 1);
         btree.unpin_page(btree.root_page_id, None);
 
@@ -310,14 +335,13 @@ mod tests {
 
         // Insert enough key-value pairs to cause multiple splits and promotions
         for i in 0..=(KEYS_PER_NODE * 2) as Key {
-            let mut value: LeafValue = [0; 6];
-            value[..4].copy_from_slice(&i.to_ne_bytes());
+            let value = btree.to_value(i);
             btree.insert(i, value)?;
         }
 
         // Verify promoted keys are in the right nodes
         let root = btree.load_page(btree.root_page_id, None)?;
-        assert_eq!(root.get_type(), &PageType::Internal);
+        assert_eq!(root.get_type(), &PageType::Inner);
         assert!(root.len() == 3); // Root should have promoted keys
 
         for i in 0..=(KEYS_PER_NODE * 2) as Key {
@@ -334,15 +358,14 @@ mod tests {
 
         // Insert keys up to height 3 threshold
         let key_count = 408 * 408 + 1;
-        for i in 0i32..key_count {
-            let mut value: LeafValue = [0; 6];
-            value[..4].copy_from_slice(&i.to_ne_bytes());
-            btree.insert(i as u32, value)?;
+        for i in 0u32..key_count {
+            let value = btree.to_value(i);
+            btree.insert(i, value)?;
         }
 
         // Check if the root is an internal node (indicating height > 1)
         let root: IndexPage = btree.load_page(btree.root_page_id, None)?;
-        assert_eq!(root.get_type(), &PageType::Internal);
+        assert_eq!(root.get_type(), &PageType::Inner);
         assert!(root.len() == 3);
         btree.unpin_page(btree.root_page_id, None);
 
@@ -363,9 +386,7 @@ mod tests {
 
         btree.insert(key, value).expect("Insert failed");
 
-        let mut iter = btree
-            .first_leaf_page_iter(None)
-            .expect("Iterator failed to initialize");
+        let mut iter = btree.iter(None).expect("Iterator failed to initialize");
         assert_eq!(iter.next(), Some((key, TupleId::from_bytes(&value))));
         assert_eq!(iter.next(), None); // No more items
     }
@@ -374,22 +395,23 @@ mod tests {
     fn test_multiple_page_iteration() -> Result<()> {
         let mut btree = setup_bplus_tree();
 
-        let key_count = KEYS_PER_NODE * KEYS_PER_NODE;
+        let key_count = (KEYS_PER_NODE * KEYS_PER_NODE) as u32;
         for i in key_count..=0 {
-            let mut value: LeafValue = [0; 6];
-            value[..4].copy_from_slice(&i.to_ne_bytes());
-            btree.insert(i as u32, value)?;
+            let value = btree.to_value(i);
+            btree.insert(i, value)?;
         }
 
-        let iter = btree
-            .first_leaf_page_iter(None)
-            .expect("Iterator failed to initialize");
-
         // Verify iterator moves across pages correctly
-        iter.enumerate().for_each(|(i, (key, value))| {
-            assert_eq!(key, i as Key);
-            assert_eq!(value.0, i as u32);
-        });
+        btree.scan(None, |(key, (page, _))| {
+            assert_eq!(key, page);
+            Ok(())
+        })?;
+
+        let mid = KEYS_PER_NODE / 2;
+        btree.scan_from(None, mid as u32, |(key, (page, _))| {
+            assert_eq!(key, page);
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -397,11 +419,71 @@ mod tests {
     #[test]
     fn test_empty_page_iteration() {
         let btree = setup_bplus_tree();
-        let mut iter = btree
-            .first_leaf_page_iter(None)
-            .expect("Iterator failed to initialize");
+        let mut iter = btree.iter(None).expect("Iterator failed to initialize");
 
         // Ensure the iterator produces no results for an empty page
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_scan_from_key_exists() {
+        let mut btree = setup_bplus_tree();
+        let values = [
+            (1, [1, 0, 0, 0, 0, 0]),
+            (2, [2, 0, 0, 0, 0, 0]),
+            (3, [3, 0, 0, 0, 0, 0]),
+            (4, [4, 0, 0, 0, 0, 0]),
+            (5, [5, 0, 0, 0, 0, 0]),
+        ];
+
+        // Insert multiple keys
+        for (key, value) in values.iter() {
+            btree.insert(*key, *value).expect("Insert failed");
+        }
+
+        // Start scanning from key 3, expecting (3, 4, 5)
+        let mut collected = Vec::new();
+        btree
+            .scan_from(None, 3, |&(key, ref value)| {
+                collected.push((key, *value));
+                Ok(())
+            })
+            .expect("Scan from key failed");
+
+        let expected = [
+            (3, TupleId::from_bytes(&values[2].1)),
+            (4, TupleId::from_bytes(&values[3].1)),
+            (5, TupleId::from_bytes(&values[4].1)),
+        ];
+        assert_eq!(collected, expected);
+    }
+
+    #[test]
+    fn test_scan_from_key_does_not_exist_gt() {
+        let mut btree = setup_bplus_tree();
+        let values = [
+            (1, [1, 0, 0, 0, 0, 0]),
+            (3, [3, 0, 0, 0, 0, 0]),
+            (5, [5, 0, 0, 0, 0, 0]),
+        ];
+
+        for (key, value) in values.iter() {
+            btree.insert(*key, *value).expect("Insert failed");
+        }
+
+        // Start scanning from non-existing key 2, expecting (3, 5)
+        let mut collected = Vec::new();
+        btree
+            .scan_from(None, 2, |&(key, ref value)| {
+                collected.push((key, *value));
+                Ok(())
+            })
+            .expect("Scan from non-existent key failed");
+
+        let expected = [
+            (3, TupleId::from_bytes(&values[1].1)),
+            (5, TupleId::from_bytes(&values[2].1)),
+        ];
+        assert_eq!(collected, expected);
     }
 }
