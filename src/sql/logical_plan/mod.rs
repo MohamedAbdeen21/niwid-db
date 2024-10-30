@@ -19,7 +19,7 @@ use anyhow::{anyhow, Result};
 use crate::catalog::ArcCatalog;
 use crate::tuple::schema::Schema;
 use crate::txn_manager::TxnId;
-use crate::types::{Types, ValueFactory};
+use crate::types::{Types, Value, ValueFactory};
 use crate::value;
 
 pub struct LogicalPlanBuilder {
@@ -606,6 +606,7 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
                     .join("."),
             ))
         }
+        Expr::Value(SqlValue::Null) => Ok(LogicalExpr::Literal(Value::Null)),
         e => todo!("{:?}", e),
     }
 }

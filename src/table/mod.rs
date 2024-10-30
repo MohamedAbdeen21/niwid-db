@@ -39,6 +39,7 @@ impl Table {
         txn_manager: ArcTransactionManager,
         name: String,
         schema: &Schema,
+        txn: Option<TxnId>,
     ) -> Result<Self> {
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
@@ -49,7 +50,7 @@ impl Table {
             first_page: page_id,
             last_page: page_id,
             blob_page,
-            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone())),
+            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), txn)),
             bpm,
             txn_manager,
             active_txn: None,
@@ -392,7 +393,7 @@ impl Table {
     pub fn truncate(&self) -> Result<Table> {
         let first_page = self.bpm.lock().new_page()?.reader().get_page_id();
         let last_page = first_page;
-        let index = BPlusTree::new(self.bpm.clone(), self.txn_manager.clone());
+        let index = BPlusTree::new(self.bpm.clone(), self.txn_manager.clone(), self.active_txn);
 
         Ok(Self {
             name: self.name.clone(),
@@ -436,7 +437,7 @@ mod tests {
             first_page: page,
             last_page: page,
             blob_page,
-            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone())),
+            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), None)),
             bpm,
             txn_manager,
             active_txn: None,

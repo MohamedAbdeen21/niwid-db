@@ -33,6 +33,7 @@ pub enum PageType {
 
 // shared between leaves and inner nodes for simplicity
 #[repr(C)]
+#[derive(Debug)]
 pub struct IndexPageData {
     _padding: [u8; 3],
     is_dirty: bool,
@@ -42,6 +43,7 @@ pub struct IndexPageData {
     pub values: ArrayVec<LeafValue, FACTOR>,
 }
 
+#[derive(Debug)]
 pub struct IndexPage {
     pub data: *mut IndexPageData,
     latch: Arc<Latch>,
@@ -82,6 +84,7 @@ impl IndexPage {
         Ok(())
     }
 
+    #[allow(unused)]
     pub fn delete(&mut self, key: Key) -> Result<()> {
         assert_eq!(self.get_type(), &PageType::Leaf);
 
@@ -112,6 +115,7 @@ impl IndexPage {
     }
 
     /// find the index of a key in a leaf page
+    #[allow(unused)]
     pub fn find_index(&self, key: Key) -> Result<usize, usize> {
         assert_eq!(self.get_type(), &PageType::Leaf);
         let data = self.data();
@@ -267,6 +271,7 @@ impl IndexPage {
 
     pub fn set_type(&mut self, page_type: PageType) {
         self.data_mut().page_type = page_type;
+        self.mark_dirty();
     }
 
     pub fn get_type(&self) -> &PageType {

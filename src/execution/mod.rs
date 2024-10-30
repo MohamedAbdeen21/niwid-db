@@ -237,7 +237,7 @@ impl Executable for Insert {
                 .lock()
                 .get_table_mut(&self.table_name, txn_id)
                 .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??
-                .insert(tuple);
+                .insert(tuple)?;
         }
 
         Ok(ResultSet::default())

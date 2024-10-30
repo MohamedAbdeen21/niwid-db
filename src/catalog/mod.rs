@@ -154,6 +154,7 @@ impl Catalog {
             self.txn_manager.clone(),
             table_name.to_string(),
             schema,
+            txn,
         )?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![

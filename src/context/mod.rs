@@ -277,4 +277,20 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_txns_with_sql() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("BEGIN")?;
+        ctx.execute_sql("CREATE TABLE test (a uint unique, b int not null);")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
+        assert!(ctx.execute_sql("INSERT INTO test VALUES (1, 5);").is_err());
+        assert!(ctx
+            .execute_sql("INSERT INTO test VALUES (8, null);")
+            .is_err());
+        let _result = ctx.execute_sql("SELECT * FROM test;")?;
+        ctx.execute_sql("COMMIT")?;
+
+        Ok(())
+    }
 }

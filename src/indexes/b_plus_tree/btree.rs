@@ -14,9 +14,8 @@ pub struct BPlusTree {
     pub txn_manager: ArcTransactionManager,
 }
 
-#[allow(dead_code)]
 impl BPlusTree {
-    pub fn new(bpm: ArcBufferPool, txn_manager: ArcTransactionManager) -> Self {
+    pub fn new(bpm: ArcBufferPool, txn_manager: ArcTransactionManager, txn: Option<TxnId>) -> Self {
         let root_page_id = bpm.lock().new_page().unwrap().writer().get_page_id();
 
         let tree = Self {
@@ -25,9 +24,16 @@ impl BPlusTree {
             txn_manager,
         };
 
-        let mut page = tree.load_page(root_page_id, None).unwrap();
+        if let Some(txn) = txn {
+            tree.txn_manager
+                .lock()
+                .touch_page(txn, root_page_id)
+                .unwrap();
+        }
+
+        let mut page = tree.load_page(root_page_id, txn).unwrap();
         page.set_type(PageType::Leaf);
-        tree.unpin_page(root_page_id, None);
+        tree.unpin_page(root_page_id, txn);
 
         tree
     }
@@ -44,6 +50,7 @@ impl BPlusTree {
         }
     }
 
+    #[allow(unused)]
     pub fn delete(&mut self, txn: Option<TxnId>, key: impl Into<Key>) -> Result<()> {
         let key = key.into();
         let root = self.load_page(self.root_page_id, txn).unwrap();
@@ -191,14 +198,14 @@ impl BPlusTree {
                     }
                     Some((new_page, new_key)) => {
                         let value = self.to_value(new_page.get_page_id());
-                        self.unpin_page(new_page.get_page_id(), None);
+                        self.unpin_page(new_page.get_page_id(), txn);
 
                         page.insert(new_key, value)?;
                         Ok(None)
                     }
                 };
 
-                self.unpin_page(child_id, None);
+                self.unpin_page(child_id, txn);
 
                 ret
             }
@@ -230,8 +237,8 @@ impl BPlusTree {
         root.insert_first_pair(left_value, right_value, median);
 
         // root node is unpinned in insertion method
-        self.unpin_page(left_page.get_page_id(), None);
-        self.unpin_page(right_page.get_page_id(), None);
+        self.unpin_page(left_page.get_page_id(), txn);
+        self.unpin_page(right_page.get_page_id(), txn);
         Ok(())
     }
 
@@ -252,11 +259,13 @@ impl BPlusTree {
             Err(e) => Err(e),
         };
 
-        self.unpin_page(self.root_page_id, None);
+        // println!("{} {:?}", self.root_page_id);
+        self.unpin_page(self.root_page_id, txn);
 
         ret
     }
 
+    #[allow(unused)]
     fn iter(&self, txn_id: Option<TxnId>) -> Result<IndexPageIterator> {
         let mut page = self.load_page(self.root_page_id, txn_id)?;
 
@@ -271,6 +280,7 @@ impl BPlusTree {
         Ok(IndexPageIterator::new(page, 0, self.bpm.clone(), txn_id))
     }
 
+    #[allow(unused)]
     pub fn scan_from(
         &self,
         txn: Option<TxnId>,
@@ -289,6 +299,7 @@ impl BPlusTree {
         IndexPageIterator::new(page, index, self.bpm.clone(), txn).try_for_each(|entry| f(&entry))
     }
 
+    #[allow(unused)]
     pub fn scan(
         &self,
         txn_id: Option<TxnId>,
@@ -315,7 +326,7 @@ mod tests {
     fn setup_bplus_tree() -> BPlusTree {
         let bpm = test_arc_bpm(5);
         let txn_manager = test_arc_transaction_manager(bpm.clone());
-        BPlusTree::new(bpm, txn_manager)
+        BPlusTree::new(bpm, txn_manager, None)
     }
 
     #[test]
