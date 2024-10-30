@@ -1,6 +1,7 @@
 use crate::buffer_pool::ArcBufferPool;
-use crate::pages::indexes::b_plus_tree::{IndexPage, Key, LeafValue, PageType};
-use crate::pages::{PageId, INVALID_PAGE};
+use crate::pages::indexes::b_plus_tree::leaf_value::LeafValue;
+use crate::pages::indexes::b_plus_tree::{IndexPage, Key, PageType};
+use crate::pages::PageId;
 use crate::tuple::TupleId;
 use crate::txn_manager::TxnId;
 use anyhow::Result;
@@ -99,19 +100,6 @@ impl BPlusTree {
         self.bpm.lock().unpin(&page_id, txn_id);
     }
 
-    fn set_prev_next_pointers(&self, left: &mut IndexPage, right: &mut IndexPage) -> Result<()> {
-        if left.get_next_page_id() != INVALID_PAGE {
-            let mut next = self.load_page(left.get_next_page_id(), None)?;
-            right.set_next_page_id(next.get_page_id());
-            next.set_prev_page_id(right.get_page_id());
-            self.unpin_page(next.get_page_id(), None);
-        };
-        left.set_next_page_id(right.get_page_id());
-        right.set_prev_page_id(left.get_page_id());
-
-        Ok(())
-    }
-
     /// Inserts key-value pair to a page. If a split happens, return the page id of the new page
     /// and the median value to be used by parent (caller function) or None if no split happens
     fn insert_into_page(
@@ -124,7 +112,6 @@ impl BPlusTree {
             PageType::Leaf if page.is_full() => {
                 let new_page = self.new_leaf_page()?;
                 let (mut right, median) = page.split_leaf(new_page);
-                self.set_prev_next_pointers(page, &mut right)?;
                 if key < median {
                     page.insert(key, value)?;
                 } else {
@@ -147,7 +134,6 @@ impl BPlusTree {
 
                         let new_page = self.new_inner_page()?;
                         let (mut right, median) = page.split_inner(new_page);
-                        self.set_prev_next_pointers(page, &mut right)?;
 
                         if key < median {
                             page.insert(new_key, value)?;

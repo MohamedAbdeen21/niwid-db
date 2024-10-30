@@ -1,64 +1,19 @@
-use std::sync::Arc;
+pub mod leaf_value;
 
 use crate::latch::Latch;
-use crate::pages::{Page, PageData, PageId, SlotId};
-use crate::tuple::{TupleExt, TupleId};
+use crate::pages::{Page, PageData, PageId};
 use anyhow::{anyhow, Result};
 use arrayvec::ArrayVec;
-
+use leaf_value::LeafValue;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 // TupleId is u32 + u16 (4 + 2 = 6), but rust pads tuples
 // so we store them directly as bytes
 pub type Key = u32; // currently numeric types are 4 bytes
 
-#[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-pub struct LeafValue {
-    pub page_id: PageId,
-    pub slot_id: SlotId,
-    pub is_deleted: bool,
-}
-
-impl LeafValue {
-    pub fn new(page_id: PageId, slot_id: SlotId) -> Self {
-        Self {
-            page_id,
-            slot_id,
-            is_deleted: false,
-        }
-    }
-
-    pub fn tuple_id(&self) -> (PageId, SlotId) {
-        (self.page_id, self.slot_id)
-    }
-}
-
-impl TupleExt for LeafValue {
-    fn from_bytes(bytes: &[u8]) -> Self {
-        let (page_id, slot_id) = TupleId::from_bytes(bytes[..6].try_into().unwrap());
-        let is_deleted = bytes[6] == 1;
-        Self {
-            page_id,
-            slot_id,
-            is_deleted,
-        }
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        let deleted: u8 = if self.is_deleted { 1 } else { 0 };
-        let mut bytes = (self.page_id, self.slot_id).to_bytes();
-        bytes.push(deleted);
-        bytes
-    }
-
-    fn from_string(_s: &str) -> Self {
-        unreachable!()
-    }
-}
-
 /// B+ Branching Factor
-const FACTOR: usize = 370;
+const FACTOR: usize = 371;
 // Leaf node pages can actually hold 340 keys
 // but it's ok for the sake of simplicity
 pub const KEYS_PER_NODE: usize = FACTOR - 1;
@@ -82,11 +37,9 @@ pub struct IndexPageData {
     _padding: [u8; 3],
     is_dirty: bool,
     page_type: PageType,
-    prev: PageId,
     next: PageId,
     pub keys: ArrayVec<Key, KEYS_PER_NODE>,
     pub values: ArrayVec<LeafValue, FACTOR>,
-    ____padding: [u8; 8],
 }
 
 pub struct IndexPage {
@@ -207,6 +160,9 @@ impl IndexPage {
         assert!(self.get_type() == &PageType::Inner);
         new_page.set_type(PageType::Inner);
 
+        new_page.set_next_page_id(self.get_next_page_id());
+        self.set_next_page_id(new_page.get_page_id());
+
         self.mark_dirty();
         new_page.mark_dirty();
 
@@ -232,6 +188,9 @@ impl IndexPage {
 
         assert!(self.get_type() == &PageType::Leaf);
         new_page.set_type(PageType::Leaf);
+
+        new_page.set_next_page_id(self.get_next_page_id());
+        self.set_next_page_id(new_page.get_page_id());
 
         self.mark_dirty();
         new_page.mark_dirty();
@@ -322,16 +281,8 @@ impl IndexPage {
         &self.latch
     }
 
-    pub fn set_prev_page_id(&mut self, page_id: PageId) {
-        self.data_mut().prev = page_id;
-    }
-
     pub fn set_next_page_id(&mut self, page_id: PageId) {
         self.data_mut().next = page_id;
-    }
-
-    pub fn get_prev_page_id(&self) -> PageId {
-        self.data().prev
     }
 
     pub fn get_next_page_id(&self) -> PageId {
