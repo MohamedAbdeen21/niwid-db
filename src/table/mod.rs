@@ -2,7 +2,7 @@ use crate::buffer_pool::ArcBufferPool;
 use crate::indexes::b_plus_tree::btree::BPlusTree;
 use crate::pages::indexes::b_plus_tree::Key;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
-use crate::pages::PageId;
+use crate::pages::{PageId, INVALID_PAGE};
 use crate::printdbg;
 use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
@@ -89,6 +89,13 @@ impl Table {
 
     pub fn get_schema(&self) -> Schema {
         self.schema.clone()
+    }
+
+    pub fn get_index_page_id(&self) -> PageId {
+        self.index
+            .as_ref()
+            .map(|i| i.get_root_page_id())
+            .unwrap_or(INVALID_PAGE)
     }
 
     pub fn get_last_page_id(&self) -> PageId {

@@ -62,9 +62,9 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
                     let _ = writer.write_all(format!("{}\n", info).as_bytes()).await;
                 }
 
-                if result.is_empty() && info.is_empty() {
-                    let _ = writer.write_all(b"Ok\n").await;
-                }
+                // if result.is_empty() && info.is_empty() {
+                //     let _ = writer.write_all(b"Ok\n").await;
+                // }
 
                 let rows = result.rows();
 
