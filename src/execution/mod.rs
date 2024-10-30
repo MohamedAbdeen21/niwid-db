@@ -7,6 +7,7 @@ use crate::sql::logical_plan::plan::{
     CreateTable, DropTables, Filter, Insert, Join, LogicalPlan, Scan, Truncate, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
+use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::Tuple;
 use crate::types::Types;
@@ -538,8 +539,8 @@ impl Executable for Scan {
         })?;
 
         let mut fields = vec![
-            Field::new("page_id", Types::UInt, false),
-            Field::new("slot_id", Types::UInt, false),
+            Field::new("page_id", Types::UInt, Constraints::nullable(false)),
+            Field::new("slot_id", Types::UInt, Constraints::nullable(false)),
         ];
 
         fields.extend(schema.fields.clone());

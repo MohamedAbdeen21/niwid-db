@@ -1,7 +1,10 @@
 use sqlparser::ast::BinaryOperator;
 
 use crate::{
-    tuple::schema::{Field, Schema},
+    tuple::{
+        constraints::Constraints,
+        schema::{Field, Schema},
+    },
     types::Value,
 };
 
@@ -32,12 +35,14 @@ impl LogicalExpr {
 
     pub fn to_field(&self, schema: &Schema) -> Field {
         match self {
-            LogicalExpr::Literal(v) => Field::new(&format!("{}", v), v.get_type(), true),
+            LogicalExpr::Literal(v) => {
+                Field::new(&format!("{}", v), v.get_type(), Constraints::nullable(true))
+            }
             LogicalExpr::Column(v) => schema.fields.iter().find(|f| f.name == *v).unwrap().clone(),
             LogicalExpr::BinaryExpr(e) => e.to_field(schema),
             LogicalExpr::AliasedExpr(e, alias) => {
                 let field = e.to_field(schema);
-                Field::new(alias, field.ty, field.nullable)
+                Field::new(alias, field.ty, field.constraints.clone())
             }
         }
     }
@@ -66,7 +71,7 @@ impl BinaryExpr {
         Field::new(
             &format!("{} {} {}", left.name, self.op, right.name),
             left.ty,
-            left.nullable,
+            left.constraints.clone(),
         )
     }
 }

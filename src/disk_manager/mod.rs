@@ -217,6 +217,7 @@ impl DiskManager {
 mod tests {
     use super::*;
     use crate::pages::Page;
+    use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
     use crate::types::{Types, ValueFactory};
     use crate::{pages::table_page::TablePage, tuple::Tuple};
@@ -256,7 +257,11 @@ mod tests {
         page.set_page_id(page_id);
         let mut table_page: TablePage = page.into();
 
-        let dummy_schema = Schema::new(vec![Field::new("str", Types::Str, false)]);
+        let dummy_schema = Schema::new(vec![Field::new(
+            "str",
+            Types::Str,
+            Constraints::nullable(false),
+        )]);
 
         let tuple = Tuple::new(
             vec![ValueFactory::from_string(&Types::Str, "Hello!")],

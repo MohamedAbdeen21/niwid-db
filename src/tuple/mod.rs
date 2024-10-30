@@ -1,3 +1,4 @@
+pub mod constraints;
 pub mod schema;
 
 use crate::pages::{PageId, SlotId};

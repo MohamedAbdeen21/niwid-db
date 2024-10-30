@@ -454,7 +454,7 @@ impl Projection {
 mod tests {
     use crate::{
         sql::logical_plan::expr::LogicalExpr,
-        tuple::schema::Field,
+        tuple::{constraints::Constraints, schema::Field},
         types::{Types, ValueFactory},
     };
 
@@ -466,7 +466,11 @@ mod tests {
     fn test_print() -> Result<()> {
         let scan = LogicalPlan::Scan(Scan {
             table_name: "test".to_string(),
-            schema: Schema::new(vec![Field::new("a", Types::UInt, false)]),
+            schema: Schema::new(vec![Field::new(
+                "a",
+                Types::UInt,
+                Constraints::nullable(false),
+            )]),
         });
 
         let string = scan.print();
