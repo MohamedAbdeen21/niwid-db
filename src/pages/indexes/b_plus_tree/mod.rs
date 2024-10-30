@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::latch::Latch;
-use crate::pages::{Page, PageData, PageId, INVALID_PAGE};
-use crate::tuple::{TupleExt, TupleId, TUPLE_ID_SIZE};
+use crate::pages::{Page, PageData, PageId, SlotId};
+use crate::tuple::{TupleExt, TupleId};
 use anyhow::{anyhow, Result};
 use arrayvec::ArrayVec;
 
@@ -10,11 +10,55 @@ use std::fmt::Debug;
 
 // TupleId is u32 + u16 (4 + 2 = 6), but rust pads tuples
 // so we store them directly as bytes
-pub type LeafValue = [u8; TUPLE_ID_SIZE];
 pub type Key = u32; // currently numeric types are 4 bytes
 
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct LeafValue {
+    pub page_id: PageId,
+    pub slot_id: SlotId,
+    pub is_deleted: bool,
+}
+
+impl LeafValue {
+    pub fn new(page_id: PageId, slot_id: SlotId) -> Self {
+        Self {
+            page_id,
+            slot_id,
+            is_deleted: false,
+        }
+    }
+
+    pub fn tuple_id(&self) -> (PageId, SlotId) {
+        (self.page_id, self.slot_id)
+    }
+}
+
+impl TupleExt for LeafValue {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let (page_id, slot_id) = TupleId::from_bytes(bytes[..6].try_into().unwrap());
+        let is_deleted = bytes[6] == 1;
+        Self {
+            page_id,
+            slot_id,
+            is_deleted,
+        }
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let deleted: u8 = if self.is_deleted { 1 } else { 0 };
+        let mut bytes = (self.page_id, self.slot_id).to_bytes();
+        bytes.push(deleted);
+        bytes
+    }
+
+    fn from_string(_s: &str) -> Self {
+        unreachable!()
+    }
+}
+
 /// B+ Branching Factor
-const FACTOR: usize = 407;
+const FACTOR: usize = 370;
 // Leaf node pages can actually hold 340 keys
 // but it's ok for the sake of simplicity
 pub const KEYS_PER_NODE: usize = FACTOR - 1;
@@ -49,7 +93,6 @@ pub struct IndexPage {
     pub data: *mut IndexPageData,
     latch: Arc<Latch>,
     page_id: PageId,
-    parent_page_id: PageId,
 }
 
 impl IndexPage {
@@ -65,15 +108,20 @@ impl IndexPage {
         let data = self.data_mut();
 
         let pos = match data.keys.binary_search(&key) {
+            Ok(pos) if data.values[pos].is_deleted => {
+                data.keys.remove(pos);
+                data.values.remove(pos);
+                pos
+            }
             Ok(_) => return Err(anyhow!("Key already exists")),
             Err(pos) => pos,
         };
 
         data.keys.insert(pos, key);
-        if matches!(data.page_type, PageType::Leaf) {
-            data.values.insert(pos, value);
-        } else {
-            data.values.insert(pos + 1, value);
+        match data.page_type {
+            PageType::Leaf => data.values.insert(pos, value),
+            PageType::Inner => data.values.insert(pos + 1, value),
+            PageType::Invalid => unreachable!("Page type was not initialized properly"),
         }
 
         self.mark_dirty();
@@ -81,30 +129,31 @@ impl IndexPage {
         Ok(())
     }
 
-    #[allow(unused)]
     pub fn delete(&mut self, key: Key) -> Result<()> {
-        let data = self.data_mut();
+        assert_eq!(self.get_type(), &PageType::Leaf);
 
-        let pos = match data.keys.binary_search(&key) {
-            Ok(pos) => pos,
-            Err(_) => return Err(anyhow!("Key not found")),
-        };
-
-        data.keys.remove(pos);
-        data.values.remove(pos);
-
-        self.mark_dirty();
-
-        Ok(())
+        match self.data().keys.binary_search(&key) {
+            Ok(pos) => {
+                let value = self.data_mut().values.get_mut(pos).unwrap();
+                if value.is_deleted {
+                    Err(anyhow!("Key does not exist"))
+                } else {
+                    value.is_deleted = true;
+                    self.mark_dirty();
+                    Ok(())
+                }
+            }
+            Err(_) => Err(anyhow!("Key does not exist")),
+        }
     }
 
     /// Find a key in a leaf page
-    pub fn search(&self, key: Key) -> Option<TupleId> {
+    pub fn search(&self, key: Key) -> Option<LeafValue> {
         assert_eq!(self.get_type(), &PageType::Leaf);
         let data = self.data();
 
         match data.keys.binary_search(&key) {
-            Ok(pos) => Some(TupleId::from_bytes(&data.values[pos])),
+            Ok(pos) => Some(data.values[pos]),
             Err(_) => None,
         }
     }
@@ -127,7 +176,7 @@ impl IndexPage {
             Err(pos) => pos,
         };
 
-        TupleId::from_bytes(&data.values[pos]).0
+        data.values[pos].page_id
     }
 
     /// helper to populate a new inner page
@@ -158,9 +207,6 @@ impl IndexPage {
         assert!(self.get_type() == &PageType::Inner);
         new_page.set_type(PageType::Inner);
 
-        self.data_mut().next = new_page.get_page_id();
-        new_page.data_mut().prev = self.get_page_id();
-
         self.mark_dirty();
         new_page.mark_dirty();
 
@@ -187,9 +233,6 @@ impl IndexPage {
         assert!(self.get_type() == &PageType::Leaf);
         new_page.set_type(PageType::Leaf);
 
-        self.data_mut().next = new_page.get_page_id();
-        new_page.data_mut().prev = self.get_page_id();
-
         self.mark_dirty();
         new_page.mark_dirty();
 
@@ -199,19 +242,6 @@ impl IndexPage {
     #[allow(unused)]
     pub fn merge(mut self, mut old_page: IndexPage) {
         unimplemented!("Merge is not implemented yet")
-    }
-}
-
-impl Debug for IndexPage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = self.data();
-        f.debug_struct("IndexPage")
-            .field("page_type", &s.page_type)
-            .field("prev", &s.prev)
-            .field("next", &s.next)
-            .field("keys", &s.keys)
-            .field("values", &s.values)
-            .finish()
     }
 }
 
@@ -226,7 +256,6 @@ impl<'a> From<&'a Page> for IndexPage {
             data,
             page_id: page.get_page_id(),
             latch: page.latch.clone(),
-            parent_page_id: INVALID_PAGE,
         }
     }
 }
@@ -242,7 +271,6 @@ impl<'a> From<&'a mut Page> for IndexPage {
             data,
             page_id: page.get_page_id(),
             latch: page.latch.clone(),
-            parent_page_id: INVALID_PAGE,
         }
     }
 }
@@ -263,17 +291,11 @@ impl IndexPage {
     }
 
     pub fn is_half_full(&self) -> bool {
-        self.len() == KEYS_PER_NODE / 2
+        self.len() > KEYS_PER_NODE.div_ceil(2)
     }
 
-    pub fn get_parent_id(&self) -> PageId {
-        assert_ne!(self.parent_page_id, INVALID_PAGE);
-        self.parent_page_id
-    }
-
-    pub fn set_parent_id(&mut self, parent_page_id: PageId) {
-        assert_ne!(parent_page_id, INVALID_PAGE);
-        self.parent_page_id = parent_page_id;
+    pub fn is_underfilled(&self) -> bool {
+        self.len() < (KEYS_PER_NODE / 2) - 1
     }
 
     pub fn data_mut(&mut self) -> &mut IndexPageData {

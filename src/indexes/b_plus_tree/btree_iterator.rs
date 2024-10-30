@@ -1,7 +1,7 @@
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::indexes::b_plus_tree::{IndexPage, Key};
 use crate::pages::INVALID_PAGE;
-use crate::tuple::{TupleExt, TupleId};
+use crate::tuple::TupleId;
 use crate::txn_manager::TxnId;
 
 pub struct IndexPageIterator {
@@ -47,6 +47,10 @@ impl Iterator for IndexPageIterator {
 
         self.index += 1;
 
-        Some((key, TupleId::from_bytes(&value)))
+        if value.is_deleted {
+            self.next();
+        }
+
+        Some((key, value.tuple_id()))
     }
 }

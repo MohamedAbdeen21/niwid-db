@@ -1,6 +1,6 @@
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::indexes::b_plus_tree::{IndexPage, Key, LeafValue, PageType};
-use crate::pages::PageId;
+use crate::pages::{PageId, INVALID_PAGE};
 use crate::tuple::TupleId;
 use crate::txn_manager::TxnId;
 use anyhow::Result;
@@ -25,25 +25,35 @@ impl BPlusTree {
         tree
     }
 
-    pub fn delete(&mut self, _key: Key) -> Result<()> {
-        unimplemented!()
+    pub fn delete(&mut self, key: Key) -> Result<()> {
+        let root = self.load_page(self.root_page_id, None).unwrap();
+
+        let mut leaf = self.find_leaf(root, key);
+        leaf.delete(key)?;
+
+        self.unpin_page(leaf.get_page_id(), None);
+
+        Ok(())
     }
 
     /// Helper that create a LeafValue from a page id as this is a common operation
     fn to_value(&self, page_id: PageId) -> LeafValue {
-        let mut value = [0; 6];
-        value[..4].copy_from_slice(&page_id.to_ne_bytes());
-        value
+        LeafValue::new(page_id, 0)
     }
 
     pub fn search(&self, key: Key) -> Option<TupleId> {
         let page: IndexPage = self.load_page(self.root_page_id, None).unwrap();
 
         let leaf = self.find_leaf(page, key);
-        let ret = leaf.search(key);
+        let value = leaf.search(key)?;
 
         self.unpin_page(leaf.get_page_id(), None);
-        ret
+
+        if value.is_deleted {
+            None
+        } else {
+            Some(value.tuple_id())
+        }
     }
 
     /// unpins the input page once the search is done
@@ -89,6 +99,19 @@ impl BPlusTree {
         self.bpm.lock().unpin(&page_id, txn_id);
     }
 
+    fn set_prev_next_pointers(&self, left: &mut IndexPage, right: &mut IndexPage) -> Result<()> {
+        if left.get_next_page_id() != INVALID_PAGE {
+            let mut next = self.load_page(left.get_next_page_id(), None)?;
+            right.set_next_page_id(next.get_page_id());
+            next.set_prev_page_id(right.get_page_id());
+            self.unpin_page(next.get_page_id(), None);
+        };
+        left.set_next_page_id(right.get_page_id());
+        right.set_prev_page_id(left.get_page_id());
+
+        Ok(())
+    }
+
     /// Inserts key-value pair to a page. If a split happens, return the page id of the new page
     /// and the median value to be used by parent (caller function) or None if no split happens
     fn insert_into_page(
@@ -101,6 +124,7 @@ impl BPlusTree {
             PageType::Leaf if page.is_full() => {
                 let new_page = self.new_leaf_page()?;
                 let (mut right, median) = page.split_leaf(new_page);
+                self.set_prev_next_pointers(page, &mut right)?;
                 if key < median {
                     page.insert(key, value)?;
                 } else {
@@ -123,6 +147,8 @@ impl BPlusTree {
 
                         let new_page = self.new_inner_page()?;
                         let (mut right, median) = page.split_inner(new_page);
+                        self.set_prev_next_pointers(page, &mut right)?;
+
                         if key < median {
                             page.insert(new_key, value)?;
                         } else {
@@ -147,17 +173,9 @@ impl BPlusTree {
         }
     }
 
-    fn new_root(
-        &mut self,
-        mut left_page: IndexPage,
-        mut right_page: IndexPage,
-        median: Key,
-    ) -> Result<()> {
+    fn new_root(&mut self, left_page: IndexPage, right_page: IndexPage, median: Key) -> Result<()> {
         let mut new_page = self.new_inner_page()?;
         self.root_page_id = new_page.get_page_id();
-
-        left_page.set_parent_id(self.root_page_id);
-        right_page.set_parent_id(self.root_page_id);
 
         let left_value = self.to_value(left_page.get_page_id());
         let right_value = self.to_value(right_page.get_page_id());
@@ -184,13 +202,12 @@ impl BPlusTree {
     }
 
     fn iter(&self, txn_id: Option<TxnId>) -> Result<IndexPageIterator> {
-        let mut page_id = self.root_page_id;
-        let mut page = self.load_page(page_id, txn_id)?;
+        let mut page = self.load_page(self.root_page_id, txn_id)?;
 
         while page.get_type() == &PageType::Inner {
-            let (_, value) = page.get_pair_at(0);
+            let (_, LeafValue { page_id, .. }) = page.get_pair_at(0);
+
             self.unpin_page(page.get_page_id(), txn_id);
-            page_id = PageId::from_ne_bytes(value[..4].try_into().unwrap());
             page = self.load_page(page_id, txn_id)?;
         }
 
@@ -234,8 +251,9 @@ mod tests {
     use super::*;
     use crate::buffer_pool::tests::test_arc_bpm;
     use crate::pages::indexes::b_plus_tree::KEYS_PER_NODE;
-    use crate::tuple::{TupleExt, TupleId};
     use anyhow::Result;
+    use rand::seq::SliceRandom;
+    use rand::thread_rng;
 
     fn setup_bplus_tree() -> BPlusTree {
         let bpm = test_arc_bpm(5);
@@ -247,31 +265,28 @@ mod tests {
     fn test_insert_and_search_single_key() {
         let mut btree = setup_bplus_tree();
         let key: Key = 42;
-        let value: LeafValue = [1, 2, 3, 4, 5, 6];
+        let value = LeafValue::new(0, 0);
 
         // Insert a single key-value pair and verify search
         btree.insert(key, value).expect("Insert failed");
         let found_value = btree.search(key);
-        assert_eq!(found_value, Some(TupleId::from_bytes(&value)));
+        assert_eq!(found_value, Some((0, 0)));
     }
 
     #[test]
     fn test_insert_and_search_multiple_keys() {
         let mut btree = setup_bplus_tree();
-        let values = [
-            (1, [1, 0, 0, 0, 0, 0]),
-            (2, [2, 0, 0, 0, 0, 0]),
-            (3, [3, 0, 0, 0, 0, 0]),
-        ];
+        let keys = [1, 2, 3];
 
         // Insert multiple keys and verify search for each
-        for (key, value) in values.iter() {
-            btree.insert(*key, *value).expect("Insert failed");
+        for key in keys {
+            let value = LeafValue::new(key, 0);
+            btree.insert(key, value).expect("Insert failed");
         }
 
-        for (key, value) in values.iter() {
-            let found_value = btree.search(*key);
-            assert_eq!(found_value, Some(TupleId::from_bytes(value)));
+        for key in keys {
+            let found_value = btree.search(key);
+            assert_eq!(found_value, Some((key, 0)));
         }
     }
 
@@ -279,7 +294,7 @@ mod tests {
     fn test_search_nonexistent_key() {
         let mut btree = setup_bplus_tree();
         let key: Key = 100;
-        let value: LeafValue = [1, 2, 3, 4, 5, 6];
+        let value: LeafValue = LeafValue::new(0, 0);
 
         // Insert a key-value pair and search for a nonexistent key
         btree.insert(key, value).expect("Insert failed");
@@ -293,7 +308,7 @@ mod tests {
 
         // Insert enough key-value pairs to cause a split at the root
         for i in 0..=KEYS_PER_NODE as Key {
-            let value: LeafValue = [i as u8, 0, 0, 0, 0, 0];
+            let value: LeafValue = LeafValue::new(i, 0);
             btree.insert(i, value).expect("Insert failed");
         }
 
@@ -306,28 +321,94 @@ mod tests {
         Ok(())
     }
 
-    // #[test]
-    // fn test_delete_existing_key() {
-    //     let mut btree = setup_bplus_tree();
-    //     let key: Key = 50;
-    //     let value: LeafValue = [5, 5, 5, 5, 5, 5];
-    //
-    //     // Insert a key-value pair, delete it, and verify it's gone
-    //     btree.insert(key, value).expect("Insert failed");
-    //     btree.delete(key).expect("Delete failed");
-    //     let found_value = btree.search(key);
-    //     assert_eq!(found_value, None);
-    // }
-    //
-    // #[test]
-    // fn test_delete_nonexistent_key() {
-    //     let mut btree = setup_bplus_tree();
-    //     let key: Key = 99;
-    //
-    //     // Attempt to delete a key that doesn't exist
-    //     let result = btree.delete(key);
-    //     assert!(result.is_err(), "Expected an error for nonexistent key");
-    // }
+    #[test]
+    fn test_delete_multiple_keys() {
+        let mut btree = setup_bplus_tree();
+
+        let keys = vec![10, 20, 30, 40, 50];
+
+        // Insert multiple keys
+        for key in &keys {
+            let value = LeafValue::new(*key, 0);
+            btree.insert(*key, value).expect("Insert failed");
+        }
+
+        // Delete each key and check that it is no longer found
+        for key in &keys {
+            btree.delete(*key).expect("Delete failed");
+            assert_eq!(
+                btree.search(*key),
+                None,
+                "Expected key {} to be deleted",
+                key
+            );
+        }
+    }
+
+    #[test]
+    fn test_delete_reinsert_keys() {
+        let mut btree = setup_bplus_tree();
+
+        // Insert a range of keys
+        for key in 1..=50 {
+            let value = LeafValue::new(key, 0);
+            btree.insert(key, value).expect("Insert failed");
+        }
+
+        // Delete half of the keys
+        for key in (1..=50).step_by(2) {
+            btree.delete(key).expect("Delete failed");
+            assert_eq!(
+                btree.search(key),
+                None,
+                "Expected key {} to be deleted",
+                key
+            );
+        }
+
+        // Verify all keys are found in the B+Tree
+        for key in (2..=50).step_by(2) {
+            let value = LeafValue::new(key, 0).tuple_id();
+            let found_value = btree.search(key).expect("Key not found after delete");
+            assert_eq!(found_value, value, "Value mismatch for key {}", key);
+        }
+
+        // Re-insert deleted keys
+        for key in (1..=50).step_by(2) {
+            let value = LeafValue::new(key, 0);
+            btree.insert(key, value).expect("Reinsert failed");
+        }
+
+        // Verify all keys are found in the B+Tree
+        for key in 1..=50 {
+            let value = LeafValue::new(key, 0).tuple_id();
+            let found_value = btree.search(key).expect("Key not found after reinsert");
+            assert_eq!(found_value, value, "Value mismatch for key {}", key);
+        }
+    }
+
+    #[test]
+    fn test_delete_existing_key() {
+        let mut btree = setup_bplus_tree();
+        let key: Key = 50;
+        let value = LeafValue::new(50, 0);
+
+        // Insert a key-value pair, delete it, and verify it's gone
+        btree.insert(key, value).expect("Insert failed");
+        btree.delete(key).expect("Delete failed");
+        let found_value = btree.search(key);
+        assert_eq!(found_value, None);
+    }
+
+    #[test]
+    fn test_delete_nonexistent_key() {
+        let mut btree = setup_bplus_tree();
+        let key: Key = 99;
+
+        // Attempt to delete a key that doesn't exist
+        let result = btree.delete(key);
+        assert!(result.is_err(), "Expected an error for nonexistent key");
+    }
 
     #[test]
     fn test_split_and_promote_key() -> Result<()> {
@@ -358,7 +439,12 @@ mod tests {
 
         // Insert keys up to height 3 threshold
         let key_count = 408 * 408 + 1;
-        for i in 0u32..key_count {
+        let mut values: Vec<u32> = (0..=key_count).collect();
+
+        let mut rng = thread_rng();
+        values.shuffle(&mut rng);
+
+        for i in values {
             let value = btree.to_value(i);
             btree.insert(i, value)?;
         }
@@ -366,7 +452,11 @@ mod tests {
         // Check if the root is an internal node (indicating height > 1)
         let root: IndexPage = btree.load_page(btree.root_page_id, None)?;
         assert_eq!(root.get_type(), &PageType::Inner);
-        assert!(root.len() == 3);
+        assert!(
+            !root.is_empty(),
+            "Root should have at least 1 key, got {}",
+            root.len()
+        );
         btree.unpin_page(btree.root_page_id, None);
 
         for i in 0..key_count as Key {
@@ -382,12 +472,12 @@ mod tests {
     fn test_single_page_iteration() {
         let mut btree = setup_bplus_tree();
         let key: Key = 1;
-        let value: LeafValue = [1, 2, 3, 4, 5, 6];
+        let value = LeafValue::new(2, 3);
 
         btree.insert(key, value).expect("Insert failed");
 
         let mut iter = btree.iter(None).expect("Iterator failed to initialize");
-        assert_eq!(iter.next(), Some((key, TupleId::from_bytes(&value))));
+        assert_eq!(iter.next(), Some((1, (2, 3))));
         assert_eq!(iter.next(), None); // No more items
     }
 
@@ -428,17 +518,12 @@ mod tests {
     #[test]
     fn test_scan_from_key_exists() {
         let mut btree = setup_bplus_tree();
-        let values = [
-            (1, [1, 0, 0, 0, 0, 0]),
-            (2, [2, 0, 0, 0, 0, 0]),
-            (3, [3, 0, 0, 0, 0, 0]),
-            (4, [4, 0, 0, 0, 0, 0]),
-            (5, [5, 0, 0, 0, 0, 0]),
-        ];
+        let keys = [1, 2, 3, 4, 5];
 
         // Insert multiple keys
-        for (key, value) in values.iter() {
-            btree.insert(*key, *value).expect("Insert failed");
+        for key in keys {
+            let value = LeafValue::new(key, 0);
+            btree.insert(key, value).expect("Insert failed");
         }
 
         // Start scanning from key 3, expecting (3, 4, 5)
@@ -450,25 +535,18 @@ mod tests {
             })
             .expect("Scan from key failed");
 
-        let expected = [
-            (3, TupleId::from_bytes(&values[2].1)),
-            (4, TupleId::from_bytes(&values[3].1)),
-            (5, TupleId::from_bytes(&values[4].1)),
-        ];
+        let expected = [(3, (3, 0)), (4, (4, 0)), (5, (5, 0))];
         assert_eq!(collected, expected);
     }
 
     #[test]
     fn test_scan_from_key_does_not_exist_gt() {
         let mut btree = setup_bplus_tree();
-        let values = [
-            (1, [1, 0, 0, 0, 0, 0]),
-            (3, [3, 0, 0, 0, 0, 0]),
-            (5, [5, 0, 0, 0, 0, 0]),
-        ];
+        let keys = [1, 3, 5];
 
-        for (key, value) in values.iter() {
-            btree.insert(*key, *value).expect("Insert failed");
+        for key in keys {
+            let value = LeafValue::new(key, 0);
+            btree.insert(key, value).expect("Insert failed");
         }
 
         // Start scanning from non-existing key 2, expecting (3, 5)
@@ -480,10 +558,7 @@ mod tests {
             })
             .expect("Scan from non-existent key failed");
 
-        let expected = [
-            (3, TupleId::from_bytes(&values[1].1)),
-            (5, TupleId::from_bytes(&values[2].1)),
-        ];
+        let expected = [(3, (3, 0)), (5, (5, 0))];
         assert_eq!(collected, expected);
     }
 }

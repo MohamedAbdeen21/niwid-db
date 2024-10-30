@@ -129,6 +129,7 @@ dependencies = [
  "lazy_static",
  "parking_lot",
  "priority-queue",
+ "rand",
  "serde",
  "sqlparser",
  "tokio",

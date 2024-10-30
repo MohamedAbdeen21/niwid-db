@@ -114,7 +114,7 @@ impl DiskManager {
 
     pub fn read_from_file<T: DiskWritable>(&self, page_id: PageId) -> Result<T> {
         if page_id == INVALID_PAGE {
-            return Err(anyhow!("Asked to read a page with invalid ID"));
+            return Err(anyhow!("Asked to read a page with invalid ID {}", page_id));
         }
 
         let path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
