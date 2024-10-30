@@ -159,17 +159,20 @@ impl BPlusTree {
         }
     }
 
-    fn new_root(&mut self, left_page: IndexPage, right_page: IndexPage, median: Key) -> Result<()> {
-        let mut new_page = self.new_inner_page()?;
-        self.root_page_id = new_page.get_page_id();
+    fn new_root(&mut self, mut root: IndexPage, right_page: IndexPage, median: Key) -> Result<()> {
+        let mut left_page = self.new_inner_page()?;
+
+        // Keep the page id of the root node
+        std::mem::swap(left_page.data_mut(), root.data_mut());
 
         let left_value = self.to_value(left_page.get_page_id());
         let right_value = self.to_value(right_page.get_page_id());
 
+        root.insert_first_pair(left_value, right_value, median);
+
+        // root node is unpinned in insertion method
         self.unpin_page(left_page.get_page_id(), None);
         self.unpin_page(right_page.get_page_id(), None);
-
-        new_page.insert_first_pair(left_value, right_value, median);
         Ok(())
     }
 
@@ -430,10 +433,14 @@ mod tests {
         let mut rng = thread_rng();
         values.shuffle(&mut rng);
 
+        let root_id = btree.root_page_id;
+
         for i in values {
             let value = btree.to_value(i);
             btree.insert(i, value)?;
         }
+
+        assert_eq!(btree.root_page_id, root_id);
 
         // Check if the root is an internal node (indicating height > 1)
         let root: IndexPage = btree.load_page(btree.root_page_id, None)?;
