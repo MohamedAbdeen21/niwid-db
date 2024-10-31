@@ -27,7 +27,7 @@ pub struct Tuple {
 impl Tuple {
     pub fn new(mut values: Vec<Value>, schema: &Schema) -> Self {
         let mut nulls = 0;
-        if values.iter().any(|t| t.is_null()) {
+        if values.iter().any(|v| v.is_null()) {
             values = values
                 .into_iter()
                 .zip(schema.fields.iter().map(|f| f.ty.clone()))

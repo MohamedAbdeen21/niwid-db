@@ -29,10 +29,6 @@ lazy_static! {
     )));
 }
 
-// FIXME: Catalog is shared between contexts.
-// For other tables, all changes happen inside BPM, who manages the txns
-// but for catalog, we have the tables hashmap, so the catalog has to manage
-// txns on its own
 pub struct Catalog {
     pub tables: VersionedMap<String, (TupleId, Table)>, // TODO: handle ownership
     schema: Schema,                                     // A catalog is itself a table

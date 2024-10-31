@@ -230,7 +230,7 @@ impl Executable for Insert {
         }
 
         for row in input.rows() {
-            let tuple = Tuple::new(row, &self.schema);
+            let tuple = Tuple::new(row, &self.table_schema);
 
             let _tuple_id = ctx
                 .get_catalog()

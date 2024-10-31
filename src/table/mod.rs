@@ -729,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn test_uniqunes() -> Result<()> {
+    fn test_uniqueness() -> Result<()> {
         let schema = Schema::new(vec![
             Field::new("a", Types::UInt, Constraints::unique(true)),
             Field::new("b", Types::UInt, Constraints::nullable(false)),

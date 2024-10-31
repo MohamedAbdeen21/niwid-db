@@ -36,7 +36,7 @@ impl LogicalExpr {
     pub fn to_field(&self, schema: &Schema) -> Field {
         match self {
             LogicalExpr::Literal(v) => {
-                Field::new(&format!("{}", v), v.get_type(), Constraints::nullable(true))
+                Field::new(&v.to_string(), v.get_type(), Constraints::nullable(true))
             }
             LogicalExpr::Column(v) => schema.fields.iter().find(|f| f.name == *v).unwrap().clone(),
             LogicalExpr::BinaryExpr(e) => e.to_field(schema),

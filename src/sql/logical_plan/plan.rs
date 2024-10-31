@@ -236,7 +236,7 @@ pub struct Insert {
     pub input: LogicalPlan,
     pub table_name: String,
     pub table_schema: Schema,
-    pub schema: Schema, // RETURNING statement
+    pub returning_schema: Schema, // RETURNING statement
 }
 
 impl Insert {
@@ -250,7 +250,7 @@ impl Insert {
             input,
             table_name,
             table_schema,
-            schema,
+            returning_schema: schema,
         }
     }
 
@@ -259,7 +259,7 @@ impl Insert {
     }
 
     fn schema(&self) -> Schema {
-        self.schema.clone()
+        self.returning_schema.clone()
     }
 
     fn print(&self, indent: usize) -> String {

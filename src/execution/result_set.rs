@@ -87,13 +87,8 @@ impl ResultSet {
         if self
             .fields()
             .iter()
-            .map(|f| f.ty.clone())
-            .collect::<Vec<_>>()
-            != other
-                .fields()
-                .iter()
-                .map(|f| f.ty.clone())
-                .collect::<Vec<_>>()
+            .zip(other.fields())
+            .any(|(f1, f2)| !f1.ty.is_compatible(&f2.ty))
         {
             panic!("Schema mismatch");
         }

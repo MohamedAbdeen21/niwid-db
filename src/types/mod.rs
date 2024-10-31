@@ -19,11 +19,15 @@ pub enum Types {
     /// string is stored as a [`TupleId`] to a blob page
     Str,
     StrAddr,
+    /// used only by the query engine to determine compatibility, mapped to correct type
+    /// during tuple creation
+    Null,
 }
 
 impl Types {
     pub fn size(&self) -> usize {
         match self {
+            Types::Null => unreachable!("Nulls should be mapped correctly during Tuple creation"),
             Types::Char | Types::Bool => 1,
             Types::Str | Types::StrAddr => TUPLE_ID_SIZE,
             Types::UInt | Types::Int | Types::Float => 4,
@@ -38,7 +42,7 @@ impl Types {
             Types::Bool => "BOOLEAN".to_string(),
             Types::Char => "CHAR".to_string(),
             Types::Str => "TEXT".to_string(),
-            Types::StrAddr => unreachable!(),
+            Types::StrAddr | Types::Null => unreachable!(),
         }
     }
 
@@ -57,6 +61,8 @@ impl Types {
                 | (Types::UInt, Types::Int)
                 | (Types::Int, Types::UInt)
                 | (Types::StrAddr, Types::StrAddr)
+                | (Types::Null, _)
+                | (_, Types::Null)
         )
     }
 
@@ -197,13 +203,13 @@ impl PartialOrd for Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (_, Value::Null) | (Value::Null, _) => true,
             (Value::UInt(l), Value::UInt(r)) => l == r,
             (Value::Int(l), Value::Int(r)) => l == r,
             (Value::Float(l), Value::Float(r)) => l == r,
             (Value::Bool(l), Value::Bool(r)) => l == r,
             (Value::Char(l), Value::Char(r)) => l == r,
             (Value::Str(l), Value::Str(r)) => l == r,
-            (Value::Null, Value::Null) => true,
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => *l as u32 == *r,
             (Value::UInt(UInt(l)), Value::Int(Int(r))) => *l == *r as u32,
             (Value::Char(Char(l)), Value::Str(Str(r))) => {
@@ -228,7 +234,7 @@ impl Value {
             Value::UInt(_) => Types::UInt,
             Value::Int(_) => Types::Int,
             Value::Float(_) => Types::Float,
-            Value::Null => Types::Char, // FIXME:
+            Value::Null => Types::Null,
         }
     }
 
@@ -468,6 +474,7 @@ macro_rules! impl_fn {
             Types::Int => Value::Int(Int::$method($($arg)?)),
             Types::Char => Value::Char(Char::$method($($arg)?)),
             Types::StrAddr => Value::StrAddr(TupleId::$method($($arg)?)),
+            Types::Null => unreachable!(),
         }
     };
 }
