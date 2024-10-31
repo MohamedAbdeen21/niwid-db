@@ -4,8 +4,8 @@ pub mod plan;
 
 use expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use plan::{
-    CreateTable, DropTables, Explain, Filter, Insert, Join, LogicalPlan, Projection, Scan,
-    Truncate, Update, Values,
+    CreateTable, DropTables, Explain, Filter, IndexScan, Insert, Join, LogicalPlan, Projection,
+    Scan, Truncate, Update, Values,
 };
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr,
@@ -82,6 +82,55 @@ impl LogicalPlanBuilder {
         }
     }
 
+    fn build_index_scan(
+        &self,
+        table_name: String,
+        schema: Schema,
+        expr: BinaryExpr,
+    ) -> Result<LogicalPlan> {
+        let BinaryExpr { left, op, right } = expr;
+        let (col, value, lhs) = match (left, right)  {
+            (LogicalExpr::Column(col), LogicalExpr::Literal(value)) => (col, value, true) ,
+            (LogicalExpr::Literal(value), LogicalExpr::Column(col)) => (col, value, false),
+            _ => return Err(anyhow!("Invalid index scan, must be of form {{col}} {{op}} {{value}} or {{value}} {{op}} {{col}}"))
+        };
+
+        if !matches!(value, Value::UInt(_)) {
+            return Err(anyhow!("Index scan only supported on UInt"));
+        }
+
+        if let Some(field) = schema.fields.iter().find(|f| f.name == col) {
+            if !field.constraints.unique {
+                return Err(anyhow!("Index scan only supported on unique fields"));
+            }
+        } else {
+            return Err(anyhow!("Column {} not found in table {}", col, table_name));
+        }
+
+        let value = value.u32();
+
+        let (left, lincl, right, rincl) = match op {
+            BinaryOperator::Eq => (Some(value), true, Some(value), true),
+            // col > value or value < col
+            BinaryOperator::Gt if lhs => (Some(value), false, None, false),
+            BinaryOperator::Lt if !lhs => (Some(value), false, None, false),
+            // value > col or col < value
+            BinaryOperator::Gt if !lhs => (None, false, Some(value), false),
+            BinaryOperator::Lt if lhs => (None, false, Some(value), false),
+            // col >= value or value =< col
+            BinaryOperator::GtEq if lhs => (Some(value), true, None, false),
+            BinaryOperator::LtEq if !lhs => (Some(value), true, None, false),
+            // value >= col or col <= value
+            BinaryOperator::GtEq if !lhs => (None, false, Some(value), true),
+            BinaryOperator::LtEq if lhs => (None, false, Some(value), true),
+            e => todo!("not supported {:?}", e),
+        };
+
+        Ok(LogicalPlan::IndexScan(IndexScan::new(
+            table_name, schema, col, left, lincl, right, rincl,
+        )))
+    }
+
     fn build_start_transaction(&self) -> Result<LogicalPlan> {
         Ok(LogicalPlan::StartTxn)
     }
@@ -102,6 +151,10 @@ impl LogicalPlanBuilder {
     ) -> Result<LogicalPlan> {
         if !table {
             return Err(anyhow!("Did you mean 'TRUNCATE TABLE'?"));
+        }
+
+        if table_names.len() != 1 {
+            return Err(anyhow!("Only single table can be truncated"));
         }
 
         // TODO: handle multiple tables
@@ -330,6 +383,7 @@ impl LogicalPlanBuilder {
     fn build_source(
         &self,
         table: Option<&TableWithJoins>,
+        prewhere: Option<Expr>,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
         match &table {
@@ -350,7 +404,17 @@ impl LogicalPlanBuilder {
                     .get_schema(&left_name, txn_id)
                     .ok_or(anyhow!("Table {} does not exist", left_name))?;
 
-                let root = LogicalPlan::Scan(Scan::new(left_name.clone(), left_schema.clone()));
+                let root = if let Some(pre) = prewhere {
+                    let expr = build_expr(&pre)?;
+                    match expr {
+                        LogicalExpr::BinaryExpr(expr) => {
+                            self.build_index_scan(left_name.clone(), left_schema.clone(), *expr)
+                        }
+                        _ => return Err(anyhow!("Prewhere must be a binary expression")),
+                    }?
+                } else {
+                    LogicalPlan::Scan(Scan::new(left_name.clone(), left_schema.clone()))
+                };
 
                 let root = match &joins.first() {
                     Some(SqlJoin {
@@ -414,11 +478,11 @@ impl LogicalPlanBuilder {
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
         let select = match *body {
-            SetExpr::Select(ref select) => select,
+            SetExpr::Select(select) => select,
             _ => unimplemented!(),
         };
 
-        let mut root = self.build_source(select.from.first(), txn_id)?;
+        let mut root = self.build_source(select.from.first(), select.prewhere, txn_id)?;
 
         let filters = select.selection.clone().map(|e| match e {
             Expr::BinaryOp { left, right, op } => self.parse_boolean_expr(*left, op, *right),
@@ -442,9 +506,9 @@ impl LogicalPlanBuilder {
             }
         }
 
-        let columns = &select
+        let columns = select
             .projection
-            .iter()
+            .into_iter()
             .flat_map(|e| match e {
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
                     vec![Ok(LogicalExpr::Literal(value!(UInt, s)))]
@@ -480,11 +544,11 @@ impl LogicalPlanBuilder {
                     })
                     .collect(),
                 SelectItem::UnnamedExpr(Expr::BinaryOp { left, right, op }) => {
-                    let left = match build_expr(left) {
+                    let left = match build_expr(&left) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
-                    let right = match build_expr(right) {
+                    let right = match build_expr(&right) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
@@ -495,7 +559,7 @@ impl LogicalPlanBuilder {
                     ))))]
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    let expr = match build_expr(expr) {
+                    let expr = match build_expr(&expr) {
                         Ok(expr) => expr,
                         Err(e) => return vec![Err(e)],
                     };
@@ -506,7 +570,7 @@ impl LogicalPlanBuilder {
                     ))]
                 }
                 SelectItem::UnnamedExpr(expr) => {
-                    let expr = build_expr(expr);
+                    let expr = build_expr(&expr);
                     match expr {
                         Ok(expr) => {
                             let name = match expr {
@@ -526,7 +590,7 @@ impl LogicalPlanBuilder {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        root = LogicalPlan::Projection(Box::new(Projection::new(root, columns.clone())));
+        root = LogicalPlan::Projection(Box::new(Projection::new(root, columns)));
 
         Ok(root)
     }

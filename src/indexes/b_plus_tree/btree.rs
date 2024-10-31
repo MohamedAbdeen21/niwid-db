@@ -259,7 +259,6 @@ impl BPlusTree {
             Err(e) => Err(e),
         };
 
-        // println!("{} {:?}", self.root_page_id);
         self.unpin_page(self.root_page_id, txn);
 
         ret

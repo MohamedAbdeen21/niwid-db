@@ -4,12 +4,13 @@ use crate::context::Context;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, DropTables, Filter, Insert, Join, LogicalPlan, Scan, Truncate, Update, Values,
+    CreateTable, DropTables, Filter, IndexScan, Insert, Join, LogicalPlan, Scan, Truncate, Update,
+    Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
-use crate::tuple::Tuple;
+use crate::tuple::{Tuple, TupleId};
 use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
@@ -42,6 +43,7 @@ impl LogicalPlan {
             LogicalPlan::Update(u) => u.execute(ctx),
             LogicalPlan::Empty => Ok(ResultSet::default()),
             LogicalPlan::Join(j) => j.execute(ctx),
+            LogicalPlan::IndexScan(i) => i.execute(ctx),
             LogicalPlan::StartTxn => {
                 ctx.start_txn()?;
                 Ok(ResultSet::default())
@@ -55,6 +57,87 @@ impl LogicalPlan {
                 Ok(ResultSet::default())
             }
         }
+    }
+}
+
+impl Executable for IndexScan {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
+        let arc_catalog = ctx.get_catalog();
+        let mut catalog = arc_catalog.lock();
+        let table = catalog.get_table(&self.table_name, txn_id).unwrap();
+
+        let schema = table.get_schema();
+
+        let mut tuple_ids = vec![];
+
+        let scanner = |(key, tuple_id): &(u32, TupleId)| {
+            if let Some(to) = self.to {
+                if *key > to {
+                    return Err(anyhow!("End of loop"));
+                };
+            }
+            tuple_ids.push(*tuple_id);
+            Ok(())
+        };
+
+        let index = table.get_index().as_ref().unwrap();
+
+        let _ = if let Some(from) = self.from {
+            index.scan_from(txn_id, from, scanner)
+        } else {
+            index.scan(txn_id, scanner)
+        };
+
+        let tuples = tuple_ids
+            .into_iter()
+            .map(|tuple_id| {
+                (
+                    tuple_id,
+                    table
+                        .get_tuple(tuple_id)
+                        .expect("Index returned a deleted record"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let mut cols: Vec<Vec<Value>> = vec![vec![]; schema.fields.len() + 2];
+
+        // TODO: pass the tuple_id as tuple for udpate to use
+        // need to define a tuple type first though
+        tuples
+            .into_iter()
+            .try_for_each(|((page_id, slot_id), tuple)| -> Result<()> {
+                let mut values = vec![
+                    value!(UInt, page_id.to_string()),
+                    value!(UInt, slot_id.to_string()),
+                ];
+
+                values.extend(tuple.get_values(&schema)?);
+
+                let values = values.into_iter().map(|v| {
+                    if matches!(v, Value::StrAddr(_)) {
+                        Value::Str(table.fetch_string(v.str_addr()))
+                    } else {
+                        v
+                    }
+                });
+
+                values.enumerate().for_each(|(i, v)| {
+                    cols[i].push(v);
+                });
+
+                Ok(())
+            })?;
+
+        let mut fields = vec![
+            Field::new("page_id", Types::UInt, Constraints::nullable(false)),
+            Field::new("slot_id", Types::UInt, Constraints::nullable(false)),
+        ];
+
+        fields.extend(schema.fields.clone());
+
+        Ok(ResultSet::new(fields, cols))
     }
 }
 
@@ -286,9 +369,12 @@ impl Executable for Filter {
         let output = input
             .cols
             .into_iter()
-            .zip(mask)
-            .filter(|(_, mask)| *mask)
-            .map(|(col, _)| col)
+            .map(|col| {
+                col.into_iter()
+                    .zip(&mask)
+                    .filter_map(|(value, &mask)| if mask { Some(value) } else { None })
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>();
 
         Ok(ResultSet::new(input.schema.fields, output))
@@ -496,7 +582,7 @@ impl Executable for Projection {
             .map(|p| p.evaluate(&input))
             .map(|(field, data)| ResultSet::new(vec![field], vec![data]))
             .reduce(|a, b| a.concat(b))
-            .unwrap();
+            .unwrap_or_default();
 
         Ok(output)
     }

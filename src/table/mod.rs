@@ -84,12 +84,36 @@ impl Table {
         })
     }
 
+    pub fn get_tuple(&self, id: TupleId) -> Option<Tuple> {
+        let (page, slot) = TupleId::from_bytes(&id.to_bytes());
+
+        let page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(page, self.active_txn)
+            .unwrap()
+            .reader()
+            .into();
+
+        let (meta, tuple) = page.read_tuple(slot);
+
+        if meta.is_deleted() {
+            None
+        } else {
+            Some(tuple)
+        }
+    }
+
     pub fn get_first_page_id(&self) -> PageId {
         self.first_page
     }
 
     pub fn get_schema(&self) -> Schema {
         self.schema.clone()
+    }
+
+    pub fn get_index(&self) -> &Option<BPlusTree> {
+        &self.index
     }
 
     pub fn get_index_page_id(&self) -> PageId {

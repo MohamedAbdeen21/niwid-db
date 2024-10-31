@@ -355,7 +355,6 @@ lazy_static! {
 /// static items are never dropped, this is mainly for testing
 impl Drop for BufferPoolManager {
     fn drop(&mut self) {
-        println!("Checking pages.. ");
         self.frames
             .iter()
             .enumerate()

@@ -1,4 +1,4 @@
-use crate::tuple::schema::Schema;
+use crate::{pages::indexes::b_plus_tree::Key, tuple::schema::Schema};
 
 use super::expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 
@@ -14,6 +14,7 @@ pub enum LogicalPlan {
     DropTables(DropTables),
     Truncate(Truncate),
     Update(Box<Update>),
+    IndexScan(IndexScan),
     StartTxn,
     CommitTxn,
     RollbackTxn,
@@ -44,6 +45,7 @@ impl LogicalPlan {
             LogicalPlan::Truncate(t) => t.print(indent),
             LogicalPlan::Update(u) => u.print(indent),
             LogicalPlan::Join(j) => j.print(indent),
+            LogicalPlan::IndexScan(i) => i.print(indent),
             LogicalPlan::StartTxn => format!("{} StartTransaction", "-".repeat(indent * 2)),
             LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
             LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
@@ -64,11 +66,85 @@ impl LogicalPlan {
             LogicalPlan::Truncate(t) => t.schema(),
             LogicalPlan::Update(u) => u.schema(),
             LogicalPlan::Join(j) => j.schema(),
-            LogicalPlan::Empty => Schema::new(vec![]),
+            LogicalPlan::IndexScan(i) => i.schema(),
+            LogicalPlan::Empty => Schema::default(),
             LogicalPlan::StartTxn => Schema::default(),
             LogicalPlan::CommitTxn => Schema::default(),
             LogicalPlan::RollbackTxn => Schema::default(),
         }
+    }
+}
+
+pub struct IndexScan {
+    pub table_name: String,
+    pub schema: Schema,
+    // mainly for display, each table can only have one index anyway
+    pub column_name: String,
+    pub from: Option<Key>,
+    pub include_from: bool,
+    pub to: Option<Key>,
+    pub include_to: bool,
+}
+
+impl IndexScan {
+    pub fn new(
+        table_name: String,
+        schema: Schema,
+        column_name: String,
+        from: Option<Key>,
+        include_from: bool,
+        to: Option<Key>,
+        include_to: bool,
+    ) -> Self {
+        Self {
+            table_name,
+            schema,
+            column_name,
+            from,
+            include_from,
+            to,
+            include_to,
+        }
+    }
+
+    fn name(&self) -> String {
+        "IndexScan".to_string()
+    }
+
+    fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    fn print(&self, indent: usize) -> String {
+        let range = format!(
+            "{}{},{}{}",
+            if self.include_from { "[" } else { "(" },
+            if let Some(k) = &self.from {
+                format!("{}", k)
+            } else {
+                "".to_string()
+            },
+            if let Some(k) = &self.to {
+                format!("{}", k)
+            } else {
+                "".to_string()
+            },
+            if self.include_to { "]" } else { ")" },
+        );
+        format!(
+            "{} {}: {} Scan( {} range {} ) [{}]\n",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.table_name,
+            self.column_name,
+            range,
+            self.schema
+                .fields
+                .iter()
+                .map(|f| format!("#{}", f.name))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
     }
 }
 
@@ -393,11 +469,7 @@ impl Filter {
     }
 
     fn schema(&self) -> Schema {
-        match &self.input {
-            LogicalPlan::Scan(s) => s.schema(),
-            LogicalPlan::Filter(f) => f.schema(),
-            _ => Schema::new(vec![]),
-        }
+        self.input.schema()
     }
 
     fn print(&self, indent: usize) -> String {
