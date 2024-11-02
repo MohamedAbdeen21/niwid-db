@@ -84,7 +84,6 @@ impl IndexPage {
         Ok(())
     }
 
-    #[allow(unused)]
     pub fn delete(&mut self, key: Key) -> Result<()> {
         assert_eq!(self.get_type(), &PageType::Leaf);
 
@@ -106,6 +105,7 @@ impl IndexPage {
     /// Find a key in a leaf page
     pub fn search(&self, key: Key) -> Option<LeafValue> {
         assert_eq!(self.get_type(), &PageType::Leaf);
+        let _guard = self.latch.rguard();
         let data = self.data();
 
         match data.keys.binary_search(&key) {
@@ -115,9 +115,9 @@ impl IndexPage {
     }
 
     /// find the index of a key in a leaf page
-    #[allow(unused)]
     pub fn find_index(&self, key: Key) -> Result<usize, usize> {
         assert_eq!(self.get_type(), &PageType::Leaf);
+        let _guard = self.latch.rguard();
         let data = self.data();
 
         data.keys.binary_search(&key)
@@ -126,6 +126,7 @@ impl IndexPage {
     /// find the leaf page that contains a key
     pub fn find_leaf(&self, key: Key) -> PageId {
         assert_eq!(self.get_type(), &PageType::Inner);
+        let _guard = self.latch.rguard();
         let data = self.data();
 
         let pos = match data.keys.binary_search(&key) {
@@ -201,11 +202,6 @@ impl IndexPage {
 
         (new_page, median)
     }
-
-    #[allow(unused)]
-    pub fn merge(mut self, mut old_page: IndexPage) {
-        unimplemented!("Merge is not implemented yet")
-    }
 }
 
 impl<'a> From<&'a Page> for IndexPage {
@@ -238,7 +234,6 @@ impl<'a> From<&'a mut Page> for IndexPage {
     }
 }
 
-#[allow(unused)]
 impl IndexPage {
     pub fn get_pair_at(&self, index: usize) -> (Key, LeafValue) {
         let data = self.data();
@@ -249,16 +244,9 @@ impl IndexPage {
         self.len() == KEYS_PER_NODE
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    pub fn is_half_full(&self) -> bool {
-        self.len() > KEYS_PER_NODE.div_ceil(2)
-    }
-
-    pub fn is_underfilled(&self) -> bool {
-        self.len() < (KEYS_PER_NODE / 2) - 1
     }
 
     pub fn data_mut(&mut self) -> &mut IndexPageData {
@@ -280,10 +268,6 @@ impl IndexPage {
 
     pub fn get_page_id(&self) -> PageId {
         self.page_id
-    }
-
-    pub fn get_latch(&self) -> &Arc<Latch> {
-        &self.latch
     }
 
     pub fn set_next_page_id(&mut self, page_id: PageId) {

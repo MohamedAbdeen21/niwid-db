@@ -459,7 +459,6 @@ pub struct Filter {
 }
 
 impl Filter {
-    #[allow(unused)]
     pub fn new(input: LogicalPlan, expr: BooleanBinaryExpr) -> Self {
         Self { input, expr }
     }

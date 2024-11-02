@@ -50,7 +50,6 @@ impl BPlusTree {
         }
     }
 
-    #[allow(unused)]
     pub fn delete(&mut self, txn: Option<TxnId>, key: impl Into<Key>) -> Result<()> {
         let key = key.into();
         let root = self.load_page(self.root_page_id, txn).unwrap();
@@ -264,7 +263,6 @@ impl BPlusTree {
         ret
     }
 
-    #[allow(unused)]
     fn iter(&self, txn_id: Option<TxnId>) -> Result<IndexPageIterator> {
         let mut page = self.load_page(self.root_page_id, txn_id)?;
 
@@ -279,7 +277,6 @@ impl BPlusTree {
         Ok(IndexPageIterator::new(page, 0, self.bpm.clone(), txn_id))
     }
 
-    #[allow(unused)]
     pub fn scan_from(
         &self,
         txn: Option<TxnId>,
@@ -298,7 +295,6 @@ impl BPlusTree {
         IndexPageIterator::new(page, index, self.bpm.clone(), txn).try_for_each(|entry| f(&entry))
     }
 
-    #[allow(unused)]
     pub fn scan(
         &self,
         txn_id: Option<TxnId>,

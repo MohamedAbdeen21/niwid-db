@@ -54,7 +54,7 @@ impl Schema {
         self.is_qualified
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     pub fn to_sql(&self) -> String {
         let mut sql = String::new();
         for (i, field) in self.fields.iter().enumerate() {

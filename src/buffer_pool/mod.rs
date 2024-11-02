@@ -43,7 +43,7 @@ impl BufferPoolManager {
         BUFFER_POOL.clone()
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     pub fn inspect(&self) {
         println!("Free Frames: {:?}", self.free_frames);
         println!("Page Table: {:?}", self.page_table);

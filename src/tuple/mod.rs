@@ -53,7 +53,6 @@ impl Tuple {
         tuple
     }
 
-    #[allow(unused)]
     pub fn from_sql(ident: Vec<Option<String>>, schema: Schema) -> Self {
         let values = ident
             .iter()

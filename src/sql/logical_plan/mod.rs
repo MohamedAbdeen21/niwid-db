@@ -59,7 +59,6 @@ impl LogicalPlanBuilder {
                 names,
                 ..
             } => self.build_drop(object_type, if_exists, names, txn_id),
-            #[allow(unused)]
             Statement::Update {
                 table,
                 assignments,

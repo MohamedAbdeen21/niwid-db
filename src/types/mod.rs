@@ -7,7 +7,6 @@ use crate::tuple::TupleExt;
 use crate::tuple::TupleId;
 use crate::tuple::TUPLE_ID_SIZE;
 
-#[allow(unused)]
 #[derive(PartialEq, Eq, Clone, Debug)] // others
 #[derive(Serialize, Deserialize)] // for schema serde
 pub enum Types {

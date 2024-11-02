@@ -47,7 +47,6 @@ impl Latch {
         unsafe { self.lock.raw().unlock_upgradable() }
     }
 
-    #[allow(unused)]
     pub fn is_locked(&self) -> bool {
         self.lock.is_locked()
     }
