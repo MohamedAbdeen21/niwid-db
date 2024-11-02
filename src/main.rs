@@ -56,29 +56,7 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
 
         match ctx.execute_sql(query) {
             Ok(result) => {
-                let info = result.get_info();
-
-                if !info.is_empty() {
-                    let _ = writer.write_all(format!("{}\n", info).as_bytes()).await;
-                }
-
-                // if result.is_empty() && info.is_empty() {
-                //     let _ = writer.write_all(b"Ok\n").await;
-                // }
-
-                let rows = result.rows();
-
-                printdbg!("Result: {:?}", rows);
-
-                for row in rows {
-                    let mut row_string = row
-                        .iter()
-                        .map(|v| format!("{}", v))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    row_string.push('\n');
-                    let _ = writer.write_all(row_string.as_bytes()).await;
-                }
+                let _ = writer.write_all(result.print().as_bytes()).await;
             }
             Err(e) => {
                 let _ = writer

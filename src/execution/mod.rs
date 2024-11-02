@@ -1,6 +1,7 @@
 pub mod result_set;
 
 use crate::context::Context;
+use crate::lit;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
@@ -14,7 +15,6 @@ use crate::tuple::{Tuple, TupleId};
 use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
-use crate::value;
 use anyhow::{anyhow, Result};
 use result_set::ResultSet;
 use sqlparser::ast::BinaryOperator;
@@ -109,8 +109,8 @@ impl Executable for IndexScan {
             .into_iter()
             .try_for_each(|((page_id, slot_id), tuple)| -> Result<()> {
                 let mut values = vec![
-                    value!(UInt, page_id.to_string()),
-                    value!(UInt, slot_id.to_string()),
+                    lit!(UInt, page_id.to_string()),
+                    lit!(UInt, slot_id.to_string()),
                 ];
 
                 values.extend(tuple.get_values(&schema)?);
@@ -174,7 +174,7 @@ impl Executable for Join {
         for left_row in left.rows() {
             let ll = ResultSet::from_tuple(left.fields().clone(), left_row.to_vec(), right.len());
             let input = ll.concat(right.clone());
-            let mask = self.on.evaluate(&input);
+            let mask = self.on.evaluate(&input)?;
             for (i, row) in input.rows().into_iter().enumerate() {
                 if mask[i].is_truthy() {
                     output_rows.push(row);
@@ -199,7 +199,7 @@ impl Executable for Update {
             .get_table_mut(&self.table_name, txn_id)
             .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
 
-        let (_, mask) = self.selection.evaluate(&input);
+        let (_, mask) = self.selection.evaluate(&input)?;
 
         let (selected_col, expr) = self.assignments;
 
@@ -230,7 +230,7 @@ impl Executable for Update {
 
             let mut new_tuple = row[2..].to_vec();
 
-            for value in expr.evaluate(&input).1 {
+            for value in expr.evaluate(&input)?.1 {
                 new_tuple[updated_col_id] = value;
             }
 
@@ -292,12 +292,16 @@ impl Executable for Values {
             .map(|row| {
                 row.into_iter()
                     .map(|expr| expr.evaluate(&input))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
                     .map(|(field, data)| ResultSet::new(vec![field], vec![data]))
                     .reduce(|a, b| a.concat(b))
-                    .unwrap() // TODO: ?
+                    .ok_or(anyhow!("Empty row"))
             })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
             .reduce(|a, b| a.union(b))
-            .unwrap();
+            .unwrap_or_default();
 
         Ok(output)
     }
@@ -382,32 +386,32 @@ impl Executable for Filter {
 }
 
 impl LogicalExpr {
-    fn evaluate(&self, input: &ResultSet) -> (Field, Vec<Value>) {
+    fn evaluate(&self, input: &ResultSet) -> Result<(Field, Vec<Value>)> {
         let size = input.len();
         match self {
             LogicalExpr::Literal(ref c) => {
                 let input_schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&input_schema);
                 let data = (0..size).map(|_| c.clone()).collect::<Vec<_>>();
-                (field, data)
+                Ok((field, data))
             }
             LogicalExpr::Column(c) => {
                 let fields = input.fields();
                 let index = fields.iter().position(|col| col.name == *c).unwrap();
-                (input.fields()[index].clone(), input.cols()[index].clone())
+                Ok((input.fields()[index].clone(), input.cols()[index].clone()))
             }
             LogicalExpr::BinaryExpr(ref expr) => {
                 let schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&schema);
-                (field, expr.evaluate(input))
+                Ok((field, expr.evaluate(input)?))
             }
             LogicalExpr::AliasedExpr(ref expr, _) => {
-                let result = expr.clone().evaluate(input);
+                let result = expr.clone().evaluate(input)?;
 
                 let schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&schema);
 
-                (field, result.1)
+                Ok((field, result.1))
             }
         }
     }
@@ -420,94 +424,105 @@ impl BinaryExpr {
             BinaryOperator::Minus => left.sub(right),
             BinaryOperator::Multiply => left.mul(right),
             BinaryOperator::Divide => left.div(right),
-            BinaryOperator::Eq => value!(Bool, left.eq(right).to_string()),
+            BinaryOperator::Eq => lit!(Bool, left.eq(right).to_string()),
             e => todo!("{:?}", e),
         }
     }
 
-    pub(super) fn evaluate(&self, input: &ResultSet) -> Vec<Value> {
+    pub(super) fn evaluate(&self, input: &ResultSet) -> Result<Vec<Value>> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
                 let fields = input.fields();
-                let index1 = fields.iter().position(|col| &col.name == c1).expect(c1);
-                let index2 = fields.iter().position(|col| &col.name == c2).expect(c2);
+                let index1 = fields
+                    .iter()
+                    .position(|col| &col.name == c1)
+                    .ok_or(anyhow!("Column {} does not exist", c1))?;
+                let index2 = fields
+                    .iter()
+                    .position(|col| &col.name == c2)
+                    .ok_or(anyhow!("Column {} does not exist", c2))?;
                 let col1 = &input.cols()[index1];
                 let col2 = &input.cols()[index2];
-                col1.iter()
+                Ok(col1
+                    .iter()
                     .zip(col2)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::Literal(lit), LogicalExpr::Column(c2)) => {
                 let index = input
                     .fields()
                     .iter()
                     .position(|col| &col.name == c2)
-                    .unwrap();
+                    .ok_or(anyhow!("Column {} does not exist", c2))?;
                 let col = &input.cols()[index];
-                col.iter().map(|val| self.eval_op(lit, val)).collect()
+                Ok(col.iter().map(|val| self.eval_op(lit, val)).collect())
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(lit)) => {
                 let index = input
                     .fields()
                     .iter()
                     .position(|col| &col.name == c1)
-                    .unwrap();
+                    .ok_or(anyhow!("Column {} does not exist", c1))?;
                 let col = &input.cols()[index];
-                col.iter().map(|val| self.eval_op(val, lit)).collect()
+                Ok(col.iter().map(|val| self.eval_op(val, lit)).collect())
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
                 let rows = input.len();
-                (0..rows).map(|_| self.eval_op(v1, v2)).collect()
+                Ok((0..rows).map(|_| self.eval_op(v1, v2)).collect())
             }
             (LogicalExpr::BinaryExpr(l), LogicalExpr::BinaryExpr(r)) => {
-                let left = l.evaluate(input);
-                let right = r.evaluate(input);
-                left.iter()
+                let left = l.evaluate(input)?;
+                let right = r.evaluate(input)?;
+                Ok(left
+                    .iter()
                     .zip(right.iter())
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::Literal(value), LogicalExpr::BinaryExpr(binary_expr)) => {
-                let right = binary_expr.evaluate(input);
-                right.iter().map(|r| self.eval_op(value, r)).collect()
+                let right = binary_expr.evaluate(input)?;
+                Ok(right.iter().map(|r| self.eval_op(value, r)).collect())
             }
             (LogicalExpr::Column(c), LogicalExpr::BinaryExpr(binary_expr)) => {
                 let fields = input.fields();
                 let index = fields.iter().position(|col| &col.name == c).unwrap();
                 let left = &input.cols()[index];
 
-                let right = binary_expr.evaluate(input);
+                let right = binary_expr.evaluate(input)?;
 
-                left.iter()
+                Ok(left
+                    .iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, &r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Literal(lit)) => {
-                let left = binary_expr.evaluate(input);
-                left.iter().map(|l| self.eval_op(l, lit)).collect()
+                let left = binary_expr.evaluate(input)?;
+                Ok(left.iter().map(|l| self.eval_op(l, lit)).collect())
             }
             (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Column(c)) => {
                 let fields = input.fields();
                 let index = fields.iter().position(|col| &col.name == c).unwrap();
                 let right = &input.cols()[index];
 
-                let left = binary_expr.evaluate(input);
+                let left = binary_expr.evaluate(input)?;
 
-                left.iter()
+                Ok(left
+                    .iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::AliasedExpr(expr, _), expr2)
             | (expr2, LogicalExpr::AliasedExpr(expr, _)) => {
-                let (_, left) = expr.clone().evaluate(input);
-                let (_, right) = expr2.clone().evaluate(input);
-                left.iter()
+                let (_, left) = expr.clone().evaluate(input)?;
+                let (_, right) = expr2.clone().evaluate(input)?;
+                Ok(left
+                    .iter()
                     .zip(right.iter())
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
         }
     }
@@ -580,6 +595,8 @@ impl Executable for Projection {
             .projections
             .iter()
             .map(|p| p.evaluate(&input))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
             .map(|(field, data)| ResultSet::new(vec![field], vec![data]))
             .reduce(|a, b| a.concat(b))
             .unwrap_or_default();
@@ -603,8 +620,8 @@ impl Executable for Scan {
         // need to define a tuple type first though
         table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
             let mut values = vec![
-                value!(UInt, page_id.to_string()),
-                value!(UInt, slot_id.to_string()),
+                lit!(UInt, page_id.to_string()),
+                lit!(UInt, slot_id.to_string()),
             ];
 
             values.extend(tuple.get_values(&schema)?);
@@ -632,5 +649,45 @@ impl Executable for Scan {
         fields.extend(schema.fields.clone());
 
         Ok(ResultSet::new(fields, cols))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::context::tests::test_context;
+
+    use super::*;
+    use anyhow::Result;
+
+    #[test]
+    fn test_values() -> Result<()> {
+        let mut ctx = test_context();
+        let values = vec![
+            vec![lit!(UInt, "1"), lit!(Str, "hello")],
+            vec![lit!(UInt, "2"), lit!(Str, "world")],
+        ];
+
+        let input = values
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|value| LogicalExpr::Literal(value.clone()))
+                    .collect()
+            })
+            .collect();
+
+        let schema = Schema::new(vec![
+            Field::new("col_1", Types::UInt, Constraints::unique(true)),
+            Field::new("col_2", Types::Str, Constraints::nullable(false)),
+        ]);
+        let expected = ResultSet::from_rows(schema.fields.clone(), values);
+        let plan = Values::new(input, Schema::default());
+
+        let output = plan.execute(&mut ctx).unwrap();
+
+        // don't check the schema
+        assert_eq!(output.cols(), expected.cols());
+
+        Ok(())
     }
 }

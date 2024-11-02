@@ -440,7 +440,7 @@ mod tests {
     use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
     use crate::txn_manager::tests::test_arc_transaction_manager;
-    use crate::{types::*, value};
+    use crate::{lit, types::*};
     use anyhow::Result;
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
@@ -761,16 +761,16 @@ mod tests {
 
         let mut table = test_table(5, &schema)?;
 
-        let t1 = Tuple::new(vec![value!(UInt, "10"), value!(UInt, "20")], &schema);
-        let t2 = Tuple::new(vec![value!(UInt, "10"), value!(UInt, "30")], &schema);
+        let t1 = Tuple::new(vec![lit!(UInt, "10"), lit!(UInt, "20")], &schema);
+        let t2 = Tuple::new(vec![lit!(UInt, "10"), lit!(UInt, "30")], &schema);
 
         table.insert(t1)?;
         assert!(table.insert(t2).is_err());
 
         let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
-            assert_eq!(values[0], value!(UInt, "10"));
-            assert_eq!(values[1], value!(UInt, "20"));
+            assert_eq!(values[0], lit!(UInt, "10"));
+            assert_eq!(values[1], lit!(UInt, "20"));
 
             Ok(())
         };

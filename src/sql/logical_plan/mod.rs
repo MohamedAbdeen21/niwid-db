@@ -17,10 +17,10 @@ use sqlparser::ast::{
 use anyhow::{anyhow, Result};
 
 use crate::catalog::ArcCatalog;
+use crate::lit;
 use crate::tuple::schema::Schema;
 use crate::txn_manager::TxnId;
 use crate::types::{Types, Value, ValueFactory};
-use crate::value;
 
 pub struct LogicalPlanBuilder {
     catalog: ArcCatalog,
@@ -224,7 +224,7 @@ impl LogicalPlanBuilder {
                 row.into_iter()
                     .map(|expr| match expr {
                         Expr::Value(_) => build_expr(&expr),
-                        e => todo!("{}", e),
+                        e => Err(anyhow!("Unsupported expression in VALUES: {:?}", e)),
                     })
                     .collect::<Result<Vec<_>>>()
             })
@@ -311,7 +311,7 @@ impl LogicalPlanBuilder {
 
         let filter = match selection {
             Some(expr) => build_expr(&expr)?,
-            None => LogicalExpr::Literal(value!(Bool, "true".to_string())),
+            None => LogicalExpr::Literal(lit!(Bool, "true".to_string())),
         };
 
         let table_name = match table.relation {
@@ -395,7 +395,7 @@ impl LogicalPlanBuilder {
                 };
 
                 if joins.len() > 1 {
-                    unimplemented!("Multiple joins not supported");
+                    return Err(anyhow!("Multiple joins not supported"));
                 }
 
                 let mut left_schema = self
@@ -511,15 +511,20 @@ impl LogicalPlanBuilder {
             .into_iter()
             .flat_map(|e| match e {
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
-                    vec![Ok(LogicalExpr::Literal(value!(UInt, s)))]
+                    vec![Ok(LogicalExpr::Literal(lit!(UInt, s)))]
                 }
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                    vec![Ok(LogicalExpr::Literal(value!(Str, s)))]
+                    vec![Ok(LogicalExpr::Literal(lit!(Str, s)))]
                 }
                 SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                     let name = ident.value.clone();
+
                     if !root.schema().fields.iter().any(|f| f.name == name) {
-                        vec![Err(anyhow!("Column {} doesn't exist", name))]
+                        vec![if root.schema().is_qualified() {
+                            Err(anyhow!("Please use qualified column names {}", name))
+                        } else {
+                            Err(anyhow!("Column {} does not exist in table", name))
+                        }]
                     } else {
                         vec![Ok(LogicalExpr::Column(ident.value.clone()))]
                     }
@@ -535,10 +540,10 @@ impl LogicalPlanBuilder {
                     .iter()
                     .map(|e| match e {
                         Expr::Value(SqlValue::Number(s, _)) => {
-                            Ok(LogicalExpr::Literal(value!(UInt, s)))
+                            Ok(LogicalExpr::Literal(lit!(UInt, s)))
                         }
                         Expr::Value(SqlValue::SingleQuotedString(s)) => {
-                            Ok(LogicalExpr::Literal(value!(Str, s)))
+                            Ok(LogicalExpr::Literal(lit!(Str, s)))
                         }
                         e => todo!("{}", e),
                     })
@@ -641,7 +646,7 @@ impl From<Expr> for LogicalExpr {
 
 impl From<bool> for LogicalExpr {
     fn from(b: bool) -> LogicalExpr {
-        LogicalExpr::Literal(value!(Bool, b.to_string()))
+        LogicalExpr::Literal(lit!(Bool, b.to_string()))
     }
 }
 
@@ -649,8 +654,8 @@ impl From<bool> for LogicalExpr {
 // https://rust-lang.github.io/rust-clippy/master/index.html#only_used_in_recursion
 fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
     match expr {
-        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(value!(UInt, n))),
-        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(value!(Str, s))),
+        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(lit!(UInt, n))),
+        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(lit!(Str, s))),
         Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value.clone())),
         Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
             BinaryExpr::new(build_expr(left)?, op.clone(), build_expr(right)?),

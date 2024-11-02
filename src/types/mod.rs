@@ -497,7 +497,7 @@ impl_display!(Str);
 impl_display!(Char);
 
 #[macro_export]
-macro_rules! value {
+macro_rules! lit {
     ($t:ident, $s:expr) => {
         ValueFactory::from_string(&Types::$t, $s)
     };
