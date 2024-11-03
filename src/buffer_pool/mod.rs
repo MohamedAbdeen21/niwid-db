@@ -353,6 +353,7 @@ lazy_static! {
 }
 
 /// static items are never dropped, this is mainly for testing
+#[cfg(test)]
 impl Drop for BufferPoolManager {
     fn drop(&mut self) {
         self.frames
@@ -392,12 +393,6 @@ pub mod tests {
         Arc::new(FairMutex::new(test_bpm(size, &test_path())))
     }
 
-    fn cleanup(bpm: BufferPoolManager, path: &str) -> Result<()> {
-        drop(bpm);
-        std::fs::remove_dir_all(path)?;
-        Ok(())
-    }
-
     #[test]
     fn test_dont_evict_pinned() -> Result<()> {
         let path = test_path();
@@ -424,8 +419,6 @@ pub mod tests {
         bpm.unpin(&p2, None);
         bpm.unpin(&p1, None);
 
-        cleanup(bpm, &path)?;
-
         Ok(())
     }
 
@@ -448,8 +441,6 @@ pub mod tests {
 
         assert!(!frame.get_latch().is_locked());
         assert!(!table_page.get_latch().is_locked());
-
-        cleanup(bpm, &path)?;
 
         Ok(())
     }
@@ -501,8 +492,6 @@ pub mod tests {
         assert!(bpm.new_page().is_ok());
 
         bpm.unpin(&page_id, None);
-
-        cleanup(bpm, &path)?;
 
         Ok(())
     }

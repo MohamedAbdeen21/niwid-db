@@ -214,6 +214,13 @@ impl DiskManager {
 }
 
 #[cfg(test)]
+impl Drop for DiskManager {
+    fn drop(&mut self) {
+        let _ = remove_dir_all(self.path.clone());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::pages::Page;

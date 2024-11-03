@@ -1,4 +1,6 @@
-use crate::{pages::indexes::b_plus_tree::Key, tuple::schema::Schema};
+use crate::{
+    execution::result_set::ResultSet, pages::indexes::b_plus_tree::Key, tuple::schema::Schema,
+};
 
 use super::expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 
@@ -19,6 +21,8 @@ pub enum LogicalPlan {
     CommitTxn,
     RollbackTxn,
     Empty,
+    #[cfg(test)]
+    Identity(Identity),
 }
 
 impl Default for LogicalPlan {
@@ -50,6 +54,8 @@ impl LogicalPlan {
             LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
             LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
+            #[cfg(test)]
+            LogicalPlan::Identity(_) => unreachable!(),
         }
     }
 
@@ -71,6 +77,8 @@ impl LogicalPlan {
             LogicalPlan::StartTxn => Schema::default(),
             LogicalPlan::CommitTxn => Schema::default(),
             LogicalPlan::RollbackTxn => Schema::default(),
+            #[cfg(test)]
+            LogicalPlan::Identity(i) => i.schema(),
         }
     }
 }
@@ -145,6 +153,21 @@ impl IndexScan {
                 .collect::<Vec<_>>()
                 .join(",")
         )
+    }
+}
+
+pub struct Identity {
+    pub input: ResultSet,
+}
+
+#[cfg(test)]
+impl Identity {
+    pub fn new(input: ResultSet) -> Self {
+        Self { input }
+    }
+
+    fn schema(&self) -> Schema {
+        self.input.schema.clone()
     }
 }
 

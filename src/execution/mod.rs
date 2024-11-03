@@ -5,8 +5,8 @@ use crate::lit;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, DropTables, Filter, IndexScan, Insert, Join, LogicalPlan, Scan, Truncate, Update,
-    Values,
+    CreateTable, DropTables, Filter, Identity, IndexScan, Insert, Join, LogicalPlan, Scan,
+    Truncate, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::constraints::Constraints;
@@ -56,6 +56,8 @@ impl LogicalPlan {
                 ctx.rollback_txn()?;
                 Ok(ResultSet::default())
             }
+            #[cfg(test)]
+            LogicalPlan::Identity(i) => i.execute(ctx),
         }
     }
 }
@@ -652,12 +654,34 @@ impl Executable for Scan {
     }
 }
 
+impl Executable for Identity {
+    fn execute(self, _ctx: &mut Context) -> Result<ResultSet> {
+        Ok(self.input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::context::tests::test_context;
 
     use super::*;
     use anyhow::Result;
+
+    fn identity_plan(values: &[Vec<Value>], fields: &[Field]) -> LogicalPlan {
+        let set = ResultSet::from_rows(fields.to_owned(), values.to_owned());
+        LogicalPlan::Identity(Identity::new(set))
+    }
+
+    fn values_to_exprs(values: &[Vec<Value>]) -> Vec<Vec<LogicalExpr>> {
+        values
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|value| LogicalExpr::Literal(value.clone()))
+                    .collect()
+            })
+            .collect()
+    }
 
     #[test]
     fn test_values() -> Result<()> {
@@ -667,14 +691,7 @@ mod tests {
             vec![lit!(UInt, "2"), lit!(Str, "world")],
         ];
 
-        let input = values
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|value| LogicalExpr::Literal(value.clone()))
-                    .collect()
-            })
-            .collect();
+        let input = values_to_exprs(&values);
 
         let schema = Schema::new(vec![
             Field::new("col_1", Types::UInt, Constraints::unique(true)),
@@ -688,6 +705,73 @@ mod tests {
         // don't check the schema
         assert_eq!(output.cols(), expected.cols());
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_filter() -> Result<()> {
+        let mut ctx = test_context();
+
+        let values = vec![
+            vec![lit!(UInt, "1"), lit!(Str, "hello")],
+            vec![lit!(UInt, "2"), lit!(Str, "world")],
+            vec![lit!(UInt, "3"), lit!(Str, "hello")],
+            vec![lit!(UInt, "4"), lit!(Str, "world")],
+        ];
+
+        let schema = Schema::new(vec![
+            Field::new("col_1", Types::UInt, Constraints::unique(true)),
+            Field::new("col_2", Types::Str, Constraints::nullable(false)),
+        ]);
+
+        let root = identity_plan(&values, &schema.fields);
+
+        let filter = BooleanBinaryExpr::new(
+            LogicalExpr::Column("col_1".to_string()),
+            BinaryOperator::Gt,
+            LogicalExpr::Literal(lit!(UInt, "2")),
+        );
+
+        let plan = Filter::new(root, filter);
+
+        let expected = ResultSet::from_rows(schema.fields.clone(), values[2..].to_vec());
+        let output = plan.execute(&mut ctx)?;
+
+        assert_eq!(output, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_projection() -> Result<()> {
+        let mut ctx = test_context();
+
+        let values = vec![
+            vec![lit!(UInt, "1"), lit!(Str, "hello"), lit!(Char, "a")],
+            vec![lit!(UInt, "2"), lit!(Str, "world"), lit!(Char, "b")],
+            vec![lit!(UInt, "3"), lit!(Str, "hello"), lit!(Char, "c")],
+            vec![lit!(UInt, "4"), lit!(Str, "world"), lit!(Char, "d")],
+        ];
+
+        let schema = Schema::new(vec![
+            Field::new("col_1", Types::UInt, Constraints::unique(true)),
+            Field::new("col_2", Types::Str, Constraints::nullable(false)),
+            Field::new("col_3", Types::Char, Constraints::nullable(false)),
+        ]);
+
+        let root = identity_plan(&values, &schema.fields);
+
+        let projections = vec![
+            LogicalExpr::Column("col_1".to_string()),
+            LogicalExpr::Column("col_3".to_string()),
+        ];
+
+        let plan = Projection::new(root, projections);
+
+        let expected =
+            ResultSet::from_rows(schema.fields.clone(), values.to_vec()).select(vec![0, 2]);
+        let output = plan.execute(&mut ctx)?;
+
+        assert_eq!(output, expected);
         Ok(())
     }
 }
