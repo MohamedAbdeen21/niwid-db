@@ -1,7 +1,7 @@
 use parking_lot::lock_api::{RawRwLock, RawRwLockUpgrade};
 use parking_lot::{RwLock, RwLockReadGuard};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Latch {
     lock: RwLock<()>,
 }
@@ -39,7 +39,6 @@ impl Latch {
         unsafe { self.lock.raw().upgrade() }
     }
 
-    #[allow(unused)]
     pub fn release_upgradable(&self) {
         unsafe { self.lock.raw().unlock_upgradable() }
     }

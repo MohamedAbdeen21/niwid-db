@@ -17,11 +17,11 @@ pub(super) struct TableIterator {
 }
 
 impl TableIterator {
-    pub fn new(table: &Table) -> Self {
+    pub fn new(table: &Table, txn_id: Option<TxnId>) -> Self {
         let bpm = table.bpm.clone();
         let page: TablePage = bpm
             .lock()
-            .fetch_frame(table.first_page, table.active_txn)
+            .fetch_frame(table.first_page, txn_id)
             .unwrap()
             .reader()
             .into();
@@ -34,8 +34,7 @@ impl TableIterator {
             num_tuples: header.get_num_tuples(),
             page,
             bpm,
-            active_txn: table.active_txn,
-            // schema is not needed for now, can copy from table though
+            active_txn: txn_id,
         }
     }
 }
@@ -50,7 +49,9 @@ impl Iterator for TableIterator {
             self.bpm.lock().unpin(&page_id, self.active_txn);
         }
 
-        if self.current_slot >= self.num_tuples && self.next_page == INVALID_PAGE {
+        if self.current_slot >= self.num_tuples
+            && (self.next_page == INVALID_PAGE || self.next_page == 0)
+        {
             return None;
         }
 
@@ -70,12 +71,15 @@ impl Iterator for TableIterator {
             return self.next();
         }
 
-        let entry = self.page.read_tuple(self.current_slot);
+        let (meta, tuple) = self.page.read_tuple(self.current_slot);
         self.current_slot += 1;
 
-        if entry.0.is_deleted() {
+        // FIXME: Can run into stack overflows because of recursion
+        if meta.is_deleted() {
             return self.next();
         }
+
+        let entry = (meta, tuple);
 
         let page_id = self.page.get_page_id();
 
@@ -87,7 +91,7 @@ impl Iterator for TableIterator {
 mod tests {
     use anyhow::Result;
 
-    use crate::pages::table_page::TablePage;
+    use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
     use crate::table::tests::test_table;
     use crate::tuple::schema::{Field, Schema};
     use crate::tuple::{Entry, Tuple, TupleId};
@@ -98,15 +102,15 @@ mod tests {
     #[test]
     fn test_skip_deleted() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("id", Types::U8, false),
-            Field::new("age", Types::U16, false),
+            Field::new("id", Types::UInt, false),
+            Field::new("age", Types::UInt, false),
         ]);
         let mut table = test_table(3, &schema)?;
 
         let t1 = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "2"),
-                ValueFactory::from_string(&Types::U16, "3"),
+                ValueFactory::from_string(&Types::UInt, "2"),
+                ValueFactory::from_string(&Types::UInt, "3"),
             ],
             &schema,
         );
@@ -114,8 +118,8 @@ mod tests {
 
         let t2 = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "4"),
-                ValueFactory::from_string(&Types::U16, "5"),
+                ValueFactory::from_string(&Types::UInt, "4"),
+                ValueFactory::from_string(&Types::UInt, "5"),
             ],
             &schema,
         );
@@ -125,8 +129,8 @@ mod tests {
 
         let t3 = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "6"),
-                ValueFactory::from_string(&Types::U16, "7"),
+                ValueFactory::from_string(&Types::UInt, "6"),
+                ValueFactory::from_string(&Types::UInt, "7"),
             ],
             &schema,
         );
@@ -139,7 +143,7 @@ mod tests {
             Ok(())
         };
 
-        TableIterator::new(&table).try_for_each(scanner)?;
+        TableIterator::new(&table, None).try_for_each(scanner)?;
 
         assert_eq!(counter, 2);
 
@@ -147,21 +151,21 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_pages() -> Result<()> {
+    fn test_multiple_pages_iter() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::U128, false),
-            Field::new("b", Types::U128, false),
+            Field::new("a", Types::Int, true),
+            Field::new("b", Types::Int, true),
         ]);
 
-        let tuples_per_page = 76;
+        let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 8);
 
         let mut table = test_table(3, &schema)?;
 
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
                 vec![
-                    ValueFactory::from_string(&Types::U128, &i.to_string()),
-                    ValueFactory::from_string(&Types::U128, &i.to_string()),
+                    ValueFactory::from_string(&Types::Int, i.to_string()),
+                    ValueFactory::from_string(&Types::Int, i.to_string()),
                 ],
                 &schema,
             );
@@ -172,12 +176,12 @@ mod tests {
             .bpm
             .lock()
             .fetch_frame(table.first_page, None)?
-            .writer()
+            .reader()
             .into();
 
         assert_eq!(table.first_page, table.last_page);
 
-        assert!(first_page.header().is_dirty());
+        assert!(first_page.is_dirty());
 
         let tuple = Tuple::new(vec![Value::Null, Value::Null], &schema);
         table.insert(tuple)?;
@@ -201,7 +205,7 @@ mod tests {
             0
         );
 
-        TableIterator::new(&table).try_for_each(scanner)?;
+        TableIterator::new(&table, None).try_for_each(scanner)?;
 
         assert_eq!(counter, tuples_per_page + 1);
 

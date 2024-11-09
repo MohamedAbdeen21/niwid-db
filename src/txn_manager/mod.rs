@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{anyhow, Result};
@@ -10,7 +11,7 @@ use crate::pages::PageId;
 pub type TxnId = u64;
 
 pub struct TransactionManager {
-    next_txn_id: TxnId,
+    next_txn_id: AtomicU64,
     bpm: ArcBufferPool,
     locked_pages: HashMap<TxnId, Vec<PageId>>,
 }
@@ -18,7 +19,9 @@ pub struct TransactionManager {
 pub type ArcTransactionManager = Arc<FairMutex<TransactionManager>>;
 
 lazy_static! {
-    static ref TM: ArcTransactionManager = Arc::new(FairMutex::new(TransactionManager::new()));
+    static ref TM: ArcTransactionManager = Arc::new(FairMutex::new(TransactionManager::new(
+        BufferPoolManager::get()
+    )));
 }
 
 impl TransactionManager {
@@ -26,17 +29,16 @@ impl TransactionManager {
         TM.clone()
     }
 
-    pub fn new() -> Self {
+    pub fn new(bpm: ArcBufferPool) -> Self {
         Self {
-            next_txn_id: 0,
-            bpm: BufferPoolManager::get(),
+            next_txn_id: AtomicU64::new(0),
+            bpm,
             locked_pages: HashMap::new(),
         }
     }
 
     pub fn start(&mut self) -> Result<TxnId> {
-        let id = self.next_txn_id;
-        self.next_txn_id += 1;
+        let id = self.next_txn_id.fetch_add(1, Ordering::Relaxed);
 
         self.bpm.lock().start_txn(id)?;
         self.locked_pages.insert(id, vec![]);
@@ -102,10 +104,28 @@ impl TransactionManager {
         Ok(())
     }
 
-    pub fn abort(&mut self, txn_id: TxnId) -> Result<()> {
-        self.bpm.lock().abort_txn(txn_id)?;
-        self.locked_pages.remove(&txn_id);
+    pub fn rollback(&mut self, txn_id: TxnId) -> Result<()> {
+        self.bpm.lock().rollback_txn(txn_id)?;
+
+        for page_id in self.locked_pages.remove(&txn_id).unwrap().iter() {
+            self.bpm
+                .lock()
+                .fetch_frame(*page_id, None)?
+                .get_latch()
+                .release_upgradable();
+
+            self.bpm.lock().unpin(page_id, None);
+        }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub fn test_arc_transaction_manager(bpm: ArcBufferPool) -> ArcTransactionManager {
+        Arc::new(FairMutex::new(TransactionManager::new(bpm)))
     }
 }

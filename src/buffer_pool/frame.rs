@@ -3,7 +3,10 @@ use std::sync::{
     Arc,
 };
 
-use crate::pages::{latch::Latch, Page, PageId};
+use crate::{
+    latch::Latch,
+    pages::{Page, PageId},
+};
 
 pub struct Frame {
     page: Page,
@@ -47,12 +50,11 @@ impl Frame {
         self.page.get_page_id()
     }
 
-    pub(super) fn move_page(&mut self, frame: Self) {
+    pub(super) fn take_page(&mut self, frame: Self) {
         assert!(self.get_latch().is_locked());
         self.set_page(frame.page);
     }
 
-    #[allow(unused)]
     pub fn get_latch(&self) -> &Arc<Latch> {
         &self.latch
     }

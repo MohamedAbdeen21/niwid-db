@@ -1,19 +1,20 @@
-use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
+use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
 use crate::pages::PageId;
+use crate::printdbg;
 use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
-use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use crate::types::{AsBytes, Str, StrAddr, Types, ValueFactory};
+use crate::txn_manager::{ArcTransactionManager, TxnId};
+use crate::types::{Str, StrAddr, Types, ValueFactory};
 use anyhow::{anyhow, Result};
 
 pub mod table_iterator;
 
 pub struct Table {
     name: String,
-    first_page: PageId,
-    last_page: PageId,
+    pub first_page: PageId,
+    pub last_page: PageId,
     blob_page: PageId,
     bpm: ArcBufferPool,
     txn_manager: ArcTransactionManager,
@@ -28,10 +29,26 @@ impl PartialEq for Table {
 }
 
 impl Table {
-    pub fn new(name: String, schema: &Schema) -> Result<Self> {
-        let bpm = BufferPoolManager::get();
-        let txn_manager = TransactionManager::get();
+    /// Avoid accidentaly cloning the table later
+    fn clone_with_txn(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            first_page: self.first_page,
+            last_page: self.last_page,
+            blob_page: self.blob_page,
+            bpm: self.bpm.clone(),
+            txn_manager: self.txn_manager.clone(),
+            active_txn: self.active_txn,
+            schema: self.schema.clone(),
+        }
+    }
 
+    pub fn new(
+        bpm: ArcBufferPool,
+        txn_manager: ArcTransactionManager,
+        name: String,
+        schema: &Schema,
+    ) -> Result<Self> {
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
@@ -49,14 +66,13 @@ impl Table {
     }
 
     pub fn fetch(
+        bpm: &mut ArcBufferPool,
+        txn_manager: &mut ArcTransactionManager,
         name: String,
         schema: &Schema,
         first_page: PageId,
         last_page: PageId,
     ) -> Result<Self> {
-        let bpm = BufferPoolManager::get();
-        let txn_manager = TransactionManager::get();
-
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
 
         Ok(Self {
@@ -64,15 +80,11 @@ impl Table {
             first_page,
             last_page,
             blob_page,
-            bpm,
-            txn_manager,
+            bpm: bpm.clone(),
+            txn_manager: txn_manager.clone(),
             active_txn: None,
             schema: schema.clone(),
         })
-    }
-
-    pub fn get_name(&self) -> &str {
-        &self.name
     }
 
     pub fn get_first_page_id(&self) -> PageId {
@@ -92,8 +104,8 @@ impl Table {
         self.blob_page
     }
 
-    fn iter(&self) -> table_iterator::TableIterator {
-        table_iterator::TableIterator::new(self)
+    fn iter(&self, txn_id: Option<TxnId>) -> table_iterator::TableIterator {
+        table_iterator::TableIterator::new(self, txn_id)
     }
 
     fn insert_string(&mut self, bytes: &[u8]) -> Result<TupleId> {
@@ -126,7 +138,7 @@ impl Table {
         }
 
         // page is full, add another page
-        let new_blob_page: TablePage = self.bpm.lock().new_page()?.writer().into();
+        let new_blob_page: TablePage = self.bpm.lock().new_page()?.reader().into();
 
         self.bpm.lock().unpin(&self.blob_page, self.active_txn);
 
@@ -169,8 +181,8 @@ impl Table {
             .iter()
             .scan(0, |acc, ty| {
                 let size = if *ty == Types::Str {
-                    let slice = &tuple.get_data()[*acc..*acc + 2];
-                    ValueFactory::from_bytes(&Types::U16, slice).u16() as usize + 2
+                    let slice = tuple.get_data()[*acc..*acc + 2].try_into().unwrap();
+                    u16::from_ne_bytes(slice) as usize + 2
                 } else {
                     ty.size()
                 };
@@ -188,48 +200,46 @@ impl Table {
                 Types::Str => {
                     let str_bytes = &tuple.get_data()[offset..size];
                     let addr = &self.insert_string(str_bytes).unwrap().to_bytes();
-                    println!("inserted at addr: {:?}", addr);
                     ValueFactory::from_bytes(&Types::StrAddr, addr)
                 }
                 _ => ValueFactory::from_bytes(&ty, &tuple.get_data()[offset..size]),
             })
             .collect::<Vec<_>>();
 
-        let mut new_tuple = Tuple::new(values, &Schema { fields });
+        let mut new_tuple = Tuple::new(values, &Schema::new(fields));
         new_tuple._null_bitmap = tuple._null_bitmap;
         Ok(new_tuple)
     }
 
-    pub fn try_start_txn(&mut self, txn_id: TxnId) -> bool {
-        if self.active_txn.is_some() {
-            false
-        } else {
-            self.start_txn(txn_id).unwrap();
-            true
-        }
-    }
-
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
-        if self.active_txn.is_some() {
-            Err(anyhow!("Another transaction is active"))
+        printdbg!("Table {} Starting txn {}", self.name, txn_id);
+        if let Some(current) = self.active_txn {
+            if txn_id != current {
+                return Err(anyhow!("Another transaction is active"));
+            }
         } else {
             self.active_txn = Some(txn_id);
-            Ok(())
         }
+        Ok(())
     }
 
     pub fn commit_txn(&mut self) -> Result<()> {
         if self.active_txn.is_some() {
+            printdbg!(
+                "Table {} Committing txn {}",
+                self.name,
+                self.active_txn.unwrap()
+            );
             self.active_txn = None;
             Ok(())
         } else {
-            Err(anyhow!("No active transaction"))
+            Err(anyhow!("Table: No active transaction"))
         }
     }
 
-    #[allow(unused)]
-    pub fn abort_txn(&self, txn_id: TxnId) -> Result<()> {
-        self.txn_manager.lock().abort(txn_id)
+    #[allow(dead_code)]
+    pub fn rollback_txn(&mut self) -> Result<()> {
+        self.commit_txn()
     }
 
     /// fetch the string from the tuple, takes TupleId bytes
@@ -254,14 +264,23 @@ impl Table {
         Str::from_raw_bytes(tuple.get_data())
     }
 
+    fn check_nullability(&self, tuple: &Tuple) -> Result<()> {
+        for (i, field) in self.schema.fields.iter().enumerate() {
+            if !field.nullable && tuple.get_value_at(i as u8, &self.schema).unwrap().is_none() {
+                return Err(anyhow!("Null value in non-nullable field {}", field.name));
+            }
+        }
+        Ok(())
+    }
+
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
         if tuple.len() > PAGE_END - (SLOT_SIZE + META_SIZE) {
             return Err(anyhow!("Tuple is too long"));
         }
 
-        println!("inserting tuple: {:?}", tuple);
+        self.check_nullability(&tuple)?;
+
         let tuple = self.insert_strings(tuple)?;
-        println!("inserted tuple: {:?}", tuple);
 
         if let Some(id) = self.active_txn {
             self.txn_manager.lock().touch_page(id, self.last_page)?;
@@ -286,7 +305,7 @@ impl Table {
         }
 
         // page is full, add another page and link to table
-        let page_id = self.bpm.lock().new_page()?.writer().get_page_id();
+        let page_id = self.bpm.lock().new_page()?.reader().get_page_id();
 
         last_page.set_next_page_id(page_id);
 
@@ -295,8 +314,12 @@ impl Table {
         self.insert(tuple)
     }
 
-    pub fn scan(&self, mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>) -> Result<()> {
-        self.iter().try_for_each(|entry| f(&entry))
+    pub fn scan(
+        &self,
+        txn_id: Option<TxnId>,
+        mut f: impl FnMut(&(TupleId, Entry)) -> Result<()>,
+    ) -> Result<()> {
+        self.iter(txn_id).try_for_each(|entry| f(&entry))
     }
 
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
@@ -311,7 +334,9 @@ impl Table {
 
         page.delete_tuple(slot_id);
 
-        let page_id = page.get_page_id();
+        if self.active_txn.is_none() {
+            self.bpm.lock().flush(Some(page_id))?;
+        }
 
         self.bpm.lock().unpin(&page_id, self.active_txn);
 
@@ -319,6 +344,10 @@ impl Table {
     }
 
     pub fn update(&mut self, tuple_id: Option<TupleId>, new_tuple: Tuple) -> Result<TupleId> {
+        if self.active_txn.is_none() {
+            panic!("Table: No active transaction");
+        }
+
         match tuple_id {
             None => todo!(),
             Some(id) => self.delete(id)?,
@@ -326,28 +355,30 @@ impl Table {
 
         let tuple_id = self.insert(new_tuple)?;
 
-        if self.active_txn.is_none() {
-            self.bpm.lock().flush(Some(self.last_page))?;
-        }
-
         Ok(tuple_id)
+    }
+
+    /// Needs to return a duplicate because of how catalog handles ownership
+    pub fn truncate(&self) -> Result<Table> {
+        let mut table = self.clone_with_txn();
+        table.first_page = self.bpm.lock().new_page()?.reader().get_page_id();
+        table.last_page = table.first_page;
+
+        Ok(table)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-    use crate::disk_manager::test_path;
+    use crate::buffer_pool::tests::test_arc_bpm;
     use crate::tuple::schema::{Field, Schema};
+    use crate::txn_manager::tests::test_arc_transaction_manager;
     use crate::types::*;
     use anyhow::Result;
-    use parking_lot::FairMutex;
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
-        let path = test_path();
-        let bpm = Arc::new(FairMutex::new(BufferPoolManager::new(size, &path)));
+        let bpm = test_arc_bpm(size);
 
         let mut guard = bpm.lock();
 
@@ -355,7 +386,7 @@ mod tests {
 
         let blob_page = guard.new_page()?.reader().get_page_id();
 
-        let txn_manager = Arc::new(FairMutex::new(TransactionManager::new()));
+        let txn_manager = test_arc_transaction_manager(bpm.clone());
 
         drop(guard);
 
@@ -374,8 +405,8 @@ mod tests {
     #[test]
     fn test_unpin_drop() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("id", Types::U8, false),
-            Field::new("age", Types::U16, false),
+            Field::new("id", Types::UInt, false),
+            Field::new("age", Types::UInt, false),
         ]);
 
         let mut table = test_table(2, &schema)?;
@@ -383,8 +414,8 @@ mod tests {
         let bpm = table.bpm.clone();
 
         let tuple_data: Vec<Value> = vec![
-            ValueFactory::from_string(&Types::U8, "2"),
-            ValueFactory::from_string(&Types::U16, "50000"),
+            ValueFactory::from_string(&Types::UInt, "2"),
+            ValueFactory::from_string(&Types::UInt, "50000"),
         ];
         let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
@@ -399,21 +430,21 @@ mod tests {
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let schema = Schema::new(vec![Field::new("a", Types::U128, false)]);
+        let schema = Schema::new(vec![Field::new("a", Types::UInt, false)]);
         let mut table = test_table(4, &schema)?;
 
         let first_id = table.get_first_page_id();
         let blob_id = table.get_blob_page_id();
 
-        // entry size = 33 (17 meta + 16 data)
+        // entry size = 22 (18 meta + 4 data)
         // slot size = 4
-        // free page = 4080
-        // 110 * 37 ≈ 4080
-        let tuples_per_page = 110;
+        // free page = 4090
+        // 4090 / 24 ≈ 157
+        let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 4);
 
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::U128, &i.to_string())],
+                vec![ValueFactory::from_string(&Types::UInt, i.to_string())],
                 &schema,
             );
             table.insert(tuple)?;
@@ -422,7 +453,7 @@ mod tests {
         assert_eq!(table.first_page, table.last_page);
 
         table.insert(Tuple::new(
-            vec![ValueFactory::from_string(&Types::U128, "99999")],
+            vec![ValueFactory::from_string(&Types::UInt, "99999")],
             &schema,
         ))?;
         let second_id = table.get_last_page_id();
@@ -432,7 +463,7 @@ mod tests {
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::U128, &i.to_string())],
+                vec![ValueFactory::from_string(&Types::UInt, i.to_string())],
                 &schema,
             );
             table.insert(tuple)?;
@@ -447,7 +478,7 @@ mod tests {
 
         // get count of tuples
         let mut count = 0;
-        table.scan(|_| {
+        table.scan(None, |_| {
             count += 1;
             Ok(())
         })?;
@@ -461,18 +492,18 @@ mod tests {
         let s1 = "Hello, World!";
         let s2 = "Hello, Again";
         let schema = Schema::new(vec![
-            Field::new("a", Types::U8, false),
+            Field::new("a", Types::UInt, false),
             Field::new("str", Types::Str, false),
-            Field::new("b", Types::U8, false),
+            Field::new("b", Types::UInt, false),
         ]);
 
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "100"),
+                ValueFactory::from_string(&Types::UInt, "100"),
                 ValueFactory::from_string(&Types::Str, s1),
-                ValueFactory::from_string(&Types::U8, "50"),
+                ValueFactory::from_string(&Types::UInt, "50"),
             ],
             &schema,
         );
@@ -480,9 +511,9 @@ mod tests {
 
         let tuple = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U8, "20"),
+                ValueFactory::from_string(&Types::UInt, "20"),
                 ValueFactory::from_string(&Types::Str, s2),
-                ValueFactory::from_string(&Types::U8, "10"),
+                ValueFactory::from_string(&Types::UInt, "10"),
             ],
             &schema,
         );
@@ -492,7 +523,6 @@ mod tests {
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let tuple_bytes = tuple.get_value_of("str", &schema)?.unwrap();
-            println!("tuple: {:?}", tuple_bytes);
             let string = table.fetch_string(tuple_bytes.str_addr());
             assert_eq!(
                 string,
@@ -506,7 +536,7 @@ mod tests {
             Ok(())
         };
 
-        table.scan(assert_strings)?;
+        table.scan(None, assert_strings)?;
 
         Ok(())
     }
@@ -517,7 +547,7 @@ mod tests {
         let s2 = "Hello, Again";
         let schema = Schema::new(vec![
             Field::new("s1", Types::Str, false),
-            Field::new("a", Types::U8, false),
+            Field::new("a", Types::UInt, false),
             Field::new("s2", Types::Str, false),
         ]);
 
@@ -526,7 +556,7 @@ mod tests {
         let tuple = Tuple::new(
             vec![
                 ValueFactory::from_string(&Types::Str, s1),
-                ValueFactory::from_string(&Types::U8, "100"),
+                ValueFactory::from_string(&Types::UInt, "100"),
                 ValueFactory::from_string(&Types::Str, s2),
             ],
             &schema,
@@ -537,7 +567,7 @@ mod tests {
             let values = tuple.get_values(&schema)?;
             let read_s1 = table.fetch_string(values[0].str_addr());
 
-            let a = U8::from_bytes(&values[1].to_bytes()).0;
+            let a = UInt::from_bytes(&values[1].to_bytes()).0;
 
             let read_s2 = table.fetch_string(values[2].str_addr());
 
@@ -548,7 +578,7 @@ mod tests {
             Ok(())
         };
 
-        table.scan(assert_strings)?;
+        table.scan(None, assert_strings)?;
 
         Ok(())
     }
@@ -556,27 +586,27 @@ mod tests {
     #[test]
     fn test_delete() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::U128, false),
-            Field::new("b", Types::F64, false),
-            Field::new("c", Types::I8, false),
+            Field::new("a", Types::UInt, false),
+            Field::new("b", Types::Float, false),
+            Field::new("c", Types::Int, false),
         ]);
 
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
             vec![
-                ValueFactory::from_string(&Types::U128, "10"),
-                ValueFactory::from_string(&Types::F64, "10.0"),
-                ValueFactory::from_string(&Types::I8, "10"),
+                ValueFactory::from_string(&Types::UInt, "10"),
+                ValueFactory::from_string(&Types::Float, "10.0"),
+                ValueFactory::from_string(&Types::Int, "10"),
             ],
             &schema,
         );
         let t1_id = table.insert(tuple)?;
 
         let tuple_data = vec![
-            ValueFactory::from_string(&Types::U128, "20"),
-            ValueFactory::from_string(&Types::F64, "20.0"),
-            ValueFactory::from_string(&Types::I8, "20"),
+            ValueFactory::from_string(&Types::UInt, "20"),
+            ValueFactory::from_string(&Types::Float, "20.0"),
+            ValueFactory::from_string(&Types::Int, "20"),
         ];
         let tuple = Tuple::new(tuple_data.clone(), &schema);
         let t2_id = table.insert(tuple)?;
@@ -592,13 +622,13 @@ mod tests {
             Ok(())
         };
 
-        table.scan(scanner_1)?;
+        table.scan(None, scanner_1)?;
 
         table.delete(t2_id)?;
 
         let scanner_2 = |_: &(TupleId, Entry)| Err(anyhow!("Should not run")); // should never run
 
-        table.scan(scanner_2)?;
+        table.scan(None, scanner_2)?;
 
         Ok(())
     }
@@ -606,9 +636,9 @@ mod tests {
     #[test]
     fn test_nulls() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::U128, false),
-            Field::new("b", Types::Str, false),
-            Field::new("c", Types::I8, false),
+            Field::new("a", Types::UInt, true),
+            Field::new("b", Types::Str, true),
+            Field::new("c", Types::Int, true),
         ]);
 
         let mut table = test_table(4, &schema)?;
@@ -629,7 +659,20 @@ mod tests {
             Ok(())
         };
 
-        table.scan(validator)?;
+        table.scan(None, validator)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_nullability() -> Result<()> {
+        let schema = Schema::new(vec![Field::new("a", Types::Int, false)]);
+
+        let mut table = test_table(4, &schema)?;
+
+        let tuple = Tuple::new(vec![Value::Null], &schema);
+
+        assert!(table.insert(tuple).is_err());
 
         Ok(())
     }

@@ -1,7 +1,10 @@
+use std::collections::HashSet;
+
 use crate::types::Types;
+use anyhow::{anyhow, Result};
 use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
-use sqlparser::ast::ColumnDef;
+use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Field {
@@ -14,7 +17,7 @@ impl Default for Field {
     fn default() -> Self {
         Self {
             name: String::new(),
-            ty: Types::U8,
+            ty: Types::Int,
             nullable: false,
         }
     }
@@ -33,11 +36,20 @@ impl Field {
 #[derive(Default, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Schema {
     pub fields: Vec<Field>,
+    is_qualified: bool,
 }
 
 impl Schema {
     pub fn new(fields: Vec<Field>) -> Self {
-        Self { fields }
+        let is_qualified = fields.iter().any(|f| f.name.contains('.'));
+        Self {
+            fields,
+            is_qualified,
+        }
+    }
+
+    pub fn is_qualified(&self) -> bool {
+        self.is_qualified
     }
 
     #[allow(unused)]
@@ -57,7 +69,20 @@ impl Schema {
         sql
     }
 
-    pub fn from_sql(cols: Vec<ColumnDef>) -> Self {
+    pub fn join(&self, schema: Schema) -> Result<Self> {
+        let mut fields = self.fields.clone();
+        let left_set: HashSet<&str> =
+            HashSet::from_iter(self.fields.iter().map(|f| f.name.as_str()));
+        let right_set = HashSet::from_iter(schema.fields.iter().map(|f| f.name.as_str()));
+        if left_set.intersection(&right_set).count() > 0 {
+            return Err(anyhow!("Ambiguous column name"));
+        } else {
+            fields.extend(schema.fields);
+        }
+        Ok(Schema::new(fields))
+    }
+
+    pub fn from_sql(cols: Vec<ColumnDef>) -> Result<Self> {
         let fields = cols
             .iter()
             .map(|col| {
@@ -68,17 +93,34 @@ impl Schema {
                     ..
                 } = col;
 
-                // TODO: actually check the vec of structs for the value
-                let nullable = options.is_empty();
+                if options.len() > 1 {
+                    return Err(anyhow!("Only supported constraint is NOT NULL"));
+                };
 
-                Field::new(
+                let nullable = !matches!(
+                    options.first(),
+                    Some(ColumnOptionDef {
+                        option: ColumnOption::NotNull,
+                        ..
+                    }),
+                );
+
+                Ok(Field::new(
                     &name.value,
                     Types::from_sql(&data_type.to_string()),
                     nullable,
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
+        Ok(Schema::new(fields))
+    }
+
+    pub fn add_qualifier(&self, name: &str) -> Self {
+        let mut fields = self.fields.clone();
+        fields
+            .iter_mut()
+            .for_each(|f| f.name = format!("{}.{}", name, f.name));
         Schema::new(fields)
     }
 }
@@ -105,9 +147,9 @@ mod tests {
     #[test]
     fn test_to_sql() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::I64, false),
+            Field::new("a", Types::Int, false),
             Field::new("b", Types::Str, true),
-            Field::new("c", Types::U8, false),
+            Field::new("c", Types::UInt, false),
         ]);
 
         let sql = format!(
@@ -117,19 +159,44 @@ mod tests {
             schema.to_sql()
         );
 
-        println!("{:#?}", sql);
-
         let statment = Parser::new(&GenericDialect)
             .try_with_sql(&sql)?
             .parse_statement()?;
 
-        println!("{:#?}", statment);
+        match statment {
+            Statement::CreateTable(CreateTable { columns, .. }) => {
+                assert_eq!(Schema::from_sql(columns)?, schema);
+            }
+            _ => panic!(),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_sql() -> Result<()> {
+        let sql = "CREATE TABLE users (
+            a int NOT NULL,
+            b text,
+            c uint
+        )";
+
+        let statment = Parser::new(&GenericDialect)
+            .try_with_sql(sql)?
+            .parse_statement()?;
 
         match statment {
             Statement::CreateTable(CreateTable { columns, .. }) => {
-                assert_eq!(Schema::from_sql(columns), schema);
+                assert_eq!(
+                    Schema::from_sql(columns)?,
+                    Schema::new(vec![
+                        Field::new("a", Types::Int, false),
+                        Field::new("b", Types::Str, true),
+                        Field::new("c", Types::UInt, true),
+                    ])
+                );
             }
-            _ => panic!(),
+            _ => unreachable!(),
         }
 
         Ok(())

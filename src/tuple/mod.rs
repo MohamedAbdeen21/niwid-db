@@ -11,6 +11,7 @@ use std::{mem, slice};
 pub type Entry = (TupleMetaData, Tuple);
 /// Page Id and slot Id
 pub type TupleId = (PageId, usize);
+pub const TUPLE_ID_SIZE: usize = 12;
 
 #[repr(C)]
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -51,8 +52,26 @@ impl Tuple {
         tuple
     }
 
+    #[allow(unused)]
+    pub fn from_sql(ident: Vec<Option<String>>, schema: Schema) -> Self {
+        let values = ident
+            .iter()
+            .zip(schema.fields.iter().map(|f| f.ty.clone()))
+            .map(|(v, ty)| match v {
+                None => ValueFactory::null(),
+                Some(v) => ValueFactory::from_string(&ty, v),
+            })
+            .collect();
+
+        Tuple::new(values, &schema)
+    }
+
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
     }
 
     pub fn get_value_of(&self, field: &str, schema: &Schema) -> Result<Option<Value>> {
@@ -87,15 +106,15 @@ impl Tuple {
     }
 
     pub fn get_value_at(&self, id: u8, schema: &Schema) -> Result<Option<Value>> {
+        if id as usize >= schema.fields.len() {
+            return Err(anyhow!("field id out of bounds"));
+        }
+
         if (self._null_bitmap >> id) & 1 == 1 {
             return Ok(None);
         }
 
         let types: Vec<_> = schema.fields.iter().map(|f| &f.ty).collect();
-
-        if id as usize >= schema.fields.len() {
-            return Err(anyhow!("field id out of bounds"));
-        }
 
         let dtype = match types[id as usize] {
             Types::Str => &Types::StrAddr,
@@ -115,32 +134,6 @@ impl Tuple {
     pub fn get_data(&self) -> &[u8] {
         &self.data
     }
-
-    #[allow(unused)]
-    pub fn set_field(
-        &mut self,
-        field: u8,
-        value: Option<Box<dyn AsBytes>>,
-        schema: &Schema,
-    ) -> Result<()> {
-        if value.is_none() {
-            self._null_bitmap |= 1 << field;
-        } else {
-            let offset = schema
-                .fields
-                .iter()
-                .take(field as usize)
-                .fold(0, |acc, f| acc + f.ty.size());
-
-            let size = schema.fields[field as usize].ty.size();
-
-            self._null_bitmap &= !(1 << field);
-
-            self.data[offset..offset + size].copy_from_slice(&value.unwrap().to_bytes());
-        }
-
-        Ok(())
-    }
 }
 
 impl Serialize for Tuple {
@@ -159,9 +152,10 @@ impl Serialize for Tuple {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct TupleMetaData {
+    _padding: [u8; 1],
+    is_deleted: bool,
     timestamp: u64,
     null_bitmap: u64,
-    is_deleted: bool,
 }
 
 impl Serialize for TupleMetaData {
@@ -176,7 +170,7 @@ impl Serialize for TupleMetaData {
 
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), mem::size_of::<TupleMetaData>());
-        unsafe { *(bytes.as_ptr() as *const TupleMetaData) }
+        unsafe { *(bytes.as_ptr() as *mut TupleMetaData) }
     }
 }
 
@@ -189,6 +183,7 @@ impl Default for TupleMetaData {
 impl TupleMetaData {
     pub fn new(nulls: u64) -> Self {
         Self {
+            _padding: [0; 1],
             timestamp: 0,
             null_bitmap: nulls,
             is_deleted: false,
@@ -214,11 +209,16 @@ impl TupleMetaData {
 }
 
 pub trait TupleExt {
+    fn from_string(s: &str) -> Self;
     fn from_bytes(bytes: &[u8]) -> Self;
     fn to_bytes(&self) -> Vec<u8>;
 }
 
 impl TupleExt for TupleId {
+    fn from_string(_s: &str) -> Self {
+        unreachable!()
+    }
+
     fn from_bytes(bytes: &[u8]) -> Self {
         let page_offset = std::mem::size_of::<PageId>();
         let slot_size = std::mem::size_of::<usize>();

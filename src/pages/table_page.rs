@@ -1,17 +1,33 @@
-use super::{latch::Latch, traits::Serialize, PageId, INVALID_PAGE};
-use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
-
+use super::{traits::Serialize, PageData, PageId};
 use super::{Page, PAGE_SIZE};
+use crate::latch::Latch;
+use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
 use anyhow::{anyhow, Result};
+use core::panic;
 use std::{mem, slice, sync::Arc};
 
-const HEADER_SIZE: usize = mem::size_of::<TablePageHeader>();
+/// The part of the header that persists on disk (num_tuples (2) and next_page (4)).
+/// The rest are computed on the fly
+const HEADER_SIZE: usize = 2 + mem::size_of::<PageId>();
 pub const SLOT_SIZE: usize = mem::size_of::<TablePageSlot>();
 pub const META_SIZE: usize = mem::size_of::<TupleMetaData>();
 
 // We take the first [`HEADER_SIZE`] bytes from the page to store the header
 // This means that the last address in the page is [`PAGE_END`] and not [`PAGE_SIZE`].
 pub const PAGE_END: usize = PAGE_SIZE - HEADER_SIZE;
+
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct TablePageHeader {
+    _padding: [u8; 3],
+    is_dirty: bool,
+    // These two fields are part of the physical page
+    // the above two don't persist on disk (yes, even
+    // though they are part of the header)
+    num_tuples: u16,
+    /// INVALID_PAGE (-1) if there are no more pages
+    next_page: PageId,
+}
 
 /// The Table Page data that persists on disk
 /// all other fields are helpers (pointers and flags)
@@ -47,6 +63,11 @@ impl TablePage {
             panic!("Cannot modify read only page");
         }
         &mut unsafe { self.data.as_mut() }.unwrap().header
+    }
+
+    #[cfg(test)]
+    pub fn is_dirty(&self) -> bool {
+        self.header().is_dirty
     }
 
     pub fn set_next_page_id(&mut self, page_id: PageId) {
@@ -140,7 +161,7 @@ impl TablePage {
         data.bytes[tuple_offset..(tuple_offset + tuple_size)].copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
-        self.header_mut().is_dirty |= true;
+        self.header_mut().mark_dirty();
 
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
@@ -175,7 +196,7 @@ impl TablePage {
         data.bytes[tuple_offset..(tuple_offset + tuple.len())].copy_from_slice(tuple.to_bytes());
 
         self.header_mut().add_tuple();
-        self.header_mut().is_dirty |= true;
+        self.header_mut().mark_dirty();
 
         Ok((self.page_id, self.header().get_num_tuples() - 1))
     }
@@ -186,14 +207,15 @@ impl TablePage {
         }
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
-        let mut deleted_meta = TupleMetaData::default(); // TODO: Copy null bitmap
-        deleted_meta.mark_deleted();
-
         let data = unsafe { self.data.as_mut().unwrap() };
 
-        data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)]
-            .copy_from_slice(deleted_meta.to_bytes());
-        self.header_mut().is_dirty |= true;
+        let slice = &mut data.bytes[slot.offset as usize..(slot.offset as usize + META_SIZE)];
+
+        let mut meta = TupleMetaData::from_bytes(slice);
+        meta.mark_deleted();
+
+        slice.copy_from_slice(meta.to_bytes());
+        self.header_mut().mark_dirty();
     }
 
     pub fn read_tuple(&self, slot: usize) -> Entry {
@@ -241,49 +263,36 @@ impl TablePage {
 
 impl<'a> From<&'a mut Page> for TablePage {
     fn from(page: &'a mut Page) -> TablePage {
-        let data = page.data.as_mut_ptr() as *mut TablePageData;
-        let mut p = TablePage {
+        let data = &mut page.data as *mut PageData as *mut TablePageData;
+        TablePage {
             data,
             page_id: page.get_page_id(),
             latch: page.latch.clone(),
             read_only: false,
-        };
-        if p.header().get_next_page() == 0 {
-            p.header_mut().set_next_page_id(INVALID_PAGE);
         }
-        p
     }
 }
 
 impl<'a> From<&'a Page> for TablePage {
     fn from(page: &'a Page) -> TablePage {
-        let data = page.data.as_ptr() as *mut TablePageData;
-        let mut p = TablePage {
+        let data = &page.data as *const PageData as *mut TablePageData;
+        TablePage {
             data,
             page_id: page.get_page_id(),
             latch: page.latch.clone(),
-            read_only: false,
-        };
-        if p.header().get_next_page() == 0 {
-            p.header_mut().set_next_page_id(INVALID_PAGE);
+            read_only: true,
         }
-        p.read_only = true;
-        p
     }
 }
 
-#[repr(C, align(2))]
-#[derive(Debug, Clone, Copy)]
-pub struct TablePageHeader {
-    is_dirty: bool,
-    /// INVALID_PAGE (-1) if there are no more pages
-    num_tuples: u16,
-    next_page: PageId,
-}
-
 impl TablePageHeader {
-    pub fn set_next_page_id(&mut self, next_page: PageId) {
-        self.next_page = next_page;
+    pub fn mark_dirty(&mut self) {
+        self.is_dirty |= true;
+    }
+
+    pub fn set_next_page_id(&mut self, page: PageId) {
+        self.next_page = page;
+        self.mark_dirty();
     }
 
     pub fn get_next_page(&self) -> PageId {
@@ -292,15 +301,11 @@ impl TablePageHeader {
 
     pub fn add_tuple(&mut self) {
         self.num_tuples += 1;
+        self.mark_dirty();
     }
 
     pub fn get_num_tuples(&self) -> usize {
         self.num_tuples as usize
-    }
-
-    #[cfg(test)]
-    pub fn is_dirty(&self) -> bool {
-        self.is_dirty
     }
 }
 
@@ -318,7 +323,8 @@ impl Serialize for TablePageSlot {
 
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), SLOT_SIZE);
-        unsafe { *(bytes.as_ptr() as *const TablePageSlot) }
+        let bytes: [u8; SLOT_SIZE] = bytes.try_into().unwrap();
+        unsafe { std::mem::transmute::<[u8; SLOT_SIZE], TablePageSlot>(bytes) }
     }
 }
 
@@ -372,17 +378,19 @@ mod tests {
         let table_page_2: TablePage = page.into();
 
         let tuple = Tuple::new(
-            vec![ValueFactory::from_string(&Types::U16, "300")],
-            &Schema::new(vec![Field::new("a", Types::U16, false)]),
+            vec![ValueFactory::from_string(&Types::UInt, "300")],
+            &Schema::new(vec![Field::new("a", Types::UInt, false)]),
         );
 
         table_page.insert_tuple(&tuple)?;
-        table_page.insert_tuple(&tuple)?;
 
-        assert_eq!(page.read_bytes(PAGE_SIZE - 2, PAGE_SIZE), tuple.to_bytes());
+        assert_eq!(
+            page.read_bytes(PAGE_SIZE - Types::UInt.size(), PAGE_SIZE),
+            tuple.to_bytes()
+        );
         assert!(page.is_dirty());
-        assert!(table_page.header().is_dirty());
-        assert!(table_page_2.header().is_dirty());
+        assert!(table_page.header().is_dirty);
+        assert!(table_page_2.header().is_dirty);
 
         assert_eq!(table_page_2.read_tuple(0).1.to_bytes(), tuple.to_bytes());
 

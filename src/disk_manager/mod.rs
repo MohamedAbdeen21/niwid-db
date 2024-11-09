@@ -1,5 +1,6 @@
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
+use crate::printdbg;
 use crate::txn_manager::TxnId;
 use anyhow::{anyhow, Context, Result};
 use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
@@ -141,6 +142,7 @@ impl DiskManager {
     }
 
     pub fn shadow_page<T: DiskWritable>(&self, txn_id: TxnId, page_id: PageId) -> Result<T> {
+        printdbg!("DM: shadowing page {page_id} for {txn_id}");
         let trans_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
 
         let to_path = Path::join(Path::new(&trans_cache), Path::new(&page_id.to_string()));
@@ -164,6 +166,15 @@ impl DiskManager {
 
     fn txn_dir(&self) -> PathBuf {
         Path::join(Path::new(&self.path), Path::new("txn"))
+    }
+
+    pub fn rollback_txn(&self, txn_id: TxnId) -> Result<()> {
+        remove_dir_all(Path::join(
+            Path::new(&self.txn_dir()),
+            Path::new(&txn_id.to_string()),
+        ))?;
+
+        Ok(())
     }
 
     pub fn commit_txn(&self, txn_id: TxnId) -> Result<()> {
@@ -245,7 +256,6 @@ mod tests {
         page.set_page_id(page_id);
         let mut table_page: TablePage = page.into();
 
-        // let dummy_schema = Schema::new(vec!["str"], vec![Types::Str]);
         let dummy_schema = Schema::new(vec![Field::new("str", Types::Str, false)]);
 
         let tuple = Tuple::new(
@@ -295,7 +305,7 @@ mod tests {
     #[test]
     fn test_shadow_page() -> Result<()> {
         let path = test_path();
-        let page_id = 1;
+        let page_id = 777;
         let txn_id = 2;
 
         let disk = DiskManager::new(&path);
@@ -304,7 +314,7 @@ mod tests {
         page.set_page_id(page_id);
 
         let data = "Hello, World!".as_bytes();
-        let start = 1;
+        let start = 2;
         let end = data.len() + start;
         page.write_bytes(start, end, data);
 

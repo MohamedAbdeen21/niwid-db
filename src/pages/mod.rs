@@ -1,41 +1,46 @@
-pub mod latch;
 pub(crate) mod table_page;
 pub(crate) mod traits;
 
 use std::sync::Arc;
 
-use latch::Latch;
 use traits::Serialize;
 
-use crate::disk_manager::DiskWritable;
+use crate::{disk_manager::DiskWritable, latch::Latch};
 
 pub const PAGE_SIZE: usize = 4096; // 4 KBs
-pub const INVALID_PAGE: PageId = -1;
+pub const INVALID_PAGE: PageId = 0;
 
-pub type PageId = i64;
+pub type PageId = u32;
+
+/// The data that is shared and modified between all page types
+/// 3 padding bytes, dirty flag, and then the actual data
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct PageData {
+    _padding: [u8; 3],
+    is_dirty: bool,
+    bytes: [u8; PAGE_SIZE],
+}
 
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement `From<Page>` and `Into<Page>` traits
 #[repr(C)]
 #[derive(Debug, Clone)]
 pub struct Page {
-    /// Underlying block of memory of size [`PAGE_SIZE`]
-    /// first two bytes are the is_dirty flag as it's shared with
-    /// other page types
-    data: [u8; PAGE_SIZE],
+    data: PageData,
     page_id: PageId,
     latch: Arc<Latch>,
 }
 
 impl Serialize for Page {
     fn to_bytes(&self) -> &[u8] {
-        &self.data
+        &self.data.bytes
     }
 
     fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), PAGE_SIZE);
         let mut page = Page::new();
-        page.data.copy_from_slice(bytes);
+        page.data.bytes.copy_from_slice(bytes);
         page
     }
 }
@@ -63,18 +68,26 @@ impl Default for Page {
 impl Page {
     pub fn new() -> Self {
         Page {
-            data: [0; PAGE_SIZE],
+            data: PageData {
+                _padding: [0; 3],
+                bytes: [0; PAGE_SIZE],
+                is_dirty: false,
+            },
             page_id: INVALID_PAGE,
             latch: Arc::new(Latch::new()),
         }
     }
 
     pub fn mark_clean(&mut self) {
-        self.data[0] = 0;
+        self.data.is_dirty = false;
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.data.is_dirty = true;
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.data[0] == 1
+        self.data.is_dirty
     }
 
     pub fn get_page_id(&self) -> PageId {
@@ -86,12 +99,12 @@ impl Page {
     }
 
     pub fn read_bytes(&self, start: usize, end: usize) -> &[u8] {
-        &self.data[start..end]
+        &self.data.bytes[start..end]
     }
 
     pub fn write_bytes(&mut self, start: usize, end: usize, bytes: &[u8]) {
-        self.data[start..end].copy_from_slice(bytes);
-        self.data[0] = 1;
+        self.data.bytes[start..end].copy_from_slice(bytes);
+        self.mark_dirty();
     }
 
     pub fn set_latch(&mut self, latch: Arc<Latch>) {
