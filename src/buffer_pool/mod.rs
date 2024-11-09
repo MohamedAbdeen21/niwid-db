@@ -114,7 +114,7 @@ impl BufferPoolManager {
             {
                 // default to the original page if the page was not touched/shadowed
                 // None => return self.fetch_frame(page_id, None),
-                None => unreachable!(),
+                None => unreachable!("Should have shadowed the page"),
                 Some(frame) => frame,
             }
         } else if let Some(frame_id) = self.page_table.get(&page_id) {
