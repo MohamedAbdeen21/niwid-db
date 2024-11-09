@@ -2,6 +2,7 @@ mod buffer_pool;
 mod catalog;
 pub mod context;
 mod disk_manager;
+pub mod errors;
 mod execution;
 mod indexes;
 mod latch;

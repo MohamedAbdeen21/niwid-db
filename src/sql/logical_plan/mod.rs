@@ -14,9 +14,10 @@ use sqlparser::ast::{
     TableFactor, TableWithJoins, TruncateTableTarget, Value as SqlValue, Values as SqlValues,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 
 use crate::catalog::ArcCatalog;
+use crate::errors::Error;
 use crate::lit;
 use crate::tuple::schema::Schema;
 use crate::txn_manager::TxnId;
@@ -110,7 +111,8 @@ impl LogicalPlanBuilder {
 
         let table_name = match &tables.first().unwrap().relation {
             TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-            e => todo!("{:?}", e),
+            _ => bail!(anyhow!(Error::Unimplemented("Joins".into()))),
+            // e => todo!("{:?}", e),
         };
 
         let schema = self
@@ -435,11 +437,11 @@ impl LogicalPlanBuilder {
             Some(TableWithJoins { relation, joins }) => {
                 let left_name = match relation {
                     TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-                    _ => todo!(),
+                    e => bail!(Error::Unsupported(e.to_string())),
                 };
 
                 if joins.len() > 1 {
-                    return Err(anyhow!("Multiple joins not supported"));
+                    bail!(Error::Unsupported("Multiple joins".into()));
                 }
 
                 let mut left_schema = self
@@ -478,15 +480,39 @@ impl LogicalPlanBuilder {
                                 right_name.clone(),
                                 right_schema.clone(),
                             ));
+
                             let operator = match join_operator {
                                 JoinOperator::Inner(e) => match e {
                                     JoinConstraint::On(expr) => match build_expr(expr)? {
                                         LogicalExpr::BinaryExpr(expr) => expr,
-                                        e => unimplemented!("{:?}", e),
+                                        _ => bail!(Error::Unsupported(
+                                                "Only Binary Expressions are supported in join conditions".into()
+                                        )),
                                     },
-                                    e => unimplemented!("{:?}", e),
+                                    JoinConstraint::Using(col) => {
+                                        if col.len() != 1 {
+                                            bail!(Error::Unsupported(
+                                                "Using clause must have a single column".into()
+                                            ))
+                                        }
+                                        let col = col.first().unwrap().value.clone();
+                                        Box::new(BinaryExpr::new(
+                                            LogicalExpr::Column(col.clone()),
+                                            BinaryOperator::Eq,
+                                            LogicalExpr::Column(col),
+                                        ))
+                                    }
+                                    JoinConstraint::None => {
+                                        bail!(Error::Expected("None".into(), "ON or USING".into()))
+                                    }
+                                    JoinConstraint::Natural => {
+                                        bail!(Error::Expected(
+                                            "Natural".into(),
+                                            "ON or USING".into()
+                                        ))
+                                    }
                                 },
-                                _ => unimplemented!("Only inner join is supported"),
+                                _ => bail!(Error::Unsupported("Only supports inner joins".into())),
                             };
 
                             let join_schema = match left_schema.join(right_schema.clone()) {
@@ -707,9 +733,9 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
         Expr::Nested(e) => build_expr(e),
         Expr::CompoundIdentifier(i) => {
             if i.len() > 2 {
-                return Err(anyhow!(
-                    "Databases are not supported (only table.col or col)"
-                ));
+                bail!(Error::Unsupported(
+                    "Please use table.column or column".into()
+                ))
             }
 
             Ok(LogicalExpr::Column(
@@ -720,6 +746,6 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
             ))
         }
         Expr::Value(SqlValue::Null) => Ok(LogicalExpr::Literal(Value::Null)),
-        e => todo!("{:?}", e),
+        e => bail!(Error::Unsupported(format!("{}", e))),
     }
 }
