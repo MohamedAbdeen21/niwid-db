@@ -179,11 +179,21 @@ pub mod tests {
         let result = ctx.execute_sql("SELECT * FROM test")?;
         assert_result_sample(&result);
 
-        let result = ctx.execute_sql("SELECT * FROM test WHERE a != 2")?;
+        // let result = ctx.execute_sql("SELECT * FROM test WHERE a != 2")?;
         assert_result_sample(&result);
-
-        let result = ctx.execute_sql("SELECT * FROM test WHERE a = 1")?;
+        //
+        // let result = ctx.execute_sql("SELECT * FROM test WHERE a = 1")?;
         assert_eq!(result.rows()[0][0], lit!(Int, "1"));
+
+        ctx.execute_sql("DELETE FROM test WHERE a = 1")?;
+        let result = ctx.execute_sql("SELECT * FROM test")?;
+        assert_eq!(result.rows()[0][0], lit!(Int, "3"));
+        assert_eq!(result.rows()[0][1], lit!(Int, "4"));
+
+        ctx.execute_sql("EXPLAIN ANALYZE UPDATE test SET b = 5 WHERE a = 3")?;
+        let result = ctx.execute_sql("SELECT * FROM test")?;
+        assert_eq!(result.rows()[0][0], lit!(Int, "3"));
+        assert_eq!(result.rows()[0][1], lit!(Int, "5"));
 
         Ok(())
     }

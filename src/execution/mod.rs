@@ -5,7 +5,7 @@ use crate::lit;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, DropTables, Filter, Identity, IndexScan, Insert, Join, LogicalPlan, Scan,
+    CreateTable, Delete, DropTables, Filter, Identity, IndexScan, Insert, Join, LogicalPlan, Scan,
     Truncate, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
@@ -41,6 +41,7 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.execute(ctx),
             LogicalPlan::Truncate(t) => t.execute(ctx),
             LogicalPlan::Update(u) => u.execute(ctx),
+            LogicalPlan::Delete(d) => d.execute(ctx),
             LogicalPlan::Empty => Ok(ResultSet::default()),
             LogicalPlan::Join(j) => j.execute(ctx),
             LogicalPlan::IndexScan(i) => i.execute(ctx),
@@ -59,6 +60,58 @@ impl LogicalPlan {
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.execute(ctx),
         }
+    }
+}
+
+impl Executable for Delete {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
+
+        let input = self.input.execute(ctx)?;
+
+        let c = ctx.get_catalog();
+        let mut catalog = c.lock();
+
+        let table = catalog
+            .get_table_mut(&self.table_name, txn_id)
+            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
+
+        let (_, mask) = self.selection.evaluate(&input)?;
+
+        let selected_rows = input
+            .rows()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
+            .collect::<Vec<_>>();
+
+        let (txn_id, is_temp) = match txn_id {
+            Some(id) => (id, false),
+            None => (ctx.start_txn()?, true),
+        };
+
+        table.start_txn(txn_id)?;
+
+        for row in selected_rows {
+            let tuple_id = (row[0].u32(), row[1].u32() as u16);
+
+            if let Err(err) = table.delete(tuple_id) {
+                table.rollback_txn()?;
+                drop(catalog);
+                if is_temp {
+                    ctx.rollback_txn()?;
+                }
+                return Err(err);
+            }
+        }
+
+        table.commit_txn()?;
+        drop(catalog);
+        if is_temp {
+            ctx.commit_txn()?;
+        }
+
+        Ok(ResultSet::default())
     }
 }
 
@@ -240,6 +293,7 @@ impl Executable for Update {
 
             if let Err(err) = table.update(Some(tuple_id), new_tuple) {
                 table.rollback_txn()?;
+                drop(catalog);
                 if is_temp {
                     ctx.rollback_txn()?;
                 }
@@ -248,6 +302,7 @@ impl Executable for Update {
         }
 
         table.commit_txn()?;
+        drop(catalog);
         if is_temp {
             ctx.commit_txn()?;
         }

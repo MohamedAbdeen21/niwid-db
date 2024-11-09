@@ -4,14 +4,14 @@ pub mod plan;
 
 use expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use plan::{
-    CreateTable, DropTables, Explain, Filter, IndexScan, Insert, Join, LogicalPlan, Projection,
-    Scan, Truncate, Update, Values,
+    CreateTable, Delete, DropTables, Explain, Filter, IndexScan, Insert, Join, LogicalPlan,
+    Projection, Scan, Truncate, Update, Values,
 };
 use sqlparser::ast::{
-    Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable, Expr,
-    Ident, Insert as SqlInsert, Join as SqlJoin, JoinConstraint, JoinOperator, ObjectName,
-    ObjectType, Query, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
-    TruncateTableTarget, Value as SqlValue, Values as SqlValues,
+    Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable,
+    Delete as SqlDelete, Expr, FromTable, Ident, Insert as SqlInsert, Join as SqlJoin,
+    JoinConstraint, JoinOperator, ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement,
+    TableFactor, TableWithJoins, TruncateTableTarget, Value as SqlValue, Values as SqlValues,
 };
 
 use anyhow::{anyhow, Result};
@@ -77,8 +77,53 @@ impl LogicalPlanBuilder {
             Statement::StartTransaction { .. } => self.build_start_transaction(),
             Statement::Commit { .. } => self.build_commit_transaction(),
             Statement::Rollback { .. } => self.build_rollback_transaction(),
+            Statement::Delete(SqlDelete {
+                from, selection, ..
+            }) => self.build_delete(from, selection, txn_id),
             e => unimplemented!("{}", e),
         }
+    }
+
+    fn build_delete(
+        &self,
+        from: FromTable,
+        selection: Option<Expr>,
+        txn_id: Option<TxnId>,
+    ) -> Result<LogicalPlan> {
+        let filter = match selection {
+            Some(expr) => build_expr(&expr)?,
+            None => {
+                return Err(anyhow!(
+                    "Delete statement must have a where clause, else use truncate"
+                ))
+            }
+        };
+
+        let tables = match from {
+            FromTable::WithoutKeyword(tables) => tables,
+            FromTable::WithFromKeyword(tables) => tables,
+        };
+
+        if tables.len() != 1 {
+            return Err(anyhow!("Delete statement must have a single table"));
+        }
+
+        let table_name = match &tables.first().unwrap().relation {
+            TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
+            e => todo!("{:?}", e),
+        };
+
+        let schema = self
+            .catalog
+            .lock()
+            .get_schema(&table_name, txn_id)
+            .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
+
+        let root = LogicalPlan::Scan(Scan::new(table_name.clone(), schema));
+
+        let root = LogicalPlan::Delete(Box::new(Delete::new(root, table_name, filter)));
+
+        Ok(root)
     }
 
     fn build_index_scan(

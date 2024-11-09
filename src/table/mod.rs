@@ -380,6 +380,10 @@ impl Table {
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
         let (page_id, slot_id) = id;
 
+        if let Some(id) = self.active_txn {
+            self.txn_manager.lock().touch_page(id, self.last_page)?;
+        }
+
         let mut page: TablePage = self
             .bpm
             .lock()

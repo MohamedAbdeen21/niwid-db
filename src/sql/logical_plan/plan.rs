@@ -16,6 +16,7 @@ pub enum LogicalPlan {
     DropTables(DropTables),
     Truncate(Truncate),
     Update(Box<Update>),
+    Delete(Box<Delete>),
     IndexScan(IndexScan),
     StartTxn,
     CommitTxn,
@@ -48,6 +49,7 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.print(indent),
             LogicalPlan::Truncate(t) => t.print(indent),
             LogicalPlan::Update(u) => u.print(indent),
+            LogicalPlan::Delete(d) => d.print(indent),
             LogicalPlan::Join(j) => j.print(indent),
             LogicalPlan::IndexScan(i) => i.print(indent),
             LogicalPlan::StartTxn => format!("{} StartTransaction", "-".repeat(indent * 2)),
@@ -71,6 +73,7 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.schema(),
             LogicalPlan::Truncate(t) => t.schema(),
             LogicalPlan::Update(u) => u.schema(),
+            LogicalPlan::Delete(d) => d.schema(),
             LogicalPlan::Join(j) => j.schema(),
             LogicalPlan::IndexScan(i) => i.schema(),
             LogicalPlan::Empty => Schema::default(),
@@ -80,6 +83,38 @@ impl LogicalPlan {
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.schema(),
         }
+    }
+}
+
+pub struct Delete {
+    // only reason this is here is because we want Scan
+    // to be the only way to access tuples, mainly for str indirection
+    pub input: LogicalPlan,
+    pub table_name: String,
+    pub selection: LogicalExpr,
+}
+
+impl Delete {
+    pub fn new(input: LogicalPlan, table_name: String, filter: LogicalExpr) -> Self {
+        Self {
+            input,
+            table_name,
+            selection: filter,
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema::new(vec![])
+    }
+
+    pub fn print(&self, indent: usize) -> String {
+        format!(
+            "{} Delete: {} [{}]\n{}",
+            "-".repeat(indent * 2),
+            self.table_name,
+            self.selection.print(),
+            self.input.print_indent(indent + 1)
+        )
     }
 }
 

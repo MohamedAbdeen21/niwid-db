@@ -56,6 +56,9 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
 
         match ctx.execute_sql(query) {
             Ok(result) => {
+                if result.is_empty() {
+                    continue;
+                }
                 let _ = writer.write_all(result.print().as_bytes()).await;
             }
             Err(e) => {
