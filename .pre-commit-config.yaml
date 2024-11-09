@@ -17,7 +17,7 @@ repos:
 
       - id: test
         name: Run tests
-        entry: cargo test --all
+        entry: cargo test --all --release
         language: rust
         types: [rust]
         pass_filenames: false

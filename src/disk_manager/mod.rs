@@ -114,7 +114,7 @@ impl DiskManager {
 
     pub fn read_from_file<T: DiskWritable>(&self, page_id: PageId) -> Result<T> {
         if page_id == INVALID_PAGE {
-            return Err(anyhow!("Asked to read a page with invalid ID"));
+            return Err(anyhow!("Asked to read a page with invalid ID {}", page_id));
         }
 
         let path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
@@ -214,9 +214,17 @@ impl DiskManager {
 }
 
 #[cfg(test)]
+impl Drop for DiskManager {
+    fn drop(&mut self) {
+        let _ = remove_dir_all(self.path.clone());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::pages::Page;
+    use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
     use crate::types::{Types, ValueFactory};
     use crate::{pages::table_page::TablePage, tuple::Tuple};
@@ -256,7 +264,11 @@ mod tests {
         page.set_page_id(page_id);
         let mut table_page: TablePage = page.into();
 
-        let dummy_schema = Schema::new(vec![Field::new("str", Types::Str, false)]);
+        let dummy_schema = Schema::new(vec![Field::new(
+            "str",
+            Types::Str,
+            Constraints::nullable(false),
+        )]);
 
         let tuple = Tuple::new(
             vec![ValueFactory::from_string(&Types::Str, "Hello!")],

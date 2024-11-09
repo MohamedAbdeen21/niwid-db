@@ -3,6 +3,7 @@ mod catalog;
 pub mod context;
 mod disk_manager;
 mod execution;
+mod indexes;
 mod latch;
 mod pages;
 mod sql;

@@ -3,7 +3,7 @@ use std::mem::take;
 use crate::tuple::schema::{Field, Schema};
 use crate::types::Value;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct ResultSet {
     info: String,
     pub schema: Schema,
@@ -87,13 +87,8 @@ impl ResultSet {
         if self
             .fields()
             .iter()
-            .map(|f| f.ty.clone())
-            .collect::<Vec<_>>()
-            != other
-                .fields()
-                .iter()
-                .map(|f| f.ty.clone())
-                .collect::<Vec<_>>()
+            .zip(other.fields())
+            .any(|(f1, f2)| !f1.ty.is_compatible(&f2.ty))
         {
             panic!("Schema mismatch");
         }
@@ -144,10 +139,11 @@ impl ResultSet {
             .collect::<Vec<_>>()
     }
 
-    pub fn show(&self) {
+    pub fn print(&self) -> String {
+        let mut buf = String::new();
         if !self.info.is_empty() {
-            println!("{}", self.info);
-            println!();
+            buf.push_str(&self.info);
+            buf.push('\n');
         }
         let col_widths: Vec<usize> = self
             .fields()
@@ -164,37 +160,39 @@ impl ResultSet {
             })
             .collect();
 
-        print_row_divider(&col_widths);
+        print_row_divider(&mut buf, &col_widths);
 
         for (i, col) in self.fields().iter().enumerate() {
-            print!(
+            buf.push_str(&format!(
                 "| {:^width$} ",
                 format!("{} ({})", col.name, col.ty.to_sql()),
                 width = col_widths[i]
-            );
+            ));
         }
-        println!("|");
+        buf.push_str("|\n");
 
-        print_row_divider(&col_widths);
+        print_row_divider(&mut buf, &col_widths);
 
         for row_idx in 0..self.cap {
             for (i, col) in self.cols.iter().enumerate() {
-                print!(
+                buf.push_str(&format!(
                     "| {:^width$} ",
                     format!("{}", col[row_idx]),
-                    width = col_widths[i]
-                );
+                    width = col_widths[i],
+                ));
             }
-            println!("|");
+            buf.push_str("|\n");
 
-            print_row_divider(&col_widths);
+            print_row_divider(&mut buf, &col_widths);
         }
+
+        buf
     }
 }
 
-fn print_row_divider(col_widths: &[usize]) {
+fn print_row_divider(buf: &mut String, col_widths: &[usize]) {
     for &width in col_widths {
-        print!("+{:-<width$}", "-", width = width + 2); // +---+
+        buf.push_str(&format!("+{:-<width$}", "-", width = width + 2)); // +---+
     }
-    println!("+");
+    buf.push_str("+\n");
 }

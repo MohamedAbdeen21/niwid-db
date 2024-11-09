@@ -4,6 +4,7 @@ use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
 use crate::pages::PageId;
 use crate::printdbg;
 use crate::table::Table;
+use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
@@ -28,10 +29,6 @@ lazy_static! {
     )));
 }
 
-// FIXME: Catalog is shared between contexts.
-// For other tables, all changes happen inside BPM, who manages the txns
-// but for catalog, we have the tables hashmap, so the catalog has to manage
-// txns on its own
 pub struct Catalog {
     pub tables: VersionedMap<String, (TupleId, Table)>, // TODO: handle ownership
     schema: Schema,                                     // A catalog is itself a table
@@ -68,7 +65,8 @@ impl Catalog {
             let name = table.fetch_string(values[0].str_addr()).0;
             let first_page_id = ValueFactory::from_bytes(&Types::UInt, &values[1].to_bytes()).u32();
             let last_page_id = ValueFactory::from_bytes(&Types::UInt, &values[2].to_bytes()).u32();
-            let schema = table.fetch_string(values[3].str_addr());
+            let index_root_id = ValueFactory::from_bytes(&Types::UInt, &values[3].to_bytes()).u32();
+            let schema = table.fetch_string(values[4].str_addr());
             let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
 
             let table = Table::fetch(
@@ -78,6 +76,7 @@ impl Catalog {
                 &schema,
                 first_page_id,
                 last_page_id,
+                Some(index_root_id),
             )
             .expect("Fetch failed");
 
@@ -101,10 +100,11 @@ impl Catalog {
         let mut txn_manager = txn_manager.clone();
 
         let schema = Schema::new(vec![
-            Field::new("table_name", Types::Str, false),
-            Field::new("first_page", Types::UInt, false),
-            Field::new("last_page", Types::UInt, false),
-            Field::new("schema", Types::Str, false),
+            Field::new("table_name", Types::Str, Constraints::nullable(false)),
+            Field::new("first_page", Types::UInt, Constraints::nullable(false)),
+            Field::new("last_page", Types::UInt, Constraints::nullable(false)),
+            Field::new("index_root", Types::UInt, Constraints::nullable(false)),
+            Field::new("schema", Types::Str, Constraints::nullable(false)),
         ]);
 
         let table = Table::fetch(
@@ -114,6 +114,7 @@ impl Catalog {
             &schema,
             CATALOG_PAGE,
             CATALOG_PAGE,
+            None,
         )
         .expect("Catalog fetch failed");
 
@@ -149,12 +150,14 @@ impl Catalog {
             self.txn_manager.clone(),
             table_name.to_string(),
             schema,
+            txn,
         )?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
             ValueFactory::from_string(&Types::Str, &table_name),
             ValueFactory::from_string(&Types::UInt, table.get_first_page_id().to_string()),
             ValueFactory::from_string(&Types::UInt, table.get_last_page_id().to_string()),
+            ValueFactory::from_string(&Types::UInt, table.get_index_page_id().to_string()),
             ValueFactory::from_string(&Types::Str, &serialized_schema),
         ];
         let tuple = Tuple::new(tuple_data, &self.schema);

@@ -18,6 +18,10 @@ impl Latch {
         unsafe { self.lock.raw() }.lock_shared();
     }
 
+    pub fn wlock(&self) {
+        unsafe { self.lock.raw() }.lock_exclusive();
+    }
+
     pub fn try_wlock(&self) -> bool {
         unsafe { self.lock.raw() }.try_lock_exclusive()
     }
@@ -43,7 +47,6 @@ impl Latch {
         unsafe { self.lock.raw().unlock_upgradable() }
     }
 
-    #[allow(unused)]
     pub fn is_locked(&self) -> bool {
         self.lock.is_locked()
     }

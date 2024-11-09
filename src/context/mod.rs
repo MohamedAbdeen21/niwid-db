@@ -105,26 +105,39 @@ impl Context {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::buffer_pool::tests::test_arc_bpm;
     use crate::catalog::tests::test_arc_catalog;
+    use crate::lit;
     use crate::txn_manager::tests::test_arc_transaction_manager;
     use crate::types::Types;
     use crate::types::ValueFactory;
-    use crate::value;
     use anyhow::Result;
 
     fn assert_result_sample(result: &ResultSet) {
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, "1"));
-        assert_eq!(rows[0][1], value!(Int, "2"));
-        assert_eq!(rows[1][0], value!(Int, "3"));
-        assert_eq!(rows[1][1], value!(Int, "4"));
+        assert_eq!(rows[0][0], lit!(Int, "1"));
+        assert_eq!(rows[0][1], lit!(Int, "2"));
+        assert_eq!(rows[1][0], lit!(Int, "3"));
+        assert_eq!(rows[1][1], lit!(Int, "4"));
     }
 
-    fn test_context() -> Context {
+    fn assert_plan(result: &ResultSet, plan: &str) {
+        // skip the execution time
+        assert_eq!(
+            result
+                .get_info()
+                .lines()
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            plan
+        )
+    }
+
+    pub fn test_context() -> Context {
         let test_bpm = test_arc_bpm(50);
         let test_txn_mngr = test_arc_transaction_manager(test_bpm.clone());
         let test_catalog = test_arc_catalog(test_bpm.clone(), test_txn_mngr.clone());
@@ -164,8 +177,37 @@ mod tests {
         ctx.execute_sql("CREATE TABLE test (a int, b int)")?;
         ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4)")?;
         let result = ctx.execute_sql("SELECT * FROM test")?;
-
         assert_result_sample(&result);
+
+        // let result = ctx.execute_sql("SELECT * FROM test WHERE a != 2")?;
+        assert_result_sample(&result);
+        //
+        // let result = ctx.execute_sql("SELECT * FROM test WHERE a = 1")?;
+        assert_eq!(result.rows()[0][0], lit!(Int, "1"));
+
+        ctx.execute_sql("DELETE FROM test WHERE a = 1")?;
+        let result = ctx.execute_sql("SELECT * FROM test")?;
+        assert_eq!(result.rows()[0][0], lit!(Int, "3"));
+        assert_eq!(result.rows()[0][1], lit!(Int, "4"));
+
+        ctx.execute_sql("EXPLAIN ANALYZE UPDATE test SET b = 5 WHERE a = 3")?;
+        let result = ctx.execute_sql("SELECT * FROM test")?;
+        assert_eq!(result.rows()[0][0], lit!(Int, "3"));
+        assert_eq!(result.rows()[0][1], lit!(Int, "5"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_result() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("CREATE TABLE test (a int, b int)")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4)")?;
+        let result = ctx.execute_sql("SELECT * FROM test")?;
+        assert_result_sample(&result);
+
+        let result = ctx.execute_sql("SELECT * FROM test WHERE a == 2")?;
+        assert_eq!(result.rows().len(), 0);
 
         Ok(())
     }
@@ -232,10 +274,10 @@ mod tests {
 
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, "3"));
-        assert_eq!(rows[0][1], value!(Int, "5"));
-        assert_eq!(rows[1][0], value!(Int, "4"));
-        assert_eq!(rows[1][1], value!(Int, "6"));
+        assert_eq!(rows[0][0], lit!(Int, "3"));
+        assert_eq!(rows[0][1], lit!(Int, "5"));
+        assert_eq!(rows[1][0], lit!(Int, "4"));
+        assert_eq!(rows[1][1], lit!(Int, "6"));
 
         Ok(())
     }
@@ -253,10 +295,10 @@ mod tests {
 
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], value!(Int, "3"));
-        assert_eq!(rows[0][1], value!(Int, "5"));
-        assert_eq!(rows[1][0], value!(Int, "4"));
-        assert_eq!(rows[1][1], value!(Int, "6"));
+        assert_eq!(rows[0][0], lit!(Int, "3"));
+        assert_eq!(rows[0][1], lit!(Int, "5"));
+        assert_eq!(rows[1][0], lit!(Int, "4"));
+        assert_eq!(rows[1][1], lit!(Int, "6"));
 
         Ok(())
     }
@@ -274,6 +316,83 @@ mod tests {
         assert!(ctx
             .execute_sql("SELECT c FROM t1 JOIN t2 ON t1.a = t2.a;")
             .is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_nullability() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("CREATE TABLE test (a int not null, b int);")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4), (4, null);")?;
+        assert_eq!(
+            ctx.execute_sql("INSERT INTO test VALUES (null, 10)")
+                .unwrap_err()
+                .to_string(),
+            "Null value in non-nullable field a"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_txns_with_sql() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("BEGIN")?;
+        ctx.execute_sql("CREATE TABLE test (a uint unique, b int not null);")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
+        // duplicate in unqiue column
+        assert_eq!(
+            ctx.execute_sql("INSERT INTO test VALUES (1, 5);")
+                .unwrap_err()
+                .to_string(),
+            "Duplicate value in unique field a"
+        );
+        // null in not null column
+        assert_eq!(
+            ctx.execute_sql("INSERT INTO test VALUES (8, null)")
+                .unwrap_err()
+                .to_string(),
+            "Null value in non-nullable field b"
+        );
+        let result = ctx.execute_sql("SELECT * FROM test;")?;
+
+        assert_result_sample(&result);
+        ctx.execute_sql("COMMIT")?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_use_index_in_selects() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("CREATE TABLE test (a uint unique, b int);")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
+
+        let expected_plan = r#"Logical Plan:
+-- Projection: [#a,#b]
+---- IndexScan: test Scan( a range [1,1] ) [#a,#b]"#;
+
+        let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a = 1;")?;
+        assert_plan(&result, expected_plan);
+        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
+
+        let expected_plan = r#"Logical Plan:
+-- Projection: [#a,#b]
+---- IndexScan: test Scan( a range (,4] ) [#a,#b]"#;
+
+        let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a <= 4;")?;
+        assert_plan(&result, expected_plan);
+        assert_result_sample(&result);
+
+        let expected_plan = r#"Logical Plan:
+-- Projection: [#a,#b]
+---- Filter: #a <> 3
+------ IndexScan: test Scan( a range [1,) ) [#a,#b]"#;
+
+        let result =
+            ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a >= 1 WHERE a != 3")?;
+        assert_plan(&result, expected_plan);
+        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
 
         Ok(())
     }

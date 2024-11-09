@@ -6,11 +6,13 @@ use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef};
 
+use super::constraints::Constraints;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Field {
     pub name: String,
     pub ty: Types,
-    pub nullable: bool,
+    pub constraints: Constraints,
 }
 
 impl Default for Field {
@@ -18,17 +20,17 @@ impl Default for Field {
         Self {
             name: String::new(),
             ty: Types::Int,
-            nullable: false,
+            constraints: Constraints::default(),
         }
     }
 }
 
 impl Field {
-    pub fn new(name: &str, ty: Types, nullable: bool) -> Self {
+    pub fn new(name: &str, ty: Types, constraints: Constraints) -> Self {
         Self {
             name: name.to_string(),
             ty,
-            nullable,
+            constraints,
         }
     }
 }
@@ -52,7 +54,7 @@ impl Schema {
         self.is_qualified
     }
 
-    #[allow(unused)]
+    #[cfg(test)]
     pub fn to_sql(&self) -> String {
         let mut sql = String::new();
         for (i, field) in self.fields.iter().enumerate() {
@@ -62,8 +64,11 @@ impl Schema {
             sql.push_str(&field.name);
             sql.push(' ');
             sql.push_str(&field.ty.to_sql());
-            if !field.nullable {
+            if !field.constraints.nullable {
                 sql.push_str(" NOT NULL");
+            }
+            if field.constraints.unique {
+                sql.push_str(" UNIQUE");
             }
         }
         sql
@@ -83,6 +88,7 @@ impl Schema {
     }
 
     pub fn from_sql(cols: Vec<ColumnDef>) -> Result<Self> {
+        let mut has_unqiue = false;
         let fields = cols
             .iter()
             .map(|col| {
@@ -97,18 +103,42 @@ impl Schema {
                     return Err(anyhow!("Only supported constraint is NOT NULL"));
                 };
 
-                let nullable = !matches!(
-                    options.first(),
-                    Some(ColumnOptionDef {
-                        option: ColumnOption::NotNull,
-                        ..
-                    }),
-                );
+                let unique = options.iter().any(|opt| {
+                    matches!(
+                        opt,
+                        ColumnOptionDef {
+                            option: ColumnOption::Unique { .. },
+                            ..
+                        }
+                    )
+                });
+                let not_null = options.iter().any(|opt| {
+                    matches!(
+                        opt,
+                        ColumnOptionDef {
+                            option: ColumnOption::NotNull { .. },
+                            ..
+                        }
+                    )
+                });
+
+                if unique {
+                    if has_unqiue {
+                        return Err(anyhow!("Only one unique field is allowed"));
+                    } else {
+                        has_unqiue = true;
+                    }
+                }
+
+                let type_ = Types::from_sql(&data_type.to_string());
+                if unique && type_ != Types::UInt {
+                    return Err(anyhow!("Unique field must be of type uint, sorry"));
+                };
 
                 Ok(Field::new(
                     &name.value,
-                    Types::from_sql(&data_type.to_string()),
-                    nullable,
+                    type_,
+                    Constraints::new(!not_null, unique),
                 ))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -147,9 +177,9 @@ mod tests {
     #[test]
     fn test_to_sql() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::Int, false),
-            Field::new("b", Types::Str, true),
-            Field::new("c", Types::UInt, false),
+            Field::new("a", Types::Int, Constraints::nullable(false)),
+            Field::new("b", Types::Str, Constraints::nullable(true)),
+            Field::new("c", Types::UInt, Constraints::nullable(false)),
         ]);
 
         let sql = format!(
@@ -158,6 +188,8 @@ mod tests {
             )",
             schema.to_sql()
         );
+
+        println!("SQL: {}", sql);
 
         let statment = Parser::new(&GenericDialect)
             .try_with_sql(&sql)?
@@ -190,9 +222,9 @@ mod tests {
                 assert_eq!(
                     Schema::from_sql(columns)?,
                     Schema::new(vec![
-                        Field::new("a", Types::Int, false),
-                        Field::new("b", Types::Str, true),
-                        Field::new("c", Types::UInt, true),
+                        Field::new("a", Types::Int, Constraints::nullable(false)),
+                        Field::new("b", Types::Str, Constraints::nullable(true)),
+                        Field::new("c", Types::UInt, Constraints::nullable(true)),
                     ])
                 );
             }

@@ -1,6 +1,6 @@
 use crate::buffer_pool::ArcBufferPool;
 use crate::pages::table_page::TablePage;
-use crate::pages::{PageId, INVALID_PAGE};
+use crate::pages::{PageId, SlotId, INVALID_PAGE};
 use crate::tuple::{Entry, TupleId};
 use crate::txn_manager::TxnId;
 
@@ -9,10 +9,10 @@ use super::Table;
 // TODO: try to iterate over pages not tuples
 pub(super) struct TableIterator {
     page: TablePage,
-    current_slot: usize,
+    current_slot: SlotId,
     next_page: PageId,
     bpm: ArcBufferPool,
-    num_tuples: usize,
+    num_tuples: SlotId,
     active_txn: Option<TxnId>,
 }
 
@@ -93,6 +93,7 @@ mod tests {
 
     use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
     use crate::table::tests::test_table;
+    use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
     use crate::tuple::{Entry, Tuple, TupleId};
     use crate::types::{Types, Value, ValueFactory};
@@ -102,8 +103,8 @@ mod tests {
     #[test]
     fn test_skip_deleted() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("id", Types::UInt, false),
-            Field::new("age", Types::UInt, false),
+            Field::new("id", Types::UInt, Constraints::nullable(false)),
+            Field::new("age", Types::UInt, Constraints::nullable(false)),
         ]);
         let mut table = test_table(3, &schema)?;
 
@@ -153,8 +154,8 @@ mod tests {
     #[test]
     fn test_multiple_pages_iter() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::Int, true),
-            Field::new("b", Types::Int, true),
+            Field::new("a", Types::Int, Constraints::nullable(true)),
+            Field::new("b", Types::Int, Constraints::nullable(true)),
         ]);
 
         let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 8);

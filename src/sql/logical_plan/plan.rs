@@ -1,4 +1,6 @@
-use crate::tuple::schema::Schema;
+use crate::{
+    execution::result_set::ResultSet, pages::indexes::b_plus_tree::Key, tuple::schema::Schema,
+};
 
 use super::expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 
@@ -14,10 +16,14 @@ pub enum LogicalPlan {
     DropTables(DropTables),
     Truncate(Truncate),
     Update(Box<Update>),
+    Delete(Box<Delete>),
+    IndexScan(IndexScan),
     StartTxn,
     CommitTxn,
     RollbackTxn,
     Empty,
+    #[cfg(test)]
+    Identity(Identity),
 }
 
 impl Default for LogicalPlan {
@@ -43,11 +49,15 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.print(indent),
             LogicalPlan::Truncate(t) => t.print(indent),
             LogicalPlan::Update(u) => u.print(indent),
+            LogicalPlan::Delete(d) => d.print(indent),
             LogicalPlan::Join(j) => j.print(indent),
+            LogicalPlan::IndexScan(i) => i.print(indent),
             LogicalPlan::StartTxn => format!("{} StartTransaction", "-".repeat(indent * 2)),
             LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
             LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
+            #[cfg(test)]
+            LogicalPlan::Identity(_) => unreachable!(),
         }
     }
 
@@ -63,12 +73,136 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.schema(),
             LogicalPlan::Truncate(t) => t.schema(),
             LogicalPlan::Update(u) => u.schema(),
+            LogicalPlan::Delete(d) => d.schema(),
             LogicalPlan::Join(j) => j.schema(),
-            LogicalPlan::Empty => Schema::new(vec![]),
+            LogicalPlan::IndexScan(i) => i.schema(),
+            LogicalPlan::Empty => Schema::default(),
             LogicalPlan::StartTxn => Schema::default(),
             LogicalPlan::CommitTxn => Schema::default(),
             LogicalPlan::RollbackTxn => Schema::default(),
+            #[cfg(test)]
+            LogicalPlan::Identity(i) => i.schema(),
         }
+    }
+}
+
+pub struct Delete {
+    // only reason this is here is because we want Scan
+    // to be the only way to access tuples, mainly for str indirection
+    pub input: LogicalPlan,
+    pub table_name: String,
+    pub selection: LogicalExpr,
+}
+
+impl Delete {
+    pub fn new(input: LogicalPlan, table_name: String, filter: LogicalExpr) -> Self {
+        Self {
+            input,
+            table_name,
+            selection: filter,
+        }
+    }
+
+    pub fn schema(&self) -> Schema {
+        Schema::new(vec![])
+    }
+
+    pub fn print(&self, indent: usize) -> String {
+        format!(
+            "{} Delete: {} [{}]\n{}",
+            "-".repeat(indent * 2),
+            self.table_name,
+            self.selection.print(),
+            self.input.print_indent(indent + 1)
+        )
+    }
+}
+
+pub struct IndexScan {
+    pub table_name: String,
+    pub schema: Schema,
+    // mainly for display, each table can only have one index anyway
+    pub column_name: String,
+    pub from: Option<Key>,
+    pub include_from: bool,
+    pub to: Option<Key>,
+    pub include_to: bool,
+}
+
+impl IndexScan {
+    pub fn new(
+        table_name: String,
+        schema: Schema,
+        column_name: String,
+        from: Option<Key>,
+        include_from: bool,
+        to: Option<Key>,
+        include_to: bool,
+    ) -> Self {
+        Self {
+            table_name,
+            schema,
+            column_name,
+            from,
+            include_from,
+            to,
+            include_to,
+        }
+    }
+
+    fn name(&self) -> String {
+        "IndexScan".to_string()
+    }
+
+    fn schema(&self) -> Schema {
+        self.schema.clone()
+    }
+
+    fn print(&self, indent: usize) -> String {
+        let range = format!(
+            "{}{},{}{}",
+            if self.include_from { "[" } else { "(" },
+            if let Some(k) = &self.from {
+                format!("{}", k)
+            } else {
+                "".to_string()
+            },
+            if let Some(k) = &self.to {
+                format!("{}", k)
+            } else {
+                "".to_string()
+            },
+            if self.include_to { "]" } else { ")" },
+        );
+        format!(
+            "{} {}: {} Scan( {} range {} ) [{}]\n",
+            "-".repeat(indent * 2),
+            self.name(),
+            self.table_name,
+            self.column_name,
+            range,
+            self.schema
+                .fields
+                .iter()
+                .map(|f| format!("#{}", f.name))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    }
+}
+
+pub struct Identity {
+    pub input: ResultSet,
+}
+
+#[cfg(test)]
+impl Identity {
+    pub fn new(input: ResultSet) -> Self {
+        Self { input }
+    }
+
+    fn schema(&self) -> Schema {
+        self.input.schema.clone()
     }
 }
 
@@ -236,7 +370,7 @@ pub struct Insert {
     pub input: LogicalPlan,
     pub table_name: String,
     pub table_schema: Schema,
-    pub schema: Schema, // RETURNING statement
+    pub returning_schema: Schema, // RETURNING statement
 }
 
 impl Insert {
@@ -250,7 +384,7 @@ impl Insert {
             input,
             table_name,
             table_schema,
-            schema,
+            returning_schema: schema,
         }
     }
 
@@ -259,7 +393,7 @@ impl Insert {
     }
 
     fn schema(&self) -> Schema {
-        self.schema.clone()
+        self.returning_schema.clone()
     }
 
     fn print(&self, indent: usize) -> String {
@@ -383,7 +517,6 @@ pub struct Filter {
 }
 
 impl Filter {
-    #[allow(unused)]
     pub fn new(input: LogicalPlan, expr: BooleanBinaryExpr) -> Self {
         Self { input, expr }
     }
@@ -393,11 +526,7 @@ impl Filter {
     }
 
     fn schema(&self) -> Schema {
-        match &self.input {
-            LogicalPlan::Scan(s) => s.schema(),
-            LogicalPlan::Filter(f) => f.schema(),
-            _ => Schema::new(vec![]),
-        }
+        self.input.schema()
     }
 
     fn print(&self, indent: usize) -> String {
@@ -454,7 +583,7 @@ impl Projection {
 mod tests {
     use crate::{
         sql::logical_plan::expr::LogicalExpr,
-        tuple::schema::Field,
+        tuple::{constraints::Constraints, schema::Field},
         types::{Types, ValueFactory},
     };
 
@@ -466,7 +595,11 @@ mod tests {
     fn test_print() -> Result<()> {
         let scan = LogicalPlan::Scan(Scan {
             table_name: "test".to_string(),
-            schema: Schema::new(vec![Field::new("a", Types::UInt, false)]),
+            schema: Schema::new(vec![Field::new(
+                "a",
+                Types::UInt,
+                Constraints::nullable(false),
+            )]),
         });
 
         let string = scan.print();

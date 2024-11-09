@@ -1,6 +1,8 @@
 use crate::buffer_pool::ArcBufferPool;
+use crate::indexes::b_plus_tree::btree::BPlusTree;
+use crate::pages::indexes::b_plus_tree::Key;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
-use crate::pages::PageId;
+use crate::pages::{PageId, INVALID_PAGE};
 use crate::printdbg;
 use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
@@ -20,6 +22,9 @@ pub struct Table {
     txn_manager: ArcTransactionManager,
     schema: Schema,
     active_txn: Option<TxnId>,
+    /// Index to check uniqueness of columns, is None for tables that don't check
+    /// uniqueness, such as the catalog
+    index: Option<BPlusTree>,
 }
 
 impl PartialEq for Table {
@@ -29,25 +34,12 @@ impl PartialEq for Table {
 }
 
 impl Table {
-    /// Avoid accidentaly cloning the table later
-    fn clone_with_txn(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            first_page: self.first_page,
-            last_page: self.last_page,
-            blob_page: self.blob_page,
-            bpm: self.bpm.clone(),
-            txn_manager: self.txn_manager.clone(),
-            active_txn: self.active_txn,
-            schema: self.schema.clone(),
-        }
-    }
-
     pub fn new(
         bpm: ArcBufferPool,
         txn_manager: ArcTransactionManager,
         name: String,
         schema: &Schema,
+        txn: Option<TxnId>,
     ) -> Result<Self> {
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
@@ -58,6 +50,7 @@ impl Table {
             first_page: page_id,
             last_page: page_id,
             blob_page,
+            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), txn)),
             bpm,
             txn_manager,
             active_txn: None,
@@ -72,8 +65,11 @@ impl Table {
         schema: &Schema,
         first_page: PageId,
         last_page: PageId,
+        index_page: Option<PageId>,
     ) -> Result<Self> {
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
+
+        let index = index_page.map(|id| BPlusTree::fetch(id, bpm.clone(), txn_manager.clone()));
 
         Ok(Self {
             name,
@@ -84,7 +80,28 @@ impl Table {
             txn_manager: txn_manager.clone(),
             active_txn: None,
             schema: schema.clone(),
+            index,
         })
+    }
+
+    pub fn get_tuple(&self, id: TupleId) -> Option<Tuple> {
+        let (page, slot) = TupleId::from_bytes(&id.to_bytes());
+
+        let page: TablePage = self
+            .bpm
+            .lock()
+            .fetch_frame(page, self.active_txn)
+            .unwrap()
+            .reader()
+            .into();
+
+        let (meta, tuple) = page.read_tuple(slot);
+
+        if meta.is_deleted() {
+            None
+        } else {
+            Some(tuple)
+        }
     }
 
     pub fn get_first_page_id(&self) -> PageId {
@@ -93,6 +110,17 @@ impl Table {
 
     pub fn get_schema(&self) -> Schema {
         self.schema.clone()
+    }
+
+    pub fn get_index(&self) -> &Option<BPlusTree> {
+        &self.index
+    }
+
+    pub fn get_index_page_id(&self) -> PageId {
+        self.index
+            .as_ref()
+            .map(|i| i.get_root_page_id())
+            .unwrap_or(INVALID_PAGE)
     }
 
     pub fn get_last_page_id(&self) -> PageId {
@@ -167,11 +195,11 @@ impl Table {
                 Field {
                     ty: Types::Str,
                     name,
-                    nullable,
+                    constraints,
                 } => Field {
                     ty: Types::StrAddr,
                     name: name.clone(),
-                    nullable,
+                    constraints,
                 },
                 e => e,
             })
@@ -266,11 +294,31 @@ impl Table {
 
     fn check_nullability(&self, tuple: &Tuple) -> Result<()> {
         for (i, field) in self.schema.fields.iter().enumerate() {
-            if !field.nullable && tuple.get_value_at(i as u8, &self.schema).unwrap().is_none() {
+            if !field.constraints.nullable
+                && tuple.get_value_at(i as u8, &self.schema).unwrap().is_none()
+            {
                 return Err(anyhow!("Null value in non-nullable field {}", field.name));
             }
         }
         Ok(())
+    }
+
+    pub fn check_uniqueness(&mut self, tuple: &Tuple) -> Result<Option<Key>> {
+        for (i, field) in self.schema.fields.iter().enumerate() {
+            if field.constraints.unique {
+                // TODO:
+                // unwrap on option because nullability is checked first and
+                // uniquness disallows null values
+                // also, schema forces unique columns to be of type u32
+                let key = tuple.get_value_at(i as u8, &self.schema)?.unwrap().u32();
+
+                return match self.index.as_ref().unwrap().search(self.active_txn, key) {
+                    None => Ok(Some(key)),
+                    Some(_) => Err(anyhow!("Duplicate value in unique field {}", field.name)),
+                };
+            }
+        }
+        Ok(None)
     }
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
@@ -279,6 +327,7 @@ impl Table {
         }
 
         self.check_nullability(&tuple)?;
+        let key = self.check_uniqueness(&tuple)?;
 
         let tuple = self.insert_strings(tuple)?;
 
@@ -298,6 +347,12 @@ impl Table {
         self.bpm.lock().unpin(&self.last_page, self.active_txn);
 
         if let Ok(id) = id {
+            if let Some(key) = key {
+                self.index
+                    .as_mut()
+                    .unwrap()
+                    .insert(self.active_txn, key, id)?;
+            };
             if self.active_txn.is_none() {
                 self.bpm.lock().flush(Some(self.last_page))?;
             }
@@ -324,6 +379,10 @@ impl Table {
 
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
         let (page_id, slot_id) = id;
+
+        if let Some(id) = self.active_txn {
+            self.txn_manager.lock().touch_page(id, self.last_page)?;
+        }
 
         let mut page: TablePage = self
             .bpm
@@ -360,11 +419,21 @@ impl Table {
 
     /// Needs to return a duplicate because of how catalog handles ownership
     pub fn truncate(&self) -> Result<Table> {
-        let mut table = self.clone_with_txn();
-        table.first_page = self.bpm.lock().new_page()?.reader().get_page_id();
-        table.last_page = table.first_page;
+        let first_page = self.bpm.lock().new_page()?.reader().get_page_id();
+        let last_page = first_page;
+        let index = BPlusTree::new(self.bpm.clone(), self.txn_manager.clone(), self.active_txn);
 
-        Ok(table)
+        Ok(Self {
+            name: self.name.clone(),
+            first_page,
+            last_page,
+            blob_page: self.blob_page,
+            bpm: self.bpm.clone(),
+            txn_manager: self.txn_manager.clone(),
+            active_txn: self.active_txn,
+            schema: self.schema.clone(),
+            index: Some(index),
+        })
     }
 }
 
@@ -372,9 +441,10 @@ impl Table {
 mod tests {
     use super::*;
     use crate::buffer_pool::tests::test_arc_bpm;
+    use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
     use crate::txn_manager::tests::test_arc_transaction_manager;
-    use crate::types::*;
+    use crate::{lit, types::*};
     use anyhow::Result;
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
@@ -395,6 +465,7 @@ mod tests {
             first_page: page,
             last_page: page,
             blob_page,
+            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), None)),
             bpm,
             txn_manager,
             active_txn: None,
@@ -405,8 +476,8 @@ mod tests {
     #[test]
     fn test_unpin_drop() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("id", Types::UInt, false),
-            Field::new("age", Types::UInt, false),
+            Field::new("id", Types::UInt, Constraints::nullable(false)),
+            Field::new("age", Types::UInt, Constraints::nullable(false)),
         ]);
 
         let mut table = test_table(2, &schema)?;
@@ -430,8 +501,12 @@ mod tests {
 
     #[test]
     fn test_multiple_pages() -> Result<()> {
-        let schema = Schema::new(vec![Field::new("a", Types::UInt, false)]);
-        let mut table = test_table(4, &schema)?;
+        let schema = Schema::new(vec![Field::new(
+            "a",
+            Types::UInt,
+            Constraints::nullable(false),
+        )]);
+        let mut table = test_table(5, &schema)?;
 
         let first_id = table.get_first_page_id();
         let blob_id = table.get_blob_page_id();
@@ -492,9 +567,9 @@ mod tests {
         let s1 = "Hello, World!";
         let s2 = "Hello, Again";
         let schema = Schema::new(vec![
-            Field::new("a", Types::UInt, false),
-            Field::new("str", Types::Str, false),
-            Field::new("b", Types::UInt, false),
+            Field::new("a", Types::UInt, Constraints::nullable(false)),
+            Field::new("str", Types::Str, Constraints::nullable(false)),
+            Field::new("b", Types::UInt, Constraints::nullable(false)),
         ]);
 
         let mut table = test_table(4, &schema)?;
@@ -546,9 +621,9 @@ mod tests {
         let s1 = "Hello, World!";
         let s2 = "Hello, Again";
         let schema = Schema::new(vec![
-            Field::new("s1", Types::Str, false),
-            Field::new("a", Types::UInt, false),
-            Field::new("s2", Types::Str, false),
+            Field::new("s1", Types::Str, Constraints::nullable(false)),
+            Field::new("a", Types::UInt, Constraints::nullable(false)),
+            Field::new("s2", Types::Str, Constraints::nullable(false)),
         ]);
 
         let mut table = test_table(4, &schema)?;
@@ -586,9 +661,9 @@ mod tests {
     #[test]
     fn test_delete() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::UInt, false),
-            Field::new("b", Types::Float, false),
-            Field::new("c", Types::Int, false),
+            Field::new("a", Types::UInt, Constraints::nullable(false)),
+            Field::new("b", Types::Float, Constraints::nullable(false)),
+            Field::new("c", Types::Int, Constraints::nullable(false)),
         ]);
 
         let mut table = test_table(4, &schema)?;
@@ -636,9 +711,9 @@ mod tests {
     #[test]
     fn test_nulls() -> Result<()> {
         let schema = Schema::new(vec![
-            Field::new("a", Types::UInt, true),
-            Field::new("b", Types::Str, true),
-            Field::new("c", Types::Int, true),
+            Field::new("a", Types::UInt, Constraints::nullable(true)),
+            Field::new("b", Types::Str, Constraints::nullable(true)),
+            Field::new("c", Types::Int, Constraints::nullable(true)),
         ]);
 
         let mut table = test_table(4, &schema)?;
@@ -666,13 +741,45 @@ mod tests {
 
     #[test]
     fn test_nullability() -> Result<()> {
-        let schema = Schema::new(vec![Field::new("a", Types::Int, false)]);
+        let schema = Schema::new(vec![Field::new(
+            "a",
+            Types::Int,
+            Constraints::nullable(false),
+        )]);
 
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(vec![Value::Null], &schema);
 
         assert!(table.insert(tuple).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_uniqueness() -> Result<()> {
+        let schema = Schema::new(vec![
+            Field::new("a", Types::UInt, Constraints::unique(true)),
+            Field::new("b", Types::UInt, Constraints::nullable(false)),
+        ]);
+
+        let mut table = test_table(5, &schema)?;
+
+        let t1 = Tuple::new(vec![lit!(UInt, "10"), lit!(UInt, "20")], &schema);
+        let t2 = Tuple::new(vec![lit!(UInt, "10"), lit!(UInt, "30")], &schema);
+
+        table.insert(t1)?;
+        assert!(table.insert(t2).is_err());
+
+        let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
+            let values = tuple.get_values(&schema)?;
+            assert_eq!(values[0], lit!(UInt, "10"));
+            assert_eq!(values[1], lit!(UInt, "20"));
+
+            Ok(())
+        };
+
+        table.scan(None, scanner_1)?;
 
         Ok(())
     }

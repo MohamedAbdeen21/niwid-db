@@ -1,3 +1,4 @@
+pub(crate) mod indexes;
 pub(crate) mod table_page;
 pub(crate) mod traits;
 
@@ -11,11 +12,12 @@ pub const PAGE_SIZE: usize = 4096; // 4 KBs
 pub const INVALID_PAGE: PageId = 0;
 
 pub type PageId = u32;
+pub type SlotId = u16;
 
 /// The data that is shared and modified between all page types
 /// 3 padding bytes, dirty flag, and then the actual data
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PageData {
     _padding: [u8; 3],
     is_dirty: bool,
@@ -25,7 +27,7 @@ pub struct PageData {
 /// A generic page with an underlying array of [`PAGE_SIZE`] bytes
 /// Other pages must implement `From<Page>` and `Into<Page>` traits
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Page {
     data: PageData,
     page_id: PageId,

@@ -1,18 +1,20 @@
 pub mod result_set;
 
 use crate::context::Context;
+use crate::lit;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, DropTables, Filter, Insert, Join, LogicalPlan, Scan, Truncate, Update, Values,
+    CreateTable, Delete, DropTables, Filter, Identity, IndexScan, Insert, Join, LogicalPlan, Scan,
+    Truncate, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
+use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
-use crate::tuple::Tuple;
+use crate::tuple::{Tuple, TupleId};
 use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
-use crate::value;
 use anyhow::{anyhow, Result};
 use result_set::ResultSet;
 use sqlparser::ast::BinaryOperator;
@@ -39,8 +41,10 @@ impl LogicalPlan {
             LogicalPlan::DropTables(d) => d.execute(ctx),
             LogicalPlan::Truncate(t) => t.execute(ctx),
             LogicalPlan::Update(u) => u.execute(ctx),
+            LogicalPlan::Delete(d) => d.execute(ctx),
             LogicalPlan::Empty => Ok(ResultSet::default()),
             LogicalPlan::Join(j) => j.execute(ctx),
+            LogicalPlan::IndexScan(i) => i.execute(ctx),
             LogicalPlan::StartTxn => {
                 ctx.start_txn()?;
                 Ok(ResultSet::default())
@@ -53,7 +57,142 @@ impl LogicalPlan {
                 ctx.rollback_txn()?;
                 Ok(ResultSet::default())
             }
+            #[cfg(test)]
+            LogicalPlan::Identity(i) => i.execute(ctx),
         }
+    }
+}
+
+impl Executable for Delete {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
+
+        let input = self.input.execute(ctx)?;
+
+        let c = ctx.get_catalog();
+        let mut catalog = c.lock();
+
+        let table = catalog
+            .get_table_mut(&self.table_name, txn_id)
+            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
+
+        let (_, mask) = self.selection.evaluate(&input)?;
+
+        let selected_rows = input
+            .rows()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
+            .collect::<Vec<_>>();
+
+        let (txn_id, is_temp) = match txn_id {
+            Some(id) => (id, false),
+            None => (ctx.start_txn()?, true),
+        };
+
+        table.start_txn(txn_id)?;
+
+        for row in selected_rows {
+            let tuple_id = (row[0].u32(), row[1].u32() as u16);
+
+            if let Err(err) = table.delete(tuple_id) {
+                table.rollback_txn()?;
+                drop(catalog);
+                if is_temp {
+                    ctx.rollback_txn()?;
+                }
+                return Err(err);
+            }
+        }
+
+        table.commit_txn()?;
+        drop(catalog);
+        if is_temp {
+            ctx.commit_txn()?;
+        }
+
+        Ok(ResultSet::default())
+    }
+}
+
+impl Executable for IndexScan {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let txn_id = ctx.get_active_txn();
+        let arc_catalog = ctx.get_catalog();
+        let mut catalog = arc_catalog.lock();
+        let table = catalog.get_table(&self.table_name, txn_id).unwrap();
+
+        let schema = table.get_schema();
+
+        let mut tuple_ids = vec![];
+
+        let scanner = |(key, tuple_id): &(u32, TupleId)| {
+            if let Some(to) = self.to {
+                if *key > to {
+                    return Err(anyhow!("End of loop"));
+                };
+            }
+            tuple_ids.push(*tuple_id);
+            Ok(())
+        };
+
+        let index = table.get_index().as_ref().unwrap();
+
+        let _ = if let Some(from) = self.from {
+            index.scan_from(txn_id, from, scanner)
+        } else {
+            index.scan(txn_id, scanner)
+        };
+
+        let tuples = tuple_ids
+            .into_iter()
+            .map(|tuple_id| {
+                (
+                    tuple_id,
+                    table
+                        .get_tuple(tuple_id)
+                        .expect("Index returned a deleted record"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let mut cols: Vec<Vec<Value>> = vec![vec![]; schema.fields.len() + 2];
+
+        // TODO: pass the tuple_id as tuple for udpate to use
+        // need to define a tuple type first though
+        tuples
+            .into_iter()
+            .try_for_each(|((page_id, slot_id), tuple)| -> Result<()> {
+                let mut values = vec![
+                    lit!(UInt, page_id.to_string()),
+                    lit!(UInt, slot_id.to_string()),
+                ];
+
+                values.extend(tuple.get_values(&schema)?);
+
+                let values = values.into_iter().map(|v| {
+                    if matches!(v, Value::StrAddr(_)) {
+                        Value::Str(table.fetch_string(v.str_addr()))
+                    } else {
+                        v
+                    }
+                });
+
+                values.enumerate().for_each(|(i, v)| {
+                    cols[i].push(v);
+                });
+
+                Ok(())
+            })?;
+
+        let mut fields = vec![
+            Field::new("page_id", Types::UInt, Constraints::nullable(false)),
+            Field::new("slot_id", Types::UInt, Constraints::nullable(false)),
+        ];
+
+        fields.extend(schema.fields.clone());
+
+        Ok(ResultSet::new(fields, cols))
     }
 }
 
@@ -90,7 +229,7 @@ impl Executable for Join {
         for left_row in left.rows() {
             let ll = ResultSet::from_tuple(left.fields().clone(), left_row.to_vec(), right.len());
             let input = ll.concat(right.clone());
-            let mask = self.on.evaluate(&input);
+            let mask = self.on.evaluate(&input)?;
             for (i, row) in input.rows().into_iter().enumerate() {
                 if mask[i].is_truthy() {
                     output_rows.push(row);
@@ -115,7 +254,7 @@ impl Executable for Update {
             .get_table_mut(&self.table_name, txn_id)
             .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
 
-        let (_, mask) = self.selection.evaluate(&input);
+        let (_, mask) = self.selection.evaluate(&input)?;
 
         let (selected_col, expr) = self.assignments;
 
@@ -142,20 +281,28 @@ impl Executable for Update {
         table.start_txn(txn_id)?;
 
         for row in selected_rows {
-            let tuple_id = (row[0].u32(), row[1].u32() as usize);
+            let tuple_id = (row[0].u32(), row[1].u32() as u16);
 
             let mut new_tuple = row[2..].to_vec();
 
-            for value in expr.evaluate(&input).1 {
+            for value in expr.evaluate(&input)?.1 {
                 new_tuple[updated_col_id] = value;
             }
 
             let new_tuple = Tuple::new(new_tuple, &schema);
 
-            table.update(Some(tuple_id), new_tuple)?;
+            if let Err(err) = table.update(Some(tuple_id), new_tuple) {
+                table.rollback_txn()?;
+                drop(catalog);
+                if is_temp {
+                    ctx.rollback_txn()?;
+                }
+                return Err(err);
+            }
         }
 
         table.commit_txn()?;
+        drop(catalog);
         if is_temp {
             ctx.commit_txn()?;
         }
@@ -202,12 +349,16 @@ impl Executable for Values {
             .map(|row| {
                 row.into_iter()
                     .map(|expr| expr.evaluate(&input))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
                     .map(|(field, data)| ResultSet::new(vec![field], vec![data]))
                     .reduce(|a, b| a.concat(b))
-                    .unwrap() // TODO: ?
+                    .ok_or(anyhow!("Empty row"))
             })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
             .reduce(|a, b| a.union(b))
-            .unwrap();
+            .unwrap_or_default();
 
         Ok(output)
     }
@@ -223,14 +374,14 @@ impl Executable for Insert {
         }
 
         for row in input.rows() {
-            let tuple = Tuple::new(row, &self.schema);
+            let tuple = Tuple::new(row, &self.table_schema);
 
             let _tuple_id = ctx
                 .get_catalog()
                 .lock()
                 .get_table_mut(&self.table_name, txn_id)
                 .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??
-                .insert(tuple);
+                .insert(tuple)?;
         }
 
         Ok(ResultSet::default())
@@ -279,9 +430,12 @@ impl Executable for Filter {
         let output = input
             .cols
             .into_iter()
-            .zip(mask)
-            .filter(|(_, mask)| *mask)
-            .map(|(col, _)| col)
+            .map(|col| {
+                col.into_iter()
+                    .zip(&mask)
+                    .filter_map(|(value, &mask)| if mask { Some(value) } else { None })
+                    .collect::<Vec<_>>()
+            })
             .collect::<Vec<_>>();
 
         Ok(ResultSet::new(input.schema.fields, output))
@@ -289,32 +443,32 @@ impl Executable for Filter {
 }
 
 impl LogicalExpr {
-    fn evaluate(&self, input: &ResultSet) -> (Field, Vec<Value>) {
+    fn evaluate(&self, input: &ResultSet) -> Result<(Field, Vec<Value>)> {
         let size = input.len();
         match self {
             LogicalExpr::Literal(ref c) => {
                 let input_schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&input_schema);
                 let data = (0..size).map(|_| c.clone()).collect::<Vec<_>>();
-                (field, data)
+                Ok((field, data))
             }
             LogicalExpr::Column(c) => {
                 let fields = input.fields();
                 let index = fields.iter().position(|col| col.name == *c).unwrap();
-                (input.fields()[index].clone(), input.cols()[index].clone())
+                Ok((input.fields()[index].clone(), input.cols()[index].clone()))
             }
             LogicalExpr::BinaryExpr(ref expr) => {
                 let schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&schema);
-                (field, expr.evaluate(input))
+                Ok((field, expr.evaluate(input)?))
             }
             LogicalExpr::AliasedExpr(ref expr, _) => {
-                let result = expr.clone().evaluate(input);
+                let result = expr.clone().evaluate(input)?;
 
                 let schema = Schema::new(input.fields().clone());
                 let field = self.to_field(&schema);
 
-                (field, result.1)
+                Ok((field, result.1))
             }
         }
     }
@@ -327,94 +481,105 @@ impl BinaryExpr {
             BinaryOperator::Minus => left.sub(right),
             BinaryOperator::Multiply => left.mul(right),
             BinaryOperator::Divide => left.div(right),
-            BinaryOperator::Eq => value!(Bool, left.eq(right).to_string()),
+            BinaryOperator::Eq => lit!(Bool, left.eq(right).to_string()),
             e => todo!("{:?}", e),
         }
     }
 
-    pub(super) fn evaluate(&self, input: &ResultSet) -> Vec<Value> {
+    pub(super) fn evaluate(&self, input: &ResultSet) -> Result<Vec<Value>> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
                 let fields = input.fields();
-                let index1 = fields.iter().position(|col| &col.name == c1).expect(c1);
-                let index2 = fields.iter().position(|col| &col.name == c2).expect(c2);
+                let index1 = fields
+                    .iter()
+                    .position(|col| &col.name == c1)
+                    .ok_or(anyhow!("Column {} does not exist", c1))?;
+                let index2 = fields
+                    .iter()
+                    .position(|col| &col.name == c2)
+                    .ok_or(anyhow!("Column {} does not exist", c2))?;
                 let col1 = &input.cols()[index1];
                 let col2 = &input.cols()[index2];
-                col1.iter()
+                Ok(col1
+                    .iter()
                     .zip(col2)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::Literal(lit), LogicalExpr::Column(c2)) => {
                 let index = input
                     .fields()
                     .iter()
                     .position(|col| &col.name == c2)
-                    .unwrap();
+                    .ok_or(anyhow!("Column {} does not exist", c2))?;
                 let col = &input.cols()[index];
-                col.iter().map(|val| self.eval_op(lit, val)).collect()
+                Ok(col.iter().map(|val| self.eval_op(lit, val)).collect())
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(lit)) => {
                 let index = input
                     .fields()
                     .iter()
                     .position(|col| &col.name == c1)
-                    .unwrap();
+                    .ok_or(anyhow!("Column {} does not exist", c1))?;
                 let col = &input.cols()[index];
-                col.iter().map(|val| self.eval_op(val, lit)).collect()
+                Ok(col.iter().map(|val| self.eval_op(val, lit)).collect())
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
                 let rows = input.len();
-                (0..rows).map(|_| self.eval_op(v1, v2)).collect()
+                Ok((0..rows).map(|_| self.eval_op(v1, v2)).collect())
             }
             (LogicalExpr::BinaryExpr(l), LogicalExpr::BinaryExpr(r)) => {
-                let left = l.evaluate(input);
-                let right = r.evaluate(input);
-                left.iter()
+                let left = l.evaluate(input)?;
+                let right = r.evaluate(input)?;
+                Ok(left
+                    .iter()
                     .zip(right.iter())
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::Literal(value), LogicalExpr::BinaryExpr(binary_expr)) => {
-                let right = binary_expr.evaluate(input);
-                right.iter().map(|r| self.eval_op(value, r)).collect()
+                let right = binary_expr.evaluate(input)?;
+                Ok(right.iter().map(|r| self.eval_op(value, r)).collect())
             }
             (LogicalExpr::Column(c), LogicalExpr::BinaryExpr(binary_expr)) => {
                 let fields = input.fields();
                 let index = fields.iter().position(|col| &col.name == c).unwrap();
                 let left = &input.cols()[index];
 
-                let right = binary_expr.evaluate(input);
+                let right = binary_expr.evaluate(input)?;
 
-                left.iter()
+                Ok(left
+                    .iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, &r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Literal(lit)) => {
-                let left = binary_expr.evaluate(input);
-                left.iter().map(|l| self.eval_op(l, lit)).collect()
+                let left = binary_expr.evaluate(input)?;
+                Ok(left.iter().map(|l| self.eval_op(l, lit)).collect())
             }
             (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Column(c)) => {
                 let fields = input.fields();
                 let index = fields.iter().position(|col| &col.name == c).unwrap();
                 let right = &input.cols()[index];
 
-                let left = binary_expr.evaluate(input);
+                let left = binary_expr.evaluate(input)?;
 
-                left.iter()
+                Ok(left
+                    .iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
             (LogicalExpr::AliasedExpr(expr, _), expr2)
             | (expr2, LogicalExpr::AliasedExpr(expr, _)) => {
-                let (_, left) = expr.clone().evaluate(input);
-                let (_, right) = expr2.clone().evaluate(input);
-                left.iter()
+                let (_, left) = expr.clone().evaluate(input)?;
+                let (_, right) = expr2.clone().evaluate(input)?;
+                Ok(left
+                    .iter()
                     .zip(right.iter())
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect())
             }
         }
     }
@@ -487,9 +652,11 @@ impl Executable for Projection {
             .projections
             .iter()
             .map(|p| p.evaluate(&input))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
             .map(|(field, data)| ResultSet::new(vec![field], vec![data]))
             .reduce(|a, b| a.concat(b))
-            .unwrap();
+            .unwrap_or_default();
 
         Ok(output)
     }
@@ -510,8 +677,8 @@ impl Executable for Scan {
         // need to define a tuple type first though
         table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
             let mut values = vec![
-                value!(UInt, page_id.to_string()),
-                value!(UInt, slot_id.to_string()),
+                lit!(UInt, page_id.to_string()),
+                lit!(UInt, slot_id.to_string()),
             ];
 
             values.extend(tuple.get_values(&schema)?);
@@ -532,12 +699,134 @@ impl Executable for Scan {
         })?;
 
         let mut fields = vec![
-            Field::new("page_id", Types::UInt, false),
-            Field::new("slot_id", Types::UInt, false),
+            Field::new("page_id", Types::UInt, Constraints::nullable(false)),
+            Field::new("slot_id", Types::UInt, Constraints::nullable(false)),
         ];
 
         fields.extend(schema.fields.clone());
 
         Ok(ResultSet::new(fields, cols))
+    }
+}
+
+impl Executable for Identity {
+    fn execute(self, _ctx: &mut Context) -> Result<ResultSet> {
+        Ok(self.input)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::context::tests::test_context;
+
+    use super::*;
+    use anyhow::Result;
+
+    fn identity_plan(values: &[Vec<Value>], fields: &[Field]) -> LogicalPlan {
+        let set = ResultSet::from_rows(fields.to_owned(), values.to_owned());
+        LogicalPlan::Identity(Identity::new(set))
+    }
+
+    fn values_to_exprs(values: &[Vec<Value>]) -> Vec<Vec<LogicalExpr>> {
+        values
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|value| LogicalExpr::Literal(value.clone()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_values() -> Result<()> {
+        let mut ctx = test_context();
+        let values = vec![
+            vec![lit!(UInt, "1"), lit!(Str, "hello")],
+            vec![lit!(UInt, "2"), lit!(Str, "world")],
+        ];
+
+        let input = values_to_exprs(&values);
+
+        let schema = Schema::new(vec![
+            Field::new("col_1", Types::UInt, Constraints::unique(true)),
+            Field::new("col_2", Types::Str, Constraints::nullable(false)),
+        ]);
+        let expected = ResultSet::from_rows(schema.fields.clone(), values);
+        let plan = Values::new(input, Schema::default());
+
+        let output = plan.execute(&mut ctx).unwrap();
+
+        // don't check the schema
+        assert_eq!(output.cols(), expected.cols());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_filter() -> Result<()> {
+        let mut ctx = test_context();
+
+        let values = vec![
+            vec![lit!(UInt, "1"), lit!(Str, "hello")],
+            vec![lit!(UInt, "2"), lit!(Str, "world")],
+            vec![lit!(UInt, "3"), lit!(Str, "hello")],
+            vec![lit!(UInt, "4"), lit!(Str, "world")],
+        ];
+
+        let schema = Schema::new(vec![
+            Field::new("col_1", Types::UInt, Constraints::unique(true)),
+            Field::new("col_2", Types::Str, Constraints::nullable(false)),
+        ]);
+
+        let root = identity_plan(&values, &schema.fields);
+
+        let filter = BooleanBinaryExpr::new(
+            LogicalExpr::Column("col_1".to_string()),
+            BinaryOperator::Gt,
+            LogicalExpr::Literal(lit!(UInt, "2")),
+        );
+
+        let plan = Filter::new(root, filter);
+
+        let expected = ResultSet::from_rows(schema.fields.clone(), values[2..].to_vec());
+        let output = plan.execute(&mut ctx)?;
+
+        assert_eq!(output, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_projection() -> Result<()> {
+        let mut ctx = test_context();
+
+        let values = vec![
+            vec![lit!(UInt, "1"), lit!(Str, "hello"), lit!(Char, "a")],
+            vec![lit!(UInt, "2"), lit!(Str, "world"), lit!(Char, "b")],
+            vec![lit!(UInt, "3"), lit!(Str, "hello"), lit!(Char, "c")],
+            vec![lit!(UInt, "4"), lit!(Str, "world"), lit!(Char, "d")],
+        ];
+
+        let schema = Schema::new(vec![
+            Field::new("col_1", Types::UInt, Constraints::unique(true)),
+            Field::new("col_2", Types::Str, Constraints::nullable(false)),
+            Field::new("col_3", Types::Char, Constraints::nullable(false)),
+        ]);
+
+        let root = identity_plan(&values, &schema.fields);
+
+        let projections = vec![
+            LogicalExpr::Column("col_1".to_string()),
+            LogicalExpr::Column("col_3".to_string()),
+        ];
+
+        let plan = Projection::new(root, projections);
+
+        let expected =
+            ResultSet::from_rows(schema.fields.clone(), values.to_vec()).select(vec![0, 2]);
+        let output = plan.execute(&mut ctx)?;
+
+        assert_eq!(output, expected);
+        Ok(())
     }
 }

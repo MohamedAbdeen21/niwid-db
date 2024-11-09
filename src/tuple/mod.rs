@@ -1,6 +1,7 @@
+pub mod constraints;
 pub mod schema;
 
-use crate::pages::PageId;
+use crate::pages::{PageId, SlotId};
 use crate::tuple::schema::Schema;
 use crate::types::{AsBytes, Types, Value};
 use crate::{pages::traits::Serialize, types::ValueFactory};
@@ -10,8 +11,8 @@ use std::{mem, slice};
 /// Tuple Meta Data + the Tuple itself
 pub type Entry = (TupleMetaData, Tuple);
 /// Page Id and slot Id
-pub type TupleId = (PageId, usize);
-pub const TUPLE_ID_SIZE: usize = 12;
+pub type TupleId = (PageId, SlotId);
+pub const TUPLE_ID_SIZE: usize = 6;
 
 #[repr(C)]
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -26,7 +27,7 @@ pub struct Tuple {
 impl Tuple {
     pub fn new(mut values: Vec<Value>, schema: &Schema) -> Self {
         let mut nulls = 0;
-        if values.iter().any(|t| t.is_null()) {
+        if values.iter().any(|v| v.is_null()) {
             values = values
                 .into_iter()
                 .zip(schema.fields.iter().map(|f| f.ty.clone()))
@@ -52,7 +53,6 @@ impl Tuple {
         tuple
     }
 
-    #[allow(unused)]
     pub fn from_sql(ident: Vec<Option<String>>, schema: Schema) -> Self {
         let values = ident
             .iter()
@@ -221,9 +221,10 @@ impl TupleExt for TupleId {
 
     fn from_bytes(bytes: &[u8]) -> Self {
         let page_offset = std::mem::size_of::<PageId>();
-        let slot_size = std::mem::size_of::<usize>();
+        let slot_size = std::mem::size_of::<SlotId>();
+        assert_eq!(bytes.len(), page_offset + slot_size);
         let page_id = PageId::from_ne_bytes(bytes[0..page_offset].try_into().unwrap());
-        let slot_id = usize::from_le_bytes(
+        let slot_id = SlotId::from_le_bytes(
             bytes[page_offset..page_offset + slot_size]
                 .try_into()
                 .unwrap(),
@@ -233,11 +234,12 @@ impl TupleExt for TupleId {
 
     fn to_bytes(&self) -> Vec<u8> {
         let page_id_size = std::mem::size_of::<PageId>();
-        let slot_id_size = std::mem::size_of::<usize>();
+        let slot_id_size = std::mem::size_of::<SlotId>();
         let mut bytes = Vec::with_capacity(page_id_size + slot_id_size);
         bytes.extend_from_slice(&self.0.to_ne_bytes());
         bytes.extend_from_slice(&self.1.to_ne_bytes());
 
+        assert_eq!(bytes.len(), page_id_size + slot_id_size);
         bytes
     }
 }
