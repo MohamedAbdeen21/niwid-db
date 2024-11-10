@@ -1,6 +1,7 @@
 pub mod result_set;
 
 use crate::context::Context;
+use crate::errors::Error;
 use crate::lit;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
@@ -15,7 +16,7 @@ use crate::tuple::{Tuple, TupleId};
 use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use result_set::ResultSet;
 use sqlparser::ast::BinaryOperator;
 
@@ -70,7 +71,7 @@ impl Executable for Delete {
         let input = self.input.execute(ctx)?;
 
         let c = ctx.get_catalog();
-        let mut catalog = c.lock();
+        let mut catalog = c.write();
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
@@ -119,7 +120,7 @@ impl Executable for IndexScan {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let arc_catalog = ctx.get_catalog();
-        let mut catalog = arc_catalog.lock();
+        let catalog = arc_catalog.read();
         let table = catalog.get_table(&self.table_name, txn_id).unwrap();
 
         let schema = table.get_schema();
@@ -248,7 +249,7 @@ impl Executable for Update {
         let input = self.input.execute(ctx)?;
 
         let c = ctx.get_catalog();
-        let mut catalog = c.lock();
+        let mut catalog = c.write();
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
@@ -315,7 +316,7 @@ impl Executable for Truncate {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         ctx.get_catalog()
-            .lock()
+            .write()
             .truncate_table(self.table_name, txn_id)?;
 
         Ok(ResultSet::default())
@@ -328,11 +329,11 @@ impl Executable for DropTables {
         for table_name in self.table_names {
             if ctx
                 .get_catalog()
-                .lock()
+                .write()
                 .drop_table(table_name.clone(), self.if_exists, txn_id)
                 .is_none()
             {
-                return Err(anyhow!("Table {} does not exist", table_name));
+                bail!(Error::TableNotFound(table_name));
             }
         }
 
@@ -378,7 +379,7 @@ impl Executable for Insert {
 
             let _tuple_id = ctx
                 .get_catalog()
-                .lock()
+                .write()
                 .get_table_mut(&self.table_name, txn_id)
                 .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??
                 .insert(tuple)?;
@@ -416,7 +417,7 @@ impl Executable for CreateTable {
         let txn_id = ctx.get_active_txn();
         let catalog = ctx.get_catalog();
         catalog
-            .lock()
+            .write()
             .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
         Ok(ResultSet::default())
     }
@@ -666,7 +667,7 @@ impl Executable for Scan {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let arc_catalog = ctx.get_catalog();
-        let mut catalog = arc_catalog.lock();
+        let catalog = arc_catalog.read();
         let table = catalog.get_table(&self.table_name, txn_id).unwrap();
 
         let schema = table.get_schema();

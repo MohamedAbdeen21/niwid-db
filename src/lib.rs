@@ -28,12 +28,12 @@ macro_rules! get_caller_name {
         bt.resolve();
         let frames = bt.frames();
         if frames.len() > 1 {
-            let caller_frame = &frames[1]; // Caller frame
+            let caller_frame = &frames[1];
             if let Some(symbol) = caller_frame.symbols().first() {
                 if let Some(name) = symbol.name() {
-                    name.to_string() // Return the caller's name as a string
+                    name.to_string()
                 } else {
-                    "Unknown Caller".to_string() // Fallback if name resolution fails
+                    "Unknown Caller".to_string()
                 }
             } else {
                 "Unknown Caller".to_string()

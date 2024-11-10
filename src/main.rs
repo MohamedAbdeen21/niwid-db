@@ -62,9 +62,7 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
                 let _ = writer.write_all(result.print().as_bytes()).await;
             }
             Err(e) => {
-                let _ = writer
-                    .write_all(format!("Error executing query: {}\n", e).as_bytes())
-                    .await;
+                let _ = writer.write_all(format!("Error: {}\n", e).as_bytes()).await;
             }
         }
     }

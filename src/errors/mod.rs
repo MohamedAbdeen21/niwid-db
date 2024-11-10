@@ -3,9 +3,13 @@ pub enum Error {
     Internal(String),
     TableExists(String),
     TupleExists,
+    TupleNotFound,
+    TableNotFound(String),
     Unimplemented(String),
     Unsupported(String),
     Expected(String, String),
+    TransactionActive,
+    NoActiveTransaction,
 }
 
 impl std::fmt::Display for Error {
@@ -16,9 +20,13 @@ impl std::fmt::Display for Error {
             Error::TupleExists => write!(f, "Tuple already exists"),
             Error::Unimplemented(object) => write!(f, "Not yet implemented: {object}."),
             Error::Unsupported(context) => write!(f, "Unsupported: {context}."),
-            Error::Expected(actual, expected) => {
+            Error::Expected(expected, actual) => {
                 write!(f, "Expected {expected}, but got {actual}.")
             }
+            Error::TableNotFound(table) => write!(f, "Table {table} not found."),
+            Error::TupleNotFound => write!(f, "Tuple not found."),
+            Error::TransactionActive => write!(f, "Writing transaction already active."),
+            Error::NoActiveTransaction => write!(f, "No active transaction."),
         }
     }
 }

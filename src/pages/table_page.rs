@@ -1,8 +1,9 @@
 use super::{traits::Serialize, PageData, PageId};
 use super::{Page, SlotId, PAGE_SIZE};
+use crate::errors::Error;
 use crate::latch::Latch;
 use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use core::panic;
 use std::{mem, slice, sync::Arc};
 
@@ -59,9 +60,7 @@ impl TablePage {
     }
 
     fn header_mut(&mut self) -> &mut TablePageHeader {
-        if self.read_only {
-            panic!("Cannot modify read only page");
-        }
+        assert!(!self.read_only, "Cannot modify read only page");
         &mut unsafe { self.data.as_mut() }.unwrap().header
     }
 
@@ -71,9 +70,8 @@ impl TablePage {
     }
 
     pub fn set_next_page_id(&mut self, page_id: PageId) {
-        if self.read_only {
-            panic!("Cannot modify read only page");
-        }
+        assert!(!self.read_only, "Cannot modify read only page");
+
         let locked = self.latch.try_wlock();
 
         self.header_mut().set_next_page_id(page_id);
@@ -135,14 +133,12 @@ impl TablePage {
     /// similar to insert tuple but avoids adding the tuple metadata
     /// used mainly in blob pages
     pub fn insert_raw(&mut self, tuple: &Tuple) -> Result<TupleId> {
-        if self.read_only {
-            panic!("Cannot modify read only page");
-        }
+        assert!(!self.read_only, "Cannot modify read only page");
 
         let tuple_size = tuple.len();
         if tuple_size + SLOT_SIZE > self.free_space() {
             self.latch.wunlock();
-            return Err(anyhow!("Not enough space to insert tuple"));
+            bail!(Error::Internal("Out of space in Table Page".into()));
         }
 
         let last_offset = self.last_tuple_offset();
@@ -167,9 +163,7 @@ impl TablePage {
     }
 
     pub fn insert_tuple(&mut self, tuple: &Tuple) -> Result<TupleId> {
-        if self.read_only {
-            panic!("Cannot modify read only page");
-        }
+        assert!(!self.read_only, "Cannot modify read only page");
 
         let entry_size = tuple.len() + META_SIZE;
         if entry_size + SLOT_SIZE > self.free_space() {
@@ -202,9 +196,8 @@ impl TablePage {
     }
 
     pub fn delete_tuple(&mut self, slot: SlotId) {
-        if self.read_only {
-            panic!("Cannot modify read only page");
-        }
+        assert!(!self.read_only, "Cannot modify read only page");
+
         let slot = self.get_slot(slot).expect("Asked for invalid slot");
 
         let data = unsafe { self.data.as_mut().unwrap() };

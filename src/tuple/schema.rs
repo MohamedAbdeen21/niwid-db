@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use crate::types::Types;
-use anyhow::{anyhow, Result};
+use crate::{errors::Error, types::Types};
+use anyhow::{bail, Result};
 use bincode::{deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{ColumnDef, ColumnOption, ColumnOptionDef};
@@ -79,11 +79,16 @@ impl Schema {
         let left_set: HashSet<&str> =
             HashSet::from_iter(self.fields.iter().map(|f| f.name.as_str()));
         let right_set = HashSet::from_iter(schema.fields.iter().map(|f| f.name.as_str()));
+
         if left_set.intersection(&right_set).count() > 0 {
-            return Err(anyhow!("Ambiguous column name"));
+            bail!(Error::Expected(
+                "qualified fields".into(),
+                "unqualified field".into()
+            ));
         } else {
             fields.extend(schema.fields);
         }
+
         Ok(Schema::new(fields))
     }
 
@@ -99,10 +104,6 @@ impl Schema {
                     ..
                 } = col;
 
-                if options.len() > 1 {
-                    return Err(anyhow!("Only supported constraint is NOT NULL"));
-                };
-
                 let unique = options.iter().any(|opt| {
                     matches!(
                         opt,
@@ -112,6 +113,7 @@ impl Schema {
                         }
                     )
                 });
+
                 let not_null = options.iter().any(|opt| {
                     matches!(
                         opt,
@@ -124,7 +126,9 @@ impl Schema {
 
                 if unique {
                     if has_unqiue {
-                        return Err(anyhow!("Only one unique field is allowed"));
+                        bail!(Error::Unsupported(
+                            "Only one unique field is allowed".into()
+                        ))
                     } else {
                         has_unqiue = true;
                     }
@@ -132,7 +136,9 @@ impl Schema {
 
                 let type_ = Types::from_sql(&data_type.to_string());
                 if unique && type_ != Types::UInt {
-                    return Err(anyhow!("Unique field must be of type uint, sorry"));
+                    bail!(Error::Unsupported(
+                        "Unique field must be of type uint, sorry".into()
+                    ));
                 };
 
                 Ok(Field::new(

@@ -1,7 +1,5 @@
-use crate::{
-    pages::{PageId, SlotId},
-    tuple::{TupleExt, TupleId},
-};
+use crate::pages::{PageId, SlotId};
+use crate::tuple::{TupleExt, TupleId};
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]

@@ -1,8 +1,10 @@
 pub mod leaf_value;
 
+use crate::errors::Error;
 use crate::latch::Latch;
 use crate::pages::{Page, PageData, PageId};
-use anyhow::{anyhow, Result};
+use crate::printdbg;
+use anyhow::{bail, ensure, Result};
 use arrayvec::ArrayVec;
 use leaf_value::LeafValue;
 use std::fmt::Debug;
@@ -52,13 +54,14 @@ pub struct IndexPage {
 
 impl IndexPage {
     fn mark_dirty(&mut self) {
-        self.data_mut().is_dirty = true;
+        unsafe { self.data.as_mut().unwrap() }.is_dirty = true;
     }
 
     pub fn insert(&mut self, key: Key, value: LeafValue) -> Result<()> {
-        if self.is_full() {
-            return Err(anyhow!("Page is full"));
-        }
+        ensure!(
+            !self.is_full(),
+            Error::Internal("Out of space in Index page".into())
+        );
 
         let data = self.data_mut();
 
@@ -68,7 +71,7 @@ impl IndexPage {
                 data.values.remove(pos);
                 pos
             }
-            Ok(_) => return Err(anyhow!("Key already exists")),
+            Ok(_) => bail!(Error::TupleExists),
             Err(pos) => pos,
         };
 
@@ -78,8 +81,6 @@ impl IndexPage {
             PageType::Inner => data.values.insert(pos + 1, value),
             PageType::Invalid => unreachable!("Page type was not initialized properly"),
         }
-
-        self.mark_dirty();
 
         Ok(())
     }
@@ -91,14 +92,13 @@ impl IndexPage {
             Ok(pos) => {
                 let value = self.data_mut().values.get_mut(pos).unwrap();
                 if value.is_deleted {
-                    Err(anyhow!("Key does not exist"))
+                    bail!(Error::TupleNotFound)
                 } else {
                     value.is_deleted = true;
-                    self.mark_dirty();
-                    Ok(())
-                }
+                };
+                Ok(())
             }
-            Err(_) => Err(anyhow!("Key does not exist")),
+            Err(_) => bail!(Error::TupleNotFound),
         }
     }
 
@@ -168,9 +168,6 @@ impl IndexPage {
         new_page.set_next_page_id(self.get_next_page_id());
         self.set_next_page_id(new_page.get_page_id());
 
-        self.mark_dirty();
-        new_page.mark_dirty();
-
         (new_page, median)
     }
 
@@ -197,15 +194,13 @@ impl IndexPage {
         new_page.set_next_page_id(self.get_next_page_id());
         self.set_next_page_id(new_page.get_page_id());
 
-        self.mark_dirty();
-        new_page.mark_dirty();
-
         (new_page, median)
     }
 }
 
 impl<'a> From<&'a Page> for IndexPage {
     fn from(page: &'a Page) -> IndexPage {
+        printdbg!("converting page to index page");
         assert_eq!(
             std::mem::size_of::<IndexPageData>(),
             std::mem::size_of::<PageData>()
@@ -221,6 +216,7 @@ impl<'a> From<&'a Page> for IndexPage {
 
 impl<'a> From<&'a mut Page> for IndexPage {
     fn from(page: &'a mut Page) -> IndexPage {
+        printdbg!("converting page to mut index page");
         assert_eq!(
             std::mem::size_of::<IndexPageData>(),
             std::mem::size_of::<PageData>()
@@ -250,6 +246,7 @@ impl IndexPage {
     }
 
     pub fn data_mut(&mut self) -> &mut IndexPageData {
+        self.mark_dirty();
         unsafe { self.data.as_mut().unwrap() }
     }
 
@@ -259,7 +256,6 @@ impl IndexPage {
 
     pub fn set_type(&mut self, page_type: PageType) {
         self.data_mut().page_type = page_type;
-        self.mark_dirty();
     }
 
     pub fn get_type(&self) -> &PageType {

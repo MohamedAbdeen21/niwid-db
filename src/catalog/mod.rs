@@ -11,7 +11,7 @@ use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use versioned_map::VersionedMap;
@@ -20,10 +20,10 @@ use versioned_map::VersionedMap;
 pub const CATALOG_PAGE: PageId = 2;
 pub const CATALOG_NAME: &str = "__CATALOG__";
 
-pub type ArcCatalog = Arc<Mutex<Catalog>>;
+pub type ArcCatalog = Arc<RwLock<Catalog>>;
 
 lazy_static! {
-    static ref CATALOG: ArcCatalog = Arc::new(Mutex::new(Catalog::new(
+    static ref CATALOG: ArcCatalog = Arc::new(RwLock::new(Catalog::new(
         BufferPoolManager::get(),
         TransactionManager::get()
     )));
@@ -216,7 +216,7 @@ impl Catalog {
         }
     }
 
-    pub fn get_table(&mut self, table_name: &str, txn: Option<TxnId>) -> Option<&Table> {
+    pub fn get_table(&self, table_name: &str, txn: Option<TxnId>) -> Option<&Table> {
         self.tables
             .get(txn, &table_name.to_string())
             .map(|(_, table)| table)
@@ -273,6 +273,6 @@ pub mod tests {
     use super::*;
 
     pub fn test_arc_catalog(bpm: ArcBufferPool, txn_manager: ArcTransactionManager) -> ArcCatalog {
-        Arc::new(Mutex::new(Catalog::new(bpm, txn_manager)))
+        Arc::new(RwLock::new(Catalog::new(bpm, txn_manager)))
     }
 }

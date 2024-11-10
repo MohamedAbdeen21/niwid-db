@@ -117,7 +117,7 @@ impl LogicalPlanBuilder {
 
         let schema = self
             .catalog
-            .lock()
+            .read()
             .get_schema(&table_name, txn_id)
             .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
 
@@ -214,7 +214,7 @@ impl LogicalPlanBuilder {
             .value
             .clone();
 
-        if self.catalog.lock().get_table(&table_name, txn_id).is_none() {
+        if self.catalog.read().get_table(&table_name, txn_id).is_none() {
             return Err(anyhow!("Table {} does not exist", table_name));
         }
 
@@ -237,15 +237,17 @@ impl LogicalPlanBuilder {
             .map(|n| n.0.first().unwrap().value.clone())
             .collect();
 
+        let catalog = self.catalog.read();
+
         if !if_exists {
             let non_existant: Vec<String> = names
                 .iter()
-                .filter(|&name| self.catalog.lock().get_table(name, txn_id).is_none())
+                .filter(|&name| catalog.get_table(name, txn_id).is_none())
                 .cloned()
                 .collect();
 
             if !non_existant.is_empty() {
-                return Err(anyhow!("Table(s) {} don't exist", non_existant.join(", ")));
+                bail!("Table(s) {} don't exist", non_existant.join(", "));
             }
         }
 
@@ -316,7 +318,7 @@ impl LogicalPlanBuilder {
     ) -> Result<LogicalPlan> {
         let input = self.build_query(source, txn_id)?.unwrap();
         let table_name = table_name.0.first().unwrap().value.clone();
-        let schema = self.catalog.lock().get_schema(&table_name, txn_id).unwrap();
+        let schema = self.catalog.read().get_schema(&table_name, txn_id).unwrap();
 
         let input_schema = input.schema();
         let input_types: Vec<_> = input_schema.fields.iter().map(|f| &f.ty).collect();
@@ -369,7 +371,7 @@ impl LogicalPlanBuilder {
 
         let schema = self
             .catalog
-            .lock()
+            .read()
             .get_schema(&table_name, txn_id)
             .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
 
@@ -446,7 +448,7 @@ impl LogicalPlanBuilder {
 
                 let mut left_schema = self
                     .catalog
-                    .lock()
+                    .read()
                     .get_schema(&left_name, txn_id)
                     .ok_or(anyhow!("Table {} does not exist", left_name))?;
 
@@ -472,7 +474,7 @@ impl LogicalPlanBuilder {
                             let right_name = name.0.first().unwrap().value.clone();
                             let mut right_schema = self
                                 .catalog
-                                .lock()
+                                .read()
                                 .get_schema(&right_name, txn_id)
                                 .ok_or(anyhow!("Table {} does not exist", right_name))?;
 
@@ -503,12 +505,12 @@ impl LogicalPlanBuilder {
                                         ))
                                     }
                                     JoinConstraint::None => {
-                                        bail!(Error::Expected("None".into(), "ON or USING".into()))
+                                        bail!(Error::Expected("ON or USING".into(), "None".into()))
                                     }
                                     JoinConstraint::Natural => {
                                         bail!(Error::Expected(
-                                            "Natural".into(),
-                                            "ON or USING".into()
+                                            "ON or USING".into(),
+                                            "Natural".into()
                                         ))
                                     }
                                 },

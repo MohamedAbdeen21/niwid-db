@@ -1,10 +1,11 @@
 use crate::catalog::{ArcCatalog, Catalog};
+use crate::errors::Error;
 use crate::execution::result_set::ResultSet;
 use crate::sql::logical_plan::optimizer::optimize_logical_plan;
 use crate::sql::logical_plan::LogicalPlanBuilder;
 use crate::sql::parser::parse;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 
 pub struct Context {
     catalog: ArcCatalog,
@@ -64,25 +65,23 @@ impl Context {
         self.txn_manager.lock().commit(self.active_txn.unwrap())?;
 
         if self.catalog_changed {
-            self.catalog.lock().table().commit_txn()?;
+            self.catalog.write().table().commit_txn()?;
             self.catalog_changed = false;
         }
 
-        self.catalog.lock().commit(self.active_txn.unwrap())?;
+        self.catalog.write().commit(self.active_txn.unwrap())?;
         self.active_txn = None;
 
         Ok(())
     }
 
     pub fn rollback_txn(&mut self) -> Result<()> {
-        if self.active_txn.is_none() {
-            return Err(anyhow!("Context: No active transaction"));
-        }
+        ensure!(self.active_txn.is_some(), Error::NoActiveTransaction);
 
         self.txn_manager.lock().rollback(self.active_txn.unwrap())?;
 
         self.catalog
-            .lock()
+            .write()
             .tables
             .rollback(self.active_txn.unwrap());
         self.active_txn = None;

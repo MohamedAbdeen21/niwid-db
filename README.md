@@ -71,3 +71,5 @@ ROLLBACK; -- Discards the update
 ## Contributing
 
 Contributions are always welcome! Feel free to submit issues or pull requests.
+
+And yes, this README is written by ChatGPT.

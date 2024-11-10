@@ -1,4 +1,5 @@
 use crate::buffer_pool::ArcBufferPool;
+use crate::errors::Error;
 use crate::indexes::b_plus_tree::btree::BPlusTree;
 use crate::pages::indexes::b_plus_tree::Key;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
@@ -9,7 +10,7 @@ use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{Str, StrAddr, Types, ValueFactory};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 
 pub mod table_iterator;
 
@@ -240,10 +241,10 @@ impl Table {
     }
 
     pub fn start_txn(&mut self, txn_id: TxnId) -> Result<()> {
-        printdbg!("Table {} Starting txn {}", self.name, txn_id);
+        printdbg!("Table {} starting txn {}", self.name, txn_id);
         if let Some(current) = self.active_txn {
             if txn_id != current {
-                return Err(anyhow!("Another transaction is active"));
+                bail!(Error::TransactionActive);
             }
         } else {
             self.active_txn = Some(txn_id);
@@ -303,7 +304,7 @@ impl Table {
         Ok(())
     }
 
-    pub fn check_uniqueness(&mut self, tuple: &Tuple) -> Result<Option<Key>> {
+    pub fn check_uniqueness(&self, tuple: &Tuple) -> Result<Option<Key>> {
         for (i, field) in self.schema.fields.iter().enumerate() {
             if field.constraints.unique {
                 // TODO:
