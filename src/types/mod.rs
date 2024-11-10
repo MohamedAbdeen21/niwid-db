@@ -180,6 +180,13 @@ impl Value {
             (l, r) => unimplemented!("{} / {}", l, r),
         }
     }
+
+    pub fn and(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Value::Bool(Bool(*l && *r)),
+            (l, r) => unimplemented!("{} && {}", l, r),
+        }
+    }
 }
 
 impl PartialOrd for Value {

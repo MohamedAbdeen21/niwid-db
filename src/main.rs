@@ -63,12 +63,13 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
             printdbg!("Query: {}", query);
             match ctx.execute_sql(query.clone()) {
                 Ok(result) => {
-                    if !result.is_empty() {
+                    if !result.is_empty() || !result.get_info().is_empty() {
                         let _ = writer.write_all(result.print().as_bytes()).await;
                     }
                 }
                 Err(e) => {
                     let _ = writer.write_all(format!("Error: {}\n", e).as_bytes()).await;
+                    panic!("{:?}", e);
                 }
             }
 

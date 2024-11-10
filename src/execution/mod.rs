@@ -483,6 +483,7 @@ impl BinaryExpr {
             BinaryOperator::Multiply => left.mul(right),
             BinaryOperator::Divide => left.div(right),
             BinaryOperator::Eq => lit!(Bool, left.eq(right).to_string()),
+            BinaryOperator::And => lit!(Bool, left.and(right).to_string()),
             e => todo!("{:?}", e),
         }
     }

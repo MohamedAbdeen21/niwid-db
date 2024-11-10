@@ -141,10 +141,16 @@ impl ResultSet {
 
     pub fn print(&self) -> String {
         let mut buf = String::new();
+
         if !self.info.is_empty() {
             buf.push_str(&self.info);
             buf.push('\n');
         }
+
+        if self.is_empty() {
+            return buf;
+        }
+
         let col_widths: Vec<usize> = self
             .fields()
             .iter()

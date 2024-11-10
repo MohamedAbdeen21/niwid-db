@@ -393,6 +393,16 @@ pub mod tests {
         assert_plan(&result, expected_plan);
         assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
 
+        let expected_plan = r#"Logical Plan:
+-- Projection: [#a,#b]
+---- IndexScan: test Scan( a range [1,5] ) [#a,#b]"#;
+
+        let result =
+            ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE (a BETWEEN 1 AND 5)")?;
+        assert_plan(&result, expected_plan);
+        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
+        assert_eq!(result.rows()[1][0], lit!(UInt, "3"));
+
         Ok(())
     }
 }

@@ -18,10 +18,10 @@ use anyhow::{anyhow, bail, Result};
 
 use crate::catalog::ArcCatalog;
 use crate::errors::Error;
-use crate::lit;
 use crate::tuple::schema::Schema;
 use crate::txn_manager::TxnId;
 use crate::types::{Types, Value, ValueFactory};
+use crate::{lit, printdbg};
 
 pub struct LogicalPlanBuilder {
     catalog: ArcCatalog,
@@ -81,7 +81,7 @@ impl LogicalPlanBuilder {
             Statement::Delete(SqlDelete {
                 from, selection, ..
             }) => self.build_delete(from, selection, txn_id),
-            e => unimplemented!("{}", e),
+            e => bail!(Error::Unimplemented(format!("{:?}", e))),
         }
     }
 
@@ -135,14 +135,41 @@ impl LogicalPlanBuilder {
         expr: BinaryExpr,
     ) -> Result<LogicalPlan> {
         let BinaryExpr { left, op, right } = expr;
-        let (col, value, lhs) = match (left, right)  {
-            (LogicalExpr::Column(col), LogicalExpr::Literal(value)) => (col, value, true) ,
-            (LogicalExpr::Literal(value), LogicalExpr::Column(col)) => (col, value, false),
-            _ => return Err(anyhow!("Invalid index scan, must be of form {{col}} {{op}} {{value}} or {{value}} {{op}} {{col}}"))
+        let (col, lvalue, rvalue, lhs) = match (left, right)  {
+            (LogicalExpr::Column(col), LogicalExpr::Literal(value)) => (col, value, None, true) ,
+            (LogicalExpr::Literal(value), LogicalExpr::Column(col)) => (col, value, None, false),
+            // BETWEEN
+            (LogicalExpr::BinaryExpr(lexpr), LogicalExpr::BinaryExpr(rexpr)) if matches!(op, BinaryOperator::And) => {
+                let column = match lexpr.left {
+                    LogicalExpr::Column(col) => col,
+                    _ => unreachable!()
+                };
+                let left = match lexpr.right {
+                    LogicalExpr::Literal(value) => value,
+                    _ => unreachable!()
+                };
+
+                let right = match rexpr.right {
+                    LogicalExpr::Literal(value) => value,
+                    _ => unreachable!()
+                };
+                ( column, left, Some(right), true)
+            }
+            _ => return Err(anyhow!("Invalid index scan, must be of form {{col}} {{op}} {{value}} or {{value}} {{op}} {{col}} or {{col}} BETWEEN {{expr}}"))
         };
 
-        if !matches!(value, Value::UInt(_)) {
-            return Err(anyhow!("Index scan only supported on UInt"));
+        if let Some(ref rv) = rvalue {
+            if !matches!(rv, Value::UInt(_)) {
+                bail!(Error::Unsupported(
+                    "Index scan only supported on UInt".into()
+                ));
+            }
+        }
+
+        if !matches!(lvalue, Value::UInt(_)) {
+            bail!(Error::Unsupported(
+                "Index scan only supported on UInt".into()
+            ));
         }
 
         if let Some(field) = schema.fields.iter().find(|f| f.name == col) {
@@ -153,22 +180,26 @@ impl LogicalPlanBuilder {
             return Err(anyhow!("Column {} not found in table {}", col, table_name));
         }
 
-        let value = value.u32();
+        let lvalue = Some(lvalue.u32());
+        let rvalue = rvalue.map(|v| v.u32());
 
         let (left, lincl, right, rincl) = match op {
-            BinaryOperator::Eq => (Some(value), true, Some(value), true),
+            BinaryOperator::Eq => (lvalue, true, lvalue, true),
             // col > value or value < col
-            BinaryOperator::Gt if lhs => (Some(value), false, None, false),
-            BinaryOperator::Lt if !lhs => (Some(value), false, None, false),
+            BinaryOperator::Gt if lhs => (lvalue, false, None, false),
+            BinaryOperator::Lt if !lhs => (lvalue, false, None, false),
             // value > col or col < value
-            BinaryOperator::Gt if !lhs => (None, false, Some(value), false),
-            BinaryOperator::Lt if lhs => (None, false, Some(value), false),
+            BinaryOperator::Gt if !lhs => (None, false, lvalue, false),
+            BinaryOperator::Lt if lhs => (None, false, lvalue, false),
             // col >= value or value =< col
-            BinaryOperator::GtEq if lhs => (Some(value), true, None, false),
-            BinaryOperator::LtEq if !lhs => (Some(value), true, None, false),
+            BinaryOperator::GtEq if lhs => (lvalue, true, None, false),
+            BinaryOperator::LtEq if !lhs => (lvalue, true, None, false),
             // value >= col or col <= value
-            BinaryOperator::GtEq if !lhs => (None, false, Some(value), true),
-            BinaryOperator::LtEq if lhs => (None, false, Some(value), true),
+            BinaryOperator::GtEq if !lhs => (None, false, lvalue, true),
+            BinaryOperator::LtEq if lhs => (None, false, lvalue, true),
+
+            BinaryOperator::And => (lvalue, true, rvalue, true),
+
             e => todo!("not supported {:?}", e),
         };
 
@@ -261,6 +292,8 @@ impl LogicalPlanBuilder {
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
         let root = self.build_initial_plan(statement, txn_id)?;
+
+        printdbg!("Initial plan: {}", root.print());
 
         Ok(LogicalPlan::Explain(Box::new(Explain::new(root, analyze))))
     }
@@ -748,6 +781,32 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
             ))
         }
         Expr::Value(SqlValue::Null) => Ok(LogicalExpr::Literal(Value::Null)),
-        e => bail!(Error::Unsupported(format!("{}", e))),
+        Expr::Between {
+            expr,
+            negated,
+            low,
+            high,
+        } => {
+            if *negated {
+                bail!(Error::Unsupported("NOT BETWEEN in index search".into()));
+            };
+            let column = build_expr(expr)?;
+            let left = LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(
+                column.clone(),
+                BinaryOperator::GtEq,
+                build_expr(low)?,
+            )));
+            let right = LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(
+                column.clone(),
+                BinaryOperator::LtEq,
+                build_expr(high)?,
+            )));
+            Ok(LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(
+                left,
+                BinaryOperator::And,
+                right,
+            ))))
+        }
+        e => bail!(Error::Unsupported(format!("Expr: {}", e))),
     }
 }
