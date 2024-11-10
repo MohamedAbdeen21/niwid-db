@@ -23,8 +23,12 @@ async fn main() -> Result<()> {
 async fn handle_client(socket: TcpStream, client_id: usize) {
     let mut ctx = Context::default();
     let (reader, mut writer) = socket.into_split();
+
     let mut reader = BufReader::new(reader);
     let mut buffer = String::new();
+    let mut query = String::new();
+
+    let mut multi_line = false;
 
     println!("Client {} connected!", client_id);
     let _ = writer
@@ -33,7 +37,9 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
 
     loop {
         printdbg!("Awaiting query...");
-        let _ = writer.write_all("> ".as_bytes()).await;
+        if !multi_line {
+            let _ = writer.write_all("> ".as_bytes()).await;
+        }
 
         buffer.clear();
         let bytes_read = reader.read_line(&mut buffer).await.unwrap();
@@ -45,25 +51,33 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
             break;
         }
 
-        let query = buffer.trim();
-        printdbg!("Query: {}", query);
-        if query.eq_ignore_ascii_case("quit") {
+        if buffer.trim().eq_ignore_ascii_case("quit") {
             let _ = writer
                 .write_all(format!("Goodbye, Client {}!\n", client_id).as_bytes())
                 .await;
             break;
         }
 
-        match ctx.execute_sql(query) {
-            Ok(result) => {
-                if result.is_empty() {
-                    continue;
+        if buffer.trim().ends_with(";") {
+            query.push_str(&buffer[..buffer.len() - 1]);
+            printdbg!("Query: {}", query);
+            match ctx.execute_sql(query.clone()) {
+                Ok(result) => {
+                    if !result.is_empty() {
+                        let _ = writer.write_all(result.print().as_bytes()).await;
+                    }
                 }
-                let _ = writer.write_all(result.print().as_bytes()).await;
+                Err(e) => {
+                    let _ = writer.write_all(format!("Error: {}\n", e).as_bytes()).await;
+                }
             }
-            Err(e) => {
-                let _ = writer.write_all(format!("Error: {}\n", e).as_bytes()).await;
-            }
+
+            query.clear();
+            multi_line = false;
+        } else {
+            multi_line = true;
+            query.push_str(&buffer);
+            let _ = writer.write_all("... ".as_bytes()).await;
         }
     }
 }
