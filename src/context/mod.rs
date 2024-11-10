@@ -377,11 +377,21 @@ pub mod tests {
 
         let expected_plan = r#"Logical Plan:
 -- Projection: [#a,#b]
----- IndexScan: test Scan( a range (,4] ) [#a,#b]"#;
+---- IndexScan: test Scan( a range (,3) ) [#a,#b]"#;
 
-        let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a <= 4;")?;
+        let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a < 3;")?;
         assert_plan(&result, expected_plan);
-        assert_result_sample(&result);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
+
+        let expected_plan = r#"Logical Plan:
+-- Projection: [#a,#b]
+---- IndexScan: test Scan( a range (1,) ) [#a,#b]"#;
+
+        let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a > 1;")?;
+        assert_plan(&result, expected_plan);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.rows()[0][0], lit!(UInt, "3"));
 
         let expected_plan = r#"Logical Plan:
 -- Projection: [#a,#b]
@@ -391,17 +401,17 @@ pub mod tests {
         let result =
             ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a >= 1 WHERE a != 3")?;
         assert_plan(&result, expected_plan);
+        assert_eq!(result.len(), 1);
         assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
 
         let expected_plan = r#"Logical Plan:
 -- Projection: [#a,#b]
----- IndexScan: test Scan( a range [1,5] ) [#a,#b]"#;
+---- IndexScan: test Scan( a range [1,3] ) [#a,#b]"#;
 
         let result =
-            ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE (a BETWEEN 1 AND 5)")?;
+            ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE (a BETWEEN 1 AND 3)")?;
         assert_plan(&result, expected_plan);
-        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
-        assert_eq!(result.rows()[1][0], lit!(UInt, "3"));
+        assert_result_sample(&result);
 
         Ok(())
     }

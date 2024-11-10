@@ -128,8 +128,14 @@ impl Executable for IndexScan {
         let mut tuple_ids = vec![];
 
         let scanner = |(key, tuple_id): &(u32, TupleId)| {
+            if let Some(from) = self.from {
+                if *key == from && !self.include_from {
+                    return Ok(());
+                }
+            }
+
             if let Some(to) = self.to {
-                if *key > to {
+                if *key > to || (*key == to && !self.include_to) {
                     return Err(anyhow!("End of loop"));
                 };
             }
