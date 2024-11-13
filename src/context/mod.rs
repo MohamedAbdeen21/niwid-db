@@ -92,7 +92,7 @@ impl Context {
     pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
         let statment = parse(sql)?;
 
-        // println!("SQL: {:?}", statment);
+        println!("SQL: {:?}", statment);
 
         let plan_builder = LogicalPlanBuilder::new(self.catalog.clone());
 

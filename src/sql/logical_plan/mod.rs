@@ -596,7 +596,22 @@ impl LogicalPlanBuilder {
                 BinaryOperator::Eq,
                 true.into(),
             )),
-            _ => todo!(),
+            Expr::Identifier(Ident { value, .. })
+                if root
+                    .schema()
+                    .fields
+                    .iter()
+                    .find(|field| field.name == value)
+                    .map(|f| matches!(f.ty, Types::Bool))
+                    .unwrap_or(false) =>
+            {
+                Ok(BooleanBinaryExpr::new(
+                    LogicalExpr::Column(value.clone()),
+                    BinaryOperator::Eq,
+                    true.into(),
+                ))
+            }
+            e => bail!(Error::Unimplemented(format!("Expr: {:?}", e))),
         });
 
         if let Some(filter) = filters {
@@ -738,6 +753,7 @@ impl From<Expr> for LogicalExpr {
                 let (ty, v) = match value {
                     SqlValue::Number(v, _) => (Types::UInt, v),
                     SqlValue::SingleQuotedString(s) => (Types::Str, s),
+                    SqlValue::Boolean(b) => (Types::Bool, b.to_string()),
                     _ => unimplemented!(),
                 };
 
@@ -807,6 +823,7 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
                 right,
             ))))
         }
+        Expr::Value(SqlValue::Boolean(b)) => Ok(LogicalExpr::Literal(lit!(Bool, b.to_string()))),
         e => bail!(Error::Unsupported(format!("Expr: {}", e))),
     }
 }

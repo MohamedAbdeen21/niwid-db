@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
     }
 }
 
+// TODO: Handle comment strings
 async fn handle_client(socket: TcpStream, client_id: usize) {
     let mut ctx = Context::default();
     let (reader, mut writer) = socket.into_split();
