@@ -43,3 +43,20 @@ macro_rules! get_caller_name {
         }
     }};
 }
+
+#[macro_export]
+macro_rules! is_boolean_op {
+    ($op:ident) => {
+        matches!(
+            $op,
+            BinaryOperator::And
+                | BinaryOperator::Or
+                | BinaryOperator::Eq
+                | BinaryOperator::NotEq
+                | BinaryOperator::Gt
+                | BinaryOperator::Lt
+                | BinaryOperator::GtEq
+                | BinaryOperator::LtEq
+        )
+    };
+}

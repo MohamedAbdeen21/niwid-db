@@ -21,7 +21,7 @@ use crate::errors::Error;
 use crate::tuple::schema::Schema;
 use crate::txn_manager::TxnId;
 use crate::types::{Types, Value, ValueFactory};
-use crate::{lit, printdbg};
+use crate::{is_boolean_op, lit, printdbg};
 
 pub struct LogicalPlanBuilder {
     catalog: ArcCatalog,
@@ -135,6 +135,13 @@ impl LogicalPlanBuilder {
         expr: BinaryExpr,
     ) -> Result<LogicalPlan> {
         let BinaryExpr { left, op, right } = expr;
+
+        if !is_boolean_op!(op) {
+            bail!(Error::Unsupported(
+                "Only supports boolean binary operators".into()
+            ));
+        };
+
         let (col, lvalue, rvalue, lhs) = match (left, right)  {
             (LogicalExpr::Column(col), LogicalExpr::Literal(value)) => (col, value, None, true) ,
             (LogicalExpr::Literal(value), LogicalExpr::Column(col)) => (col, value, None, false),
@@ -491,7 +498,9 @@ impl LogicalPlanBuilder {
                         LogicalExpr::BinaryExpr(expr) => {
                             self.build_index_scan(left_name.clone(), left_schema.clone(), *expr)
                         }
-                        _ => return Err(anyhow!("Prewhere must be a binary expression")),
+                        _ => bail!(Error::Unsupported(
+                            "Prewhere must be a binary expression".into()
+                        )),
                     }?
                 } else {
                     LogicalPlan::Scan(Scan::new(left_name.clone(), left_schema.clone()))
@@ -579,7 +588,7 @@ impl LogicalPlanBuilder {
     fn build_select(
         &self,
         body: Box<SetExpr>,
-        _limit: Option<Expr>,
+        limit: Option<Expr>,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
         let select = match *body {
@@ -626,9 +635,9 @@ impl LogicalPlanBuilder {
             }
         }
 
-        root = self.build_limit(root, _limit)?;
+        root = self.build_limit(root, limit)?;
 
-        let projections = self.build_projections(select.projection, &root.schema())?;
+        let projections = self.build_projections(select.projection, root.schema())?;
 
         root = LogicalPlan::Projection(Box::new(Projection::new(root, projections)));
 
@@ -652,7 +661,7 @@ impl LogicalPlanBuilder {
     fn build_projections(
         &self,
         projections: Vec<SelectItem>,
-        schema: &Schema,
+        schema: Schema,
     ) -> Result<Vec<LogicalExpr>> {
         projections
             .into_iter()
@@ -737,7 +746,10 @@ impl LogicalPlanBuilder {
                         Err(e) => vec![Err(e)],
                     }
                 }
-                e => todo!("{:?}", e),
+                e => vec![Err(anyhow!(Error::Unsupported(format!(
+                    "Select Item: {}",
+                    e
+                ))))],
             })
             .collect::<Result<Vec<_>>>()
     }
@@ -748,41 +760,42 @@ impl LogicalPlanBuilder {
         op: BinaryOperator,
         right: Expr,
     ) -> Result<BooleanBinaryExpr> {
-        if !matches!(
-            op,
-            BinaryOperator::And
-                | BinaryOperator::Or
-                | BinaryOperator::Eq
-                | BinaryOperator::NotEq
-                | BinaryOperator::Gt
-                | BinaryOperator::Lt
-                | BinaryOperator::GtEq
-                | BinaryOperator::LtEq
-        ) {
-            return Err(anyhow::anyhow!("Not a binary Operator: {:?}", op));
+        if !is_boolean_op!(op) {
+            bail!(Error::Unsupported(format!(
+                "Expected a boolean binary operator, got: {:?}",
+                op
+            )));
         }
 
-        Ok(BooleanBinaryExpr::new(left.into(), op, right.into()))
+        Ok(BooleanBinaryExpr::new(
+            left.try_into()?,
+            op,
+            right.try_into()?,
+        ))
     }
 }
 
 // convenience method
-impl From<Expr> for LogicalExpr {
-    fn from(expr: Expr) -> LogicalExpr {
+impl TryFrom<Expr> for LogicalExpr {
+    type Error = anyhow::Error;
+
+    fn try_from(expr: Expr) -> Result<LogicalExpr> {
         match expr {
-            Expr::Identifier(ident) => LogicalExpr::Column(ident.to_string()),
+            Expr::Identifier(ident) => Ok(LogicalExpr::Column(ident.to_string())),
             Expr::Value(value) => {
                 let (ty, v) = match value {
                     SqlValue::Number(v, _) => (Types::UInt, v),
                     SqlValue::SingleQuotedString(s) => (Types::Str, s),
                     SqlValue::Boolean(b) => (Types::Bool, b.to_string()),
-                    _ => unimplemented!(),
+                    _ => bail!(Error::Unsupported("Unsupported value type".into())),
                 };
 
-                LogicalExpr::Literal(ValueFactory::from_string(&ty, &v))
+                Ok(LogicalExpr::Literal(ValueFactory::from_string(&ty, &v)))
             }
-
-            e => unimplemented!("{:?}", e),
+            e => bail!(Error::Unimplemented(format!(
+                "Casting Expr {} to LogicalExpr",
+                e
+            ))),
         }
     }
 }
