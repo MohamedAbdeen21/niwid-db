@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::BufReader;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
@@ -27,9 +28,6 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
 
     let mut reader = BufReader::new(reader);
     let mut buffer = String::new();
-    let mut query = String::new();
-
-    let mut multi_line = false;
 
     println!("Client {} connected!", client_id);
     let _ = writer
@@ -38,12 +36,12 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
 
     loop {
         printdbg!("Awaiting query...");
-        if !multi_line {
-            let _ = writer.write_all("> ".as_bytes()).await;
-        }
+        let _ = writer.write_all("> ".as_bytes()).await;
 
         buffer.clear();
         let bytes_read = reader.read_line(&mut buffer).await.unwrap();
+
+        buffer = buffer.trim().to_string();
 
         if bytes_read == 0 {
             let _ = writer
@@ -52,17 +50,53 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
             break;
         }
 
-        if buffer.trim().eq_ignore_ascii_case("quit") {
+        if buffer.eq_ignore_ascii_case("quit") {
             let _ = writer
                 .write_all(format!("Goodbye, Client {}!\n", client_id).as_bytes())
                 .await;
             break;
         }
 
+        if buffer.is_empty() {
+            continue;
+        } else if buffer.starts_with("--") || buffer.starts_with("/*") {
+            skip_comments(&mut buffer, &mut reader).await;
+        } else {
+            execute_query(&mut buffer, &mut ctx, &mut reader, &mut writer).await;
+        }
+    }
+}
+
+async fn skip_comments(buffer: &mut String, reader: &mut BufReader<OwnedReadHalf>) {
+    if buffer.trim_start().starts_with("--") {
+        buffer.clear();
+    }
+    if buffer.contains("*/") {
+        buffer.clear();
+    } else {
+        while !buffer.contains("*/") {
+            buffer.clear();
+            if reader.read_line(buffer).await.unwrap_or(0) == 0 {
+                break;
+            }
+        }
+        buffer.clear();
+    }
+}
+
+async fn execute_query(
+    buffer: &mut String,
+    ctx: &mut Context,
+    reader: &mut BufReader<OwnedReadHalf>,
+    writer: &mut OwnedWriteHalf,
+) {
+    let mut query = String::new();
+
+    loop {
         if buffer.trim().ends_with(";") {
             query.push_str(&buffer[..buffer.len() - 1]);
             printdbg!("Query: {}", query);
-            match ctx.execute_sql(query.clone()) {
+            return match ctx.execute_sql(query.clone()) {
                 Ok(result) => {
                     if !result.is_empty() || !result.get_info().is_empty() {
                         let _ = writer.write_all(result.print().as_bytes()).await;
@@ -72,14 +106,12 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
                     let _ = writer.write_all(format!("Error: {}\n", e).as_bytes()).await;
                     panic!("{:?}", e);
                 }
-            }
-
-            query.clear();
-            multi_line = false;
+            };
         } else {
-            multi_line = true;
-            query.push_str(&buffer);
+            query.push_str(buffer);
+            buffer.clear();
             let _ = writer.write_all("... ".as_bytes()).await;
+            let _ = reader.read_line(buffer).await.unwrap();
         }
     }
 }
