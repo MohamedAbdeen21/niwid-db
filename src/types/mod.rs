@@ -528,3 +528,35 @@ impl ValueFactory {
         Value::Null
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Types;
+    use sqllogictest::ColumnType;
+
+    impl ColumnType for Types {
+        fn from_char(value: char) -> Option<Self> {
+            match value {
+                'I' => Some(Types::Int),
+                'S' => Some(Types::Str),
+                'U' => Some(Types::UInt),
+                'B' => Some(Types::Bool),
+                'F' => Some(Types::Float),
+                'C' => Some(Types::Char),
+                _ => None,
+            }
+        }
+
+        fn to_char(&self) -> char {
+            match self {
+                Types::Int => 'I',
+                Types::Str => 'S',
+                Types::UInt => 'U',
+                Types::Bool => 'B',
+                Types::Float => 'F',
+                Types::Char => 'C',
+                Types::StrAddr | Types::Null => unreachable!(),
+            }
+        }
+    }
+}

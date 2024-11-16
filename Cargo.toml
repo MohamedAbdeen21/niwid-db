@@ -17,4 +17,5 @@ arrayvec = "0.7.6"
 
 [dev-dependencies]
 rand = "0.8.5"
+sqllogictest = "0.22.0"
 uuid = {version = "1.10.0", features = ["fast-rng", "v4", "macro-diagnostics"]}

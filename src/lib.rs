@@ -8,6 +8,8 @@ mod indexes;
 mod latch;
 mod pages;
 mod sql;
+#[cfg(test)]
+mod sqllogictest;
 mod table;
 pub mod tuple;
 mod txn_manager;
