@@ -164,6 +164,9 @@ impl Value {
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l * *r as i32)),
             (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 * r)),
             (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l * *r as f32)),
+            (Value::Float(Float(l)), Value::UInt(UInt(r))) => Value::Float(Float(l * *r as f32)),
+            (Value::UInt(UInt(l)), Value::Float(r)) => Value::Float(Float(*l as f32 * r.0)),
+            (Value::Null, _) | (_, Value::Null) => Value::Null,
             (l, r) => unimplemented!("{} * {}", l, r),
         }
     }
@@ -185,6 +188,13 @@ impl Value {
         match (self, other) {
             (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Value::Bool(Bool(*l && *r)),
             (l, r) => unimplemented!("{} && {}", l, r),
+        }
+    }
+
+    pub fn or(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Value::Bool(Bool(*l || *r)),
+            (l, r) => unimplemented!("{} || {}", l, r),
         }
     }
 }

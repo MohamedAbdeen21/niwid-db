@@ -2,7 +2,7 @@ statement error Table test does not exist
 SELECT a FROM test;
 
 statement ok
-CREATE TABLE test (a UINT, b FLOAT, c INT);
+CREATE TABLE test (a UINT, b FLOAT, c INT, d boolean);
 
 statement error Table test already exists
 CREATE TABLE test (d TEXT);
@@ -11,16 +11,22 @@ statement ok
 SELECT a FROM test;
 
 statement ok
-INSERT INTO test VALUES (1, 2.3, -4);
+INSERT INTO test VALUES (1, 2.3, -4, true);
 
-statement error Type mismatch: Expected \[UInt, Float, Int\], but got \[Int, Float, Int\].
-INSERT INTO test VALUES (-1, 2.3, -4);
+statement error Type mismatch: Expected \[UInt, Float, Int, Bool\], but got \[Int, Float, Int, Bool\].
+INSERT INTO test VALUES (-1, 2.3, -4, false);
 
 statement ok
-INSERT INTO test VALUES (5, 6.789, 10);
+INSERT INTO test VALUES (5, 6.789, 10, false);
 
-query UFI
-SELECT a, b, c FROM test;
+query UFIB
+SELECT a, b, c, d FROM test;
 ----
-1 2.3 -4
-5 6.789 10
+1 2.3 -4 true
+5 6.789 10 false
+
+query UFIB
+SELECT a + 1, b * 2, c - 1, d OR false FROM test;
+----
+2 4.6 -5 true
+6 13.578 9 false
