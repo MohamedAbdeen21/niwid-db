@@ -4,7 +4,7 @@ pub mod plan;
 
 use expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use plan::{
-    CreateTable, Delete, DropTables, Explain, Filter, IndexScan, Insert, Join, LogicalPlan,
+    CreateTable, Delete, DropTables, Explain, Filter, IndexScan, Insert, Join, Limit, LogicalPlan,
     Projection, Scan, Truncate, Update, Values,
 };
 use sqlparser::ast::{
@@ -335,7 +335,7 @@ impl LogicalPlanBuilder {
         let input = match *body {
             SetExpr::Select(_) => self.build_select(body, limit, txn_id)?,
             SetExpr::Values(SqlValues { rows, .. }) => self.build_values(rows)?,
-            _ => unimplemented!(),
+            e => bail!(Error::Unsupported(format!("Query: {}", e))),
         };
 
         Ok(Some(input))
@@ -626,8 +626,35 @@ impl LogicalPlanBuilder {
             }
         }
 
-        let columns = select
-            .projection
+        root = self.build_limit(root, _limit)?;
+
+        let projections = self.build_projections(select.projection, &root.schema())?;
+
+        root = LogicalPlan::Projection(Box::new(Projection::new(root, projections)));
+
+        Ok(root)
+    }
+
+    fn build_limit(&self, root: LogicalPlan, limit: Option<Expr>) -> Result<LogicalPlan> {
+        match limit {
+            Some(limit) => {
+                let l = match limit {
+                    Expr::Value(SqlValue::Number(s, _)) => Ok(lit!(UInt, s)),
+                    e => Err(anyhow!("Unsupported expression in LIMIT: {}", e)),
+                }?;
+
+                Ok(LogicalPlan::Limit(Box::new(Limit::new(root, l.u32()))))
+            }
+            None => Ok(root),
+        }
+    }
+
+    fn build_projections(
+        &self,
+        projections: Vec<SelectItem>,
+        schema: &Schema,
+    ) -> Result<Vec<LogicalExpr>> {
+        projections
             .into_iter()
             .flat_map(|e| match e {
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
@@ -639,8 +666,8 @@ impl LogicalPlanBuilder {
                 SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                     let name = ident.value.clone();
 
-                    if !root.schema().fields.iter().any(|f| f.name == name) {
-                        vec![if root.schema().is_qualified() {
+                    if !schema.fields.iter().any(|f| f.name == name) {
+                        vec![if schema.is_qualified() {
                             Err(anyhow!("Please use qualified column names {}", name))
                         } else {
                             Err(anyhow!("Column {} does not exist in table", name))
@@ -649,8 +676,7 @@ impl LogicalPlanBuilder {
                         vec![Ok(LogicalExpr::Column(ident.value.clone()))]
                     }
                 }
-                SelectItem::Wildcard(_) => root
-                    .schema()
+                SelectItem::Wildcard(_) => schema
                     .fields
                     .iter()
                     .map(|f| f.name.clone())
@@ -702,7 +728,7 @@ impl LogicalPlanBuilder {
                                 LogicalExpr::Column(ref name) => name,
                                 _ => unreachable!(),
                             };
-                            if !root.schema().fields.iter().any(|f| &f.name == name) {
+                            if !schema.fields.iter().any(|f| &f.name == name) {
                                 vec![Err(anyhow!("Column {} doesn't exist", name))]
                             } else {
                                 vec![Ok(expr)]
@@ -713,11 +739,7 @@ impl LogicalPlanBuilder {
                 }
                 e => todo!("{:?}", e),
             })
-            .collect::<Result<Vec<_>>>()?;
-
-        root = LogicalPlan::Projection(Box::new(Projection::new(root, columns)));
-
-        Ok(root)
+            .collect::<Result<Vec<_>>>()
     }
 
     fn parse_boolean_expr(
@@ -760,7 +782,7 @@ impl From<Expr> for LogicalExpr {
                 LogicalExpr::Literal(ValueFactory::from_string(&ty, &v))
             }
 
-            _ => unimplemented!(),
+            e => unimplemented!("{:?}", e),
         }
     }
 }

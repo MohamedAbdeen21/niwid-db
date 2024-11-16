@@ -59,6 +59,13 @@ impl ResultSet {
         }
     }
 
+    pub fn take(mut self, cap: u32) -> Self {
+        self.cols
+            .iter_mut()
+            .for_each(|col| col.truncate(cap as usize));
+        Self::new(self.schema.fields, self.cols)
+    }
+
     pub fn from_tuple(field: Vec<Field>, tuple: Vec<Value>, cap: usize) -> Self {
         let cols = (0..field.len())
             .map(|i| (0..cap).map(|_| tuple[i].clone()).collect())

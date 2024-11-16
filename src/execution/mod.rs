@@ -6,8 +6,8 @@ use crate::lit;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, Delete, DropTables, Filter, Identity, IndexScan, Insert, Join, LogicalPlan, Scan,
-    Truncate, Update, Values,
+    CreateTable, Delete, DropTables, Filter, Identity, IndexScan, Insert, Join, Limit, LogicalPlan,
+    Scan, Truncate, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::constraints::Constraints;
@@ -45,6 +45,7 @@ impl LogicalPlan {
             LogicalPlan::Delete(d) => d.execute(ctx),
             LogicalPlan::Empty => Ok(ResultSet::default()),
             LogicalPlan::Join(j) => j.execute(ctx),
+            LogicalPlan::Limit(l) => l.execute(ctx),
             LogicalPlan::IndexScan(i) => i.execute(ctx),
             LogicalPlan::StartTxn => {
                 ctx.start_txn()?;
@@ -61,6 +62,13 @@ impl LogicalPlan {
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.execute(ctx),
         }
+    }
+}
+
+impl Executable for Limit {
+    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+        let input = self.input.execute(ctx)?;
+        Ok(input.take(self.limit))
     }
 }
 

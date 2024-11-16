@@ -17,6 +17,7 @@ pub enum LogicalPlan {
     Truncate(Truncate),
     Update(Box<Update>),
     Delete(Box<Delete>),
+    Limit(Box<Limit>),
     IndexScan(IndexScan),
     StartTxn,
     CommitTxn,
@@ -56,6 +57,7 @@ impl LogicalPlan {
             LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
             LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
+            LogicalPlan::Limit(l) => l.print(indent),
             #[cfg(test)]
             LogicalPlan::Identity(_) => unreachable!(),
         }
@@ -80,9 +82,34 @@ impl LogicalPlan {
             LogicalPlan::StartTxn => Schema::default(),
             LogicalPlan::CommitTxn => Schema::default(),
             LogicalPlan::RollbackTxn => Schema::default(),
+            LogicalPlan::Limit(l) => l.schema(),
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.schema(),
         }
+    }
+}
+
+pub struct Limit {
+    pub input: LogicalPlan,
+    pub limit: u32,
+}
+
+impl Limit {
+    pub fn new(input: LogicalPlan, limit: u32) -> Self {
+        Self { input, limit }
+    }
+
+    pub fn schema(&self) -> Schema {
+        self.input.schema()
+    }
+
+    pub fn print(&self, indent: usize) -> String {
+        format!(
+            "{} Limit: {}\n{}",
+            "-".repeat(indent * 2),
+            self.limit,
+            self.input.print_indent(indent + 1)
+        )
     }
 }
 

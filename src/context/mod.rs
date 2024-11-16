@@ -92,7 +92,7 @@ impl Context {
     pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
         let statment = parse(sql)?;
 
-        println!("SQL: {:?}", statment);
+        // println!("SQL: {:?}", statment);
 
         let plan_builder = LogicalPlanBuilder::new(self.catalog.clone());
 
@@ -411,6 +411,18 @@ pub mod tests {
         let result =
             ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE (a BETWEEN 1 AND 3)")?;
         assert_plan(&result, expected_plan);
+        assert_result_sample(&result);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_limit() -> Result<()> {
+        let mut ctx = test_context();
+        ctx.execute_sql("CREATE TABLE test (a int, b int);")?;
+        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4), (5,6);")?;
+
+        let result = ctx.execute_sql("SELECT * FROM test LIMIT 2;")?;
         assert_result_sample(&result);
 
         Ok(())

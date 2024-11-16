@@ -195,7 +195,7 @@ mod tests {
             schema.to_sql()
         );
 
-        println!("SQL: {}", sql);
+        // println!("SQL: {}", sql);
 
         let statment = Parser::new(&GenericDialect)
             .try_with_sql(&sql)?
