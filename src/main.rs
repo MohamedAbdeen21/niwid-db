@@ -110,6 +110,7 @@ async fn execute_query(
         } else {
             query.push_str(buffer);
             buffer.clear();
+            buffer.push(' '); // avoid concating words in different lines
             let _ = writer.write_all("... ".as_bytes()).await;
             let _ = reader.read_line(buffer).await.unwrap();
         }

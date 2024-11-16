@@ -81,7 +81,7 @@ impl LogicalPlanBuilder {
             Statement::Delete(SqlDelete {
                 from, selection, ..
             }) => self.build_delete(from, selection, txn_id),
-            e => bail!(Error::Unimplemented(format!("{:?}", e))),
+            e => bail!(Error::Unimplemented(format!("Statement: {:?}", e))),
         }
     }
 
@@ -616,6 +616,23 @@ impl LogicalPlanBuilder {
             {
                 Ok(BooleanBinaryExpr::new(
                     LogicalExpr::Column(value.clone()),
+                    BinaryOperator::Eq,
+                    true.into(),
+                ))
+            }
+            Expr::CompoundIdentifier(idents) => {
+                let name = idents
+                    .into_iter()
+                    .map(|i| i.value.clone())
+                    .collect::<Vec<String>>()
+                    .join(".");
+
+                if !root.schema().fields.iter().any(|f| f.name == name) {
+                    return Err(anyhow!("Column {} does not exist", name));
+                }
+
+                Ok(BooleanBinaryExpr::new(
+                    LogicalExpr::Column(name),
                     BinaryOperator::Eq,
                     true.into(),
                 ))
