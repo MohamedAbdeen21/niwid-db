@@ -1,4 +1,17 @@
-query I
-SELECT 1;
+query IF
+SELECT 1, 3.14;
 ----
-1
+1 3.14
+
+query S
+SELECT 'hello';
+----
+"hello"
+
+query BB
+SELECT true, false;
+----
+true false
+
+statement ok
+CREATE TABLE test (a INT, b FLOAT);

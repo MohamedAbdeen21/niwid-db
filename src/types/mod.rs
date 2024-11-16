@@ -57,7 +57,7 @@ impl Types {
                 | (Types::Bool, Types::Bool)
                 | (Types::Char, Types::Char)
                 | (Types::Str, Types::Str)
-                | (Types::UInt, Types::Int)
+                // | (Types::UInt, Types::Int)
                 | (Types::Int, Types::UInt)
                 | (Types::StrAddr, Types::StrAddr)
                 | (Types::Null, _)

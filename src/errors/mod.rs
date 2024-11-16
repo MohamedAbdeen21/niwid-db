@@ -1,3 +1,5 @@
+use crate::types::Types;
+
 #[derive(Debug)]
 pub enum Error {
     Internal(String),
@@ -8,6 +10,7 @@ pub enum Error {
     Unimplemented(String),
     Unsupported(String),
     Expected(String, String),
+    TypeMismatch(Vec<Types>, Vec<Types>),
     TransactionActive,
     NoActiveTransaction,
 }
@@ -27,6 +30,12 @@ impl std::fmt::Display for Error {
             Error::TupleNotFound => write!(f, "Tuple not found."),
             Error::TransactionActive => write!(f, "Writing transaction already active."),
             Error::NoActiveTransaction => write!(f, "No active transaction."),
+            Error::TypeMismatch(expected, actual) => {
+                write!(
+                    f,
+                    "Type mismatch: Expected {expected:?}, but got {actual:?}."
+                )
+            }
         }
     }
 }

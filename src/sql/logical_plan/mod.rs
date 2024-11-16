@@ -11,7 +11,8 @@ use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable,
     Delete as SqlDelete, Expr, FromTable, Ident, Insert as SqlInsert, Join as SqlJoin,
     JoinConstraint, JoinOperator, ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement,
-    TableFactor, TableWithJoins, TruncateTableTarget, Value as SqlValue, Values as SqlValues,
+    TableFactor, TableWithJoins, TruncateTableTarget, UnaryOperator, Value as SqlValue,
+    Values as SqlValues,
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -311,7 +312,7 @@ impl LogicalPlanBuilder {
             .map(|row| {
                 row.into_iter()
                     .map(|expr| match expr {
-                        Expr::Value(_) => build_expr(&expr),
+                        Expr::Value(_) | Expr::UnaryOp { .. } => build_expr(&expr),
                         e => Err(anyhow!("Unsupported expression in VALUES: {:?}", e)),
                     })
                     .collect::<Result<Vec<_>>>()
@@ -361,19 +362,15 @@ impl LogicalPlanBuilder {
         let schema = self.catalog.read().get_schema(&table_name, txn_id).unwrap();
 
         let input_schema = input.schema();
-        let input_types: Vec<_> = input_schema.fields.iter().map(|f| &f.ty).collect();
-        let table_types: Vec<_> = schema.fields.iter().map(|f| &f.ty).collect();
+        let input_types: Vec<_> = input_schema.fields.iter().map(|f| f.ty.clone()).collect();
+        let table_types: Vec<_> = schema.fields.iter().map(|f| f.ty.clone()).collect();
 
-        if input_types
+        if table_types
             .iter()
-            .zip(table_types.iter())
+            .zip(input_types.iter())
             .any(|(a, b)| !a.is_compatible(b))
         {
-            return Err(anyhow!(
-                "Schema mismatch: {:?} vs {:?}",
-                input_types,
-                table_types
-            ));
+            bail!(Error::TypeMismatch(table_types, input_types));
         }
 
         let root = LogicalPlan::Insert(Box::new(Insert::new(
@@ -665,7 +662,7 @@ impl LogicalPlanBuilder {
         match limit {
             Some(limit) => {
                 let l = match limit {
-                    Expr::Value(SqlValue::Number(s, _)) => Ok(lit!(UInt, s)),
+                    Expr::Value(SqlValue::Number(s, _)) => Ok(build_number(&s, false)),
                     e => Err(anyhow!("Unsupported expression in LIMIT: {}", e)),
                 }?;
 
@@ -684,10 +681,13 @@ impl LogicalPlanBuilder {
             .into_iter()
             .flat_map(|e| match e {
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
-                    vec![Ok(LogicalExpr::Literal(lit!(UInt, s)))]
+                    vec![Ok(LogicalExpr::Literal(build_number(&s, false)))]
                 }
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::SingleQuotedString(s))) => {
                     vec![Ok(LogicalExpr::Literal(lit!(Str, s)))]
+                }
+                SelectItem::UnnamedExpr(Expr::Value(SqlValue::Boolean(b))) => {
+                    vec![Ok(LogicalExpr::Literal(lit!(Bool, b.to_string())))]
                 }
                 SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                     let name = ident.value.clone();
@@ -708,18 +708,9 @@ impl LogicalPlanBuilder {
                     .map(|f| f.name.clone())
                     .map(|c| Ok(LogicalExpr::Column(c)))
                     .collect(),
-                SelectItem::UnnamedExpr(Expr::Tuple(fields)) => fields
-                    .iter()
-                    .map(|e| match e {
-                        Expr::Value(SqlValue::Number(s, _)) => {
-                            Ok(LogicalExpr::Literal(lit!(UInt, s)))
-                        }
-                        Expr::Value(SqlValue::SingleQuotedString(s)) => {
-                            Ok(LogicalExpr::Literal(lit!(Str, s)))
-                        }
-                        e => todo!("{}", e),
-                    })
-                    .collect(),
+                SelectItem::UnnamedExpr(Expr::Tuple(fields)) => {
+                    fields.iter().map(build_expr).collect()
+                }
                 SelectItem::UnnamedExpr(Expr::BinaryOp { left, right, op }) => {
                     let left = match build_expr(&left) {
                         Ok(expr) => expr,
@@ -752,7 +743,7 @@ impl LogicalPlanBuilder {
                         Ok(expr) => {
                             let name = match expr {
                                 LogicalExpr::Column(ref name) => name,
-                                _ => unreachable!(),
+                                e => unreachable!("{:?}", e),
                             };
                             if !schema.fields.iter().any(|f| &f.name == name) {
                                 vec![Err(anyhow!("Column {} doesn't exist", name))]
@@ -799,9 +790,22 @@ impl TryFrom<Expr> for LogicalExpr {
     fn try_from(expr: Expr) -> Result<LogicalExpr> {
         match expr {
             Expr::Identifier(ident) => Ok(LogicalExpr::Column(ident.to_string())),
+            Expr::UnaryOp {
+                op: UnaryOperator::Minus,
+                expr,
+            } => {
+                if let Expr::Value(SqlValue::Number(n, _)) = *expr.clone() {
+                    Ok(LogicalExpr::Literal(build_number(&n, true)))
+                } else {
+                    bail!(Error::Unsupported("Unsupported value type".into()))
+                }
+            }
             Expr::Value(value) => {
+                if let SqlValue::Number(s, _) = value {
+                    return Ok(LogicalExpr::Literal(build_number(&s, false)));
+                }
+
                 let (ty, v) = match value {
-                    SqlValue::Number(v, _) => (Types::UInt, v),
                     SqlValue::SingleQuotedString(s) => (Types::Str, s),
                     SqlValue::Boolean(b) => (Types::Bool, b.to_string()),
                     _ => bail!(Error::Unsupported("Unsupported value type".into())),
@@ -827,7 +831,17 @@ impl From<bool> for LogicalExpr {
 // https://rust-lang.github.io/rust-clippy/master/index.html#only_used_in_recursion
 fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
     match expr {
-        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(lit!(UInt, n))),
+        Expr::UnaryOp {
+            op: UnaryOperator::Minus,
+            expr,
+        } => {
+            if let Expr::Value(SqlValue::Number(n, _)) = *expr.clone() {
+                Ok(LogicalExpr::Literal(build_number(&n, true)))
+            } else {
+                bail!(Error::Unsupported("Unsupported value type".into()))
+            }
+        }
+        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(build_number(n, false))),
         Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(lit!(Str, s))),
         Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value.clone())),
         Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
@@ -877,5 +891,17 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
         }
         Expr::Value(SqlValue::Boolean(b)) => Ok(LogicalExpr::Literal(lit!(Bool, b.to_string()))),
         e => bail!(Error::Unsupported(format!("Expr: {}", e))),
+    }
+}
+
+fn build_number(num: &String, neg: bool) -> Value {
+    if num.contains('.') {
+        lit!(Float, num)
+    } else if neg {
+        let mut num = num.clone();
+        num.insert(0, '-');
+        lit!(Int, num)
+    } else {
+        lit!(UInt, num)
     }
 }

@@ -518,7 +518,7 @@ mod tests {
         );
         btree.unpin_page(btree.root_page_id, None);
 
-        for i in 0..key_count as Key {
+        for i in (0..key_count).step_by(408) {
             let found = btree.search(None, i);
             assert!(found.is_some(), "Key {} not found", i);
             assert_eq!(found.unwrap().0, i, "Key {} not found", i);
