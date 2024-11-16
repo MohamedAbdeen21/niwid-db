@@ -4,11 +4,11 @@
 
 ## Features
 
-- **ACID Compliance via Shadow Paging**: Ensures **Atomicity, Consistency, Isolation,** and **Durability** by implementing shadow paging, maintaining a stable, crash-resistant state. Shadow paging allows a single-writer approach for simplified concurrency control.
+- **ACID Compliance via Shadow Paging**: Ensures **Atomicity, Consistency, Isolation (read-committed),** and **Durability** by implementing shadow paging, maintaining a stable, crash-resistant state. Shadow paging allows a single-writer approach for simplified concurrency control.
 
 - **Transaction Management**: Supports **commits** and **rollbacks** to execute or discard changes within a transaction block, ensuring transactional atomicity and isolation.
 
-- **Custom Execution Engine**: A simple query engine that processes SQL statements and performs basic DDL, TCL, and DML operations. Also supports "DESCRIBE" and "DESCRIBE ANALYZE". No physical plans or optimizations yet.
+- **Custom Execution Engine**: A simple query engine that processes SQL statements and performs basic DDL, TCL, and DML operations. Also supports "EXPLAIN" and "EXPLAIN ANALYZE". No physical plans or optimizations yet.
 
 - **SQL Parsing**: Leverages the `sqlparser-rs` crate for SQL syntax parsing, with custom implementations for query interpretation and execution. This is the only part of the system that is not from scratch.
 
@@ -42,10 +42,6 @@
    nc localhost 8080
    ```
 
-4. Send you sql queries.
-
-5. Once done, send a "quit" to terminate the connection.
-
 ### Usage
 
 niwid-db can execute SQL queries for managing tables, running transactions, and executing basic SQL commands.
@@ -71,5 +67,6 @@ ROLLBACK; -- Discards the update
 ## Contributing
 
 Contributions are always welcome! Feel free to submit issues or pull requests.
+
 
 And yes, this README is written by ChatGPT.
