@@ -490,16 +490,16 @@ impl LogicalExpr {
 }
 
 impl BinaryExpr {
-    fn eval_op(&self, left: &Value, right: &Value) -> Value {
+    fn eval_op(&self, left: &Value, right: &Value) -> Result<Value> {
         match &self.op {
-            BinaryOperator::Plus => left.add(right),
-            BinaryOperator::Minus => left.sub(right),
-            BinaryOperator::Multiply => left.mul(right),
-            BinaryOperator::Divide => left.div(right),
-            BinaryOperator::Eq => lit!(Bool, left.eq(right).to_string()),
-            BinaryOperator::And => lit!(Bool, left.and(right).to_string()),
-            BinaryOperator::Or => lit!(Bool, left.or(right).to_string()),
-            e => todo!("{:?}", e),
+            BinaryOperator::Plus => Ok(left.add(right)?),
+            BinaryOperator::Minus => Ok(left.sub(right)?),
+            BinaryOperator::Multiply => Ok(left.mul(right)?),
+            BinaryOperator::Divide => Ok(left.div(right)?),
+            BinaryOperator::Eq => Ok(lit!(Bool, left.equ(right)?.to_string())),
+            BinaryOperator::And => Ok(lit!(Bool, left.and(right)?.to_string())),
+            BinaryOperator::Or => Ok(lit!(Bool, left.or(right)?.to_string())),
+            e => bail!(Error::Unsupported(format!("Operator evaluation {}", e))),
         }
     }
 
@@ -521,7 +521,7 @@ impl BinaryExpr {
                     .iter()
                     .zip(col2)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect())
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::Literal(lit), LogicalExpr::Column(c2)) => {
                 let index = input
@@ -530,7 +530,10 @@ impl BinaryExpr {
                     .position(|col| &col.name == c2)
                     .ok_or(anyhow!("Column {} does not exist", c2))?;
                 let col = &input.cols()[index];
-                Ok(col.iter().map(|val| self.eval_op(lit, val)).collect())
+                Ok(col
+                    .iter()
+                    .map(|val| self.eval_op(lit, val))
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(lit)) => {
                 let index = input
@@ -539,11 +542,16 @@ impl BinaryExpr {
                     .position(|col| &col.name == c1)
                     .ok_or(anyhow!("Column {} does not exist", c1))?;
                 let col = &input.cols()[index];
-                Ok(col.iter().map(|val| self.eval_op(val, lit)).collect())
+                Ok(col
+                    .iter()
+                    .map(|val| self.eval_op(val, lit))
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
                 let rows = input.len();
-                Ok((0..rows).map(|_| self.eval_op(v1, v2)).collect())
+                Ok((0..rows)
+                    .map(|_| self.eval_op(v1, v2))
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::BinaryExpr(l), LogicalExpr::BinaryExpr(r)) => {
                 let left = l.evaluate(input)?;
@@ -552,11 +560,14 @@ impl BinaryExpr {
                     .iter()
                     .zip(right.iter())
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect())
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::Literal(value), LogicalExpr::BinaryExpr(binary_expr)) => {
                 let right = binary_expr.evaluate(input)?;
-                Ok(right.iter().map(|r| self.eval_op(value, r)).collect())
+                Ok(right
+                    .iter()
+                    .map(|r| self.eval_op(value, r))
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::Column(c), LogicalExpr::BinaryExpr(binary_expr)) => {
                 let fields = input.fields();
@@ -569,11 +580,14 @@ impl BinaryExpr {
                     .iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, &r))
-                    .collect())
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Literal(lit)) => {
                 let left = binary_expr.evaluate(input)?;
-                Ok(left.iter().map(|l| self.eval_op(l, lit)).collect())
+                Ok(left
+                    .iter()
+                    .map(|l| self.eval_op(l, lit))
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::BinaryExpr(binary_expr), LogicalExpr::Column(c)) => {
                 let fields = input.fields();
@@ -586,7 +600,7 @@ impl BinaryExpr {
                     .iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect())
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::AliasedExpr(expr, _), expr2)
             | (expr2, LogicalExpr::AliasedExpr(expr, _)) => {
@@ -596,7 +610,7 @@ impl BinaryExpr {
                     .iter()
                     .zip(right.iter())
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect())
+                    .collect::<Result<_>>()?)
             }
         }
     }

@@ -13,6 +13,7 @@ pub enum Error {
     TypeMismatch(Vec<Types>, Vec<Types>),
     TransactionActive,
     NoActiveTransaction,
+    DivisionByZero,
 }
 
 impl std::fmt::Display for Error {
@@ -36,6 +37,7 @@ impl std::fmt::Display for Error {
                     "Type mismatch: Expected {expected:?}, but got {actual:?}."
                 )
             }
+            Error::DivisionByZero => write!(f, "Division by zero."),
         }
     }
 }

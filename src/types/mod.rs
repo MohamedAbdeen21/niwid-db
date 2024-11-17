@@ -1,8 +1,11 @@
+use anyhow::bail;
+use anyhow::Result;
 use std::fmt::Debug;
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+use crate::errors::Error;
 use crate::tuple::TupleExt;
 use crate::tuple::TupleId;
 use crate::tuple::TUPLE_ID_SIZE;
@@ -129,73 +132,119 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn add(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l + r)),
-            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l + r)),
-            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l + r)),
-            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 + r)),
-            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l + *r as i32)),
-            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 + r)),
-            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l + *r as f32)),
-            (l, r) => unimplemented!("{} + {}", l, r),
+    pub fn to_string_display(&self) -> String {
+        match self {
+            Value::UInt(v) => v.to_string(),
+            Value::Int(v) => v.to_string(),
+            Value::Float(v) => v.to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Char(v) => v.to_string(),
+            Value::Str(v) => v.to_string(),
+            Value::Null => "null".to_string(),
+            Value::StrAddr(_) => unreachable!(),
         }
     }
 
-    pub fn sub(&self, other: &Self) -> Self {
+    pub fn add(&self, other: &Self) -> Result<Self> {
         match (self, other) {
-            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l - r)),
-            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l - r)),
-            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l - r)),
-            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 - r)),
-            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l - *r as i32)),
-            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 - r)),
-            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l - *r as f32)),
-            (l, r) => unimplemented!("{} - {}", l, r),
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Ok(Value::UInt(UInt(l + r))),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(l + r))),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(l + r))),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(*l as i32 + r))),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(Value::Int(Int(l + *r as i32))),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(*l as f32 + r))),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Ok(Value::Float(Float(l + *r as f32))),
+            (l, r) => bail!(Error::Unimplemented(format!("{} + {}", l, r))),
         }
     }
 
-    pub fn mul(&self, other: &Self) -> Self {
+    pub fn sub(&self, other: &Self) -> Result<Self> {
         match (self, other) {
-            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l * r)),
-            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l * r)),
-            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l * r)),
-            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 * r)),
-            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l * *r as i32)),
-            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 * r)),
-            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l * *r as f32)),
-            (Value::Float(Float(l)), Value::UInt(UInt(r))) => Value::Float(Float(l * *r as f32)),
-            (Value::UInt(UInt(l)), Value::Float(r)) => Value::Float(Float(*l as f32 * r.0)),
-            (Value::Null, _) | (_, Value::Null) => Value::Null,
-            (l, r) => unimplemented!("{} * {}", l, r),
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Ok(Value::UInt(UInt(l - r))),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(l - r))),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(l - r))),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(*l as i32 - r))),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(Value::Int(Int(l - *r as i32))),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(*l as f32 - r))),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Ok(Value::Float(Float(l - *r as f32))),
+            (l, r) => bail!(Error::Unimplemented(format!("{} - {}", l, r))),
         }
     }
 
-    pub fn div(&self, other: &Self) -> Self {
+    pub fn mul(&self, other: &Self) -> Result<Self> {
         match (self, other) {
-            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Value::UInt(UInt(l / r)),
-            (Value::Int(Int(l)), Value::Int(Int(r))) => Value::Int(Int(l / r)),
-            (Value::Float(Float(l)), Value::Float(Float(r))) => Value::Float(Float(l / r)),
-            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Value::Int(Int(*l as i32 / r)),
-            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Value::Int(Int(l / *r as i32)),
-            (Value::Int(Int(l)), Value::Float(Float(r))) => Value::Float(Float(*l as f32 / r)),
-            (Value::Float(Float(l)), Value::Int(Int(r))) => Value::Float(Float(l / *r as f32)),
-            (l, r) => unimplemented!("{} / {}", l, r),
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Ok(Value::UInt(UInt(l * r))),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(l * r))),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(l * r))),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(*l as i32 * r))),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(Value::Int(Int(l * *r as i32))),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(*l as f32 * r))),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Ok(Value::Float(Float(l * *r as f32))),
+            (Value::UInt(UInt(l)), Value::Float(r)) => Ok(Value::Float(Float(*l as f32 * r.0))),
+            (Value::Null, _) | (_, Value::Null) => Ok(Value::Null),
+            (Value::Float(Float(l)), Value::UInt(UInt(r))) => {
+                Ok(Value::Float(Float(l * *r as f32)))
+            }
+            (l, r) => bail!(Error::Unimplemented(format!("{} * {}", l, r))),
         }
     }
 
-    pub fn and(&self, other: &Self) -> Self {
+    pub fn div(&self, other: &Self) -> Result<Self> {
         match (self, other) {
-            (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Value::Bool(Bool(*l && *r)),
-            (l, r) => unimplemented!("{} && {}", l, r),
+            (_, Value::UInt(UInt(0))) | (_, Value::Int(Int(0))) | (_, Value::Float(Float(0.0))) => {
+                bail!(Error::DivisionByZero)
+            }
+            (Value::UInt(UInt(l)), Value::UInt(UInt(r))) => Ok(Value::UInt(UInt(l / r))),
+            (Value::Int(Int(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(l / r))),
+            (Value::Float(Float(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(l / r))),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Ok(Value::Int(Int(*l as i32 / r))),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(Value::Int(Int(l / *r as i32))),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(*l as f32 / r))),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => Ok(Value::Float(Float(l / *r as f32))),
+            (l, r) => bail!(Error::Unimplemented(format!("{} / {}", l, r))),
         }
     }
 
-    pub fn or(&self, other: &Self) -> Self {
+    pub fn and(&self, other: &Self) -> Result<Self> {
         match (self, other) {
-            (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Value::Bool(Bool(*l || *r)),
-            (l, r) => unimplemented!("{} || {}", l, r),
+            (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Ok(Value::Bool(Bool(*l && *r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{} && {}", l, r))),
         }
+    }
+
+    pub fn or(&self, other: &Self) -> Result<Self> {
+        match (self, other) {
+            (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Ok(Value::Bool(Bool(*l || *r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{} || {}", l, r))),
+        }
+    }
+
+    pub fn equ(&self, other: &Self) -> Result<bool> {
+        match (self, other) {
+            (_, Value::Null) | (Value::Null, _) => Ok(true),
+            (Value::UInt(l), Value::UInt(r)) => Ok(l == r),
+            (Value::Int(l), Value::Int(r)) => Ok(l == r),
+            (Value::Float(l), Value::Float(r)) => Ok(l == r),
+            (Value::Bool(l), Value::Bool(r)) => Ok(l == r),
+            (Value::Char(l), Value::Char(r)) => Ok(l == r),
+            (Value::Str(l), Value::Str(r)) => Ok(l == r),
+            (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(*l as u32 == *r),
+            (Value::UInt(UInt(l)), Value::Int(Int(r))) => Ok(*l == *r as u32),
+            (Value::Char(Char(l)), Value::Str(Str(r))) => {
+                if r.len() != 1 {
+                    Ok(false)
+                } else {
+                    Ok(*l == r.chars().next().unwrap())
+                }
+            }
+            (l, r) => bail!(Error::Unimplemented(format!("{} = {}", l, r))),
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        self.equ(other).unwrap()
     }
 }
 
@@ -212,30 +261,6 @@ impl PartialOrd for Value {
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => l.partial_cmp(&(*r as i32)),
             (Value::UInt(UInt(l)), Value::Int(Int(r))) => (*l as i32).partial_cmp(r),
             _ => None,
-        }
-    }
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (_, Value::Null) | (Value::Null, _) => true,
-            (Value::UInt(l), Value::UInt(r)) => l == r,
-            (Value::Int(l), Value::Int(r)) => l == r,
-            (Value::Float(l), Value::Float(r)) => l == r,
-            (Value::Bool(l), Value::Bool(r)) => l == r,
-            (Value::Char(l), Value::Char(r)) => l == r,
-            (Value::Str(l), Value::Str(r)) => l == r,
-            (Value::Int(Int(l)), Value::UInt(UInt(r))) => *l as u32 == *r,
-            (Value::UInt(UInt(l)), Value::Int(Int(r))) => *l == *r as u32,
-            (Value::Char(Char(l)), Value::Str(Str(r))) => {
-                if r.len() != 1 {
-                    false
-                } else {
-                    *l == r.chars().next().unwrap()
-                }
-            }
-            _ => false,
         }
     }
 }
