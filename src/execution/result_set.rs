@@ -63,7 +63,16 @@ impl ResultSet {
         self.cols
             .iter_mut()
             .for_each(|col| col.truncate(cap as usize));
-        Self::new(self.schema.fields, self.cols)
+        self
+    }
+
+    pub fn skip(mut self, skip: u32) -> Self {
+        self.cols = self
+            .cols
+            .into_iter()
+            .map(|col| col.into_iter().skip(skip as usize).collect())
+            .collect();
+        self
     }
 
     pub fn from_tuple(field: Vec<Field>, tuple: Vec<Value>, cap: usize) -> Self {

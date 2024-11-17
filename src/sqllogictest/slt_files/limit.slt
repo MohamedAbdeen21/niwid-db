@@ -1,0 +1,42 @@
+statement ok
+CREATE TABLE "users" (
+	"id" UINT UNIQUE,
+	"name" TEXT
+);
+
+statement ok
+INSERT INTO "users" VALUES (1, 'John Doe'), (2, 'Jane Doe'), (3, 'John Smith'), (4, 'Jane Smith');
+
+query IS
+SELECT * FROM "users"
+----
+1 John Doe
+2 Jane Doe
+3 John Smith
+4 Jane Smith
+
+query IS
+SELECT * FROM "users" LIMIT 2;
+----
+1 John Doe
+2 Jane Doe
+
+query IS
+SELECT * FROM "users" LIMIT 2, 2;
+----
+3 John Smith
+4 Jane Smith
+
+query IS
+SELECT * FROM "users" LIMIT 1 OFFSET 1;
+----
+2 Jane Doe
+
+statement error OFFSET without LIMIT
+SELECT * FROM "users" OFFSET 1;
+
+statement error OFFSET must be an unsigned integer
+SELECT * FROM "users" LIMIT 1 OFFSET -1;
+
+statement error LIMIT must be an unsigned integer
+SELECT * FROM "users" LIMIT -1 OFFSET 1;

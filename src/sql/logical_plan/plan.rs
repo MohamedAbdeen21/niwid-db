@@ -92,11 +92,16 @@ impl LogicalPlan {
 pub struct Limit {
     pub input: LogicalPlan,
     pub limit: u32,
+    pub offset: u32,
 }
 
 impl Limit {
-    pub fn new(input: LogicalPlan, limit: u32) -> Self {
-        Self { input, limit }
+    pub fn new(input: LogicalPlan, limit: u32, offset: u32) -> Self {
+        Self {
+            input,
+            limit,
+            offset,
+        }
     }
 
     pub fn schema(&self) -> Schema {

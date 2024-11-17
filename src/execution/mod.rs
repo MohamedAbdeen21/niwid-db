@@ -68,7 +68,7 @@ impl LogicalPlan {
 impl Executable for Limit {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let input = self.input.execute(ctx)?;
-        Ok(input.take(self.limit))
+        Ok(input.skip(self.offset).take(self.limit))
     }
 }
 
@@ -642,11 +642,10 @@ impl BooleanBinaryExpr {
                 let left = &input.cols()[index1];
                 let right = &input.cols()[index2];
 
-                Ok(left
-                    .iter()
+                left.iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect::<Result<_>>()?)
+                    .collect::<Result<_>>()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Column(c2)) => {
                 let index2 = input
@@ -656,10 +655,10 @@ impl BooleanBinaryExpr {
                     .unwrap();
                 let right = &input.cols()[index2];
 
-                Ok(right
+                right
                     .iter()
                     .map(|r| self.eval_op(v1, r))
-                    .collect::<Result<_>>()?)
+                    .collect::<Result<_>>()
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
                 let index1 = input

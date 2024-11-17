@@ -10,12 +10,12 @@ use plan::{
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable,
     Delete as SqlDelete, Expr, FromTable, Ident, Insert as SqlInsert, Join as SqlJoin,
-    JoinConstraint, JoinOperator, ObjectName, ObjectType, Query, SelectItem, SetExpr, Statement,
-    TableFactor, TableWithJoins, TruncateTableTarget, UnaryOperator, Value as SqlValue,
-    Values as SqlValues,
+    JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OffsetRows, Query, SelectItem,
+    SetExpr, Statement, TableFactor, TableWithJoins, TruncateTableTarget, UnaryOperator,
+    Value as SqlValue, Values as SqlValues,
 };
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 
 use crate::catalog::ArcCatalog;
 use crate::errors::Error;
@@ -52,8 +52,13 @@ impl LogicalPlanBuilder {
                 ..
             }) => self.build_insert(table_name, source, columns, returning, txn_id),
             Statement::Query(query) => {
-                let Query { body, limit, .. } = *query;
-                self.build_select(body, limit, txn_id)
+                let Query {
+                    body,
+                    limit,
+                    offset,
+                    ..
+                } = *query;
+                self.build_select(body, limit, offset, txn_id)
             }
             Statement::Drop {
                 object_type,
@@ -338,10 +343,15 @@ impl LogicalPlanBuilder {
             return Ok(None);
         }
 
-        let Query { body, limit, .. } = *query.unwrap();
+        let Query {
+            body,
+            limit,
+            offset,
+            ..
+        } = *query.unwrap();
 
         let input = match *body {
-            SetExpr::Select(_) => self.build_select(body, limit, txn_id)?,
+            SetExpr::Select(_) => self.build_select(body, limit, offset, txn_id)?,
             SetExpr::Values(SqlValues { rows, .. }) => self.build_values(rows)?,
             e => bail!(Error::Unsupported(format!("Query: {}", e))),
         };
@@ -586,6 +596,7 @@ impl LogicalPlanBuilder {
         &self,
         body: Box<SetExpr>,
         limit: Option<Expr>,
+        offset: Option<Offset>,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
         let select = match *body {
@@ -649,7 +660,18 @@ impl LogicalPlanBuilder {
             }
         }
 
-        root = self.build_limit(root, limit)?;
+        let offset = match offset {
+            Some(offset) => {
+                ensure!(
+                    offset.rows == OffsetRows::None,
+                    "OFFSET [ROWS|ROW] is not supported"
+                );
+                Some(offset.value)
+            }
+            None => None,
+        };
+
+        root = self.build_limit(root, limit, offset)?;
 
         let projections = self.build_projections(select.projection, root.schema())?;
 
@@ -658,15 +680,39 @@ impl LogicalPlanBuilder {
         Ok(root)
     }
 
-    fn build_limit(&self, root: LogicalPlan, limit: Option<Expr>) -> Result<LogicalPlan> {
+    fn build_limit(
+        &self,
+        root: LogicalPlan,
+        limit: Option<Expr>,
+        offset: Option<Expr>,
+    ) -> Result<LogicalPlan> {
         match limit {
             Some(limit) => {
-                let l = match limit {
-                    Expr::Value(SqlValue::Number(s, _)) => Ok(build_number(&s, false)),
-                    e => Err(anyhow!("Unsupported expression in LIMIT: {}", e)),
+                let limit = match limit {
+                    Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false) {
+                        Value::UInt(u) => Ok(u.0),
+                        _ => Err(anyhow!("LIMIT must be an unsigned integer")),
+                    },
+                    _ => Err(anyhow!("LIMIT must be an unsigned integer")),
                 }?;
 
-                Ok(LogicalPlan::Limit(Box::new(Limit::new(root, l.u32()))))
+                let offset = match offset {
+                    Some(offset) => match offset {
+                        Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false) {
+                            Value::UInt(u) => Ok(u.0),
+                            _ => Err(anyhow!("OFFSET must be an unsigned integer")),
+                        },
+                        _ => Err(anyhow!("OFFSET must be an unsigned integer")),
+                    },
+                    None => Ok(0),
+                }?;
+
+                Ok(LogicalPlan::Limit(Box::new(Limit::new(
+                    root, limit, offset,
+                ))))
+            }
+            None if offset.is_some() => {
+                bail!(Error::Unsupported("OFFSET without LIMIT".into()));
             }
             None => Ok(root),
         }
