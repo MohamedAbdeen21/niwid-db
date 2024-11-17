@@ -894,14 +894,18 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
     }
 }
 
-fn build_number(num: &String, neg: bool) -> Value {
-    if num.contains('.') {
-        lit!(Float, num)
-    } else if neg {
-        let mut num = num.clone();
-        num.insert(0, '-');
-        lit!(Int, num)
+fn build_number(num: &str, neg: bool) -> Value {
+    let mut st = num.to_owned();
+
+    if neg {
+        st.insert(0, '-');
+    };
+
+    if st.contains('.') {
+        lit!(Float, st)
+    } else if st.contains('-') {
+        lit!(Int, st)
     } else {
-        lit!(UInt, num)
+        lit!(UInt, st)
     }
 }

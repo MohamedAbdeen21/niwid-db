@@ -17,16 +17,16 @@ statement error Type mismatch: Expected \[UInt, Float, Int, Bool\], but got \[In
 INSERT INTO test VALUES (-1, 2.3, -4, false);
 
 statement ok
-INSERT INTO test VALUES (5, 6.789, 10, false);
+INSERT INTO test VALUES (5, -6.789, 10, false);
 
 query UFIB
 SELECT a, b, c, d FROM test;
 ----
 1 2.3 -4 true
-5 6.789 10 false
+5 -6.789 10 false
 
 query UFIB
 SELECT a + 1, b * 2, c - 1, d OR false FROM test;
 ----
 2 4.6 -5 true
-6 13.578 9 false
+6 -13.578 9 false
