@@ -1,0 +1,53 @@
+statement ok
+BEGIN;
+
+statement ok
+CREATE TABLE test (a INT, b INT);
+
+statement ok
+INSERT INTO test VALUES (1,2), (3,4), (5,6), (7,8);
+
+query II
+SELECT * FROM test;
+----
+1 2
+3 4
+5 6
+7 8
+
+statement ok
+COMMIT;
+
+query II
+SELECT * FROM test;
+----
+1 2
+3 4
+5 6
+7 8
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO test VALUES (9,10);
+
+query II
+SELECT * FROM test;
+----
+1 2
+3 4
+5 6
+7 8
+9 10
+
+statement ok
+ROLLBACK;
+
+query II
+SELECT * FROM test;
+----
+1 2
+3 4
+5 6
+7 8

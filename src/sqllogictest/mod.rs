@@ -28,10 +28,11 @@ impl DB for Context {
 
 #[tokio::test]
 async fn sqllogictest() -> Result<()> {
-    let test_files = vec![
-        "./src/sqllogictest/slt_files/basic.slt",
-        "./src/sqllogictest/slt_files/select.slt",
-    ];
+    let root = "./src/sqllogictest/slt_files";
+    let test_files: Vec<_> = std::fs::read_dir(root)
+        .unwrap()
+        .map(|r| r.unwrap().path())
+        .collect();
 
     let mut handles = Vec::new();
 

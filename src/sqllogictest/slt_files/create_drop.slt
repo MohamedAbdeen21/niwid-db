@@ -1,0 +1,23 @@
+statement ok
+CREATE TABLE IF NOT EXISTS "users" (
+	"id" UINT UNIQUE NOT NULL,
+	"name" TEXT NOT NULL
+)
+
+statement error Table users already exists.
+CREATE TABLE "users" ()
+
+statement ok
+CREATE TABLE IF NOT EXISTS "users" (
+	"id" UINT UNIQUE NOT NULL,
+	"name" TEXT NOT NULL
+)
+
+statement ok
+DROP TABLE "users"
+
+statement error Table\(s\) users don't exist
+DROP TABLE "users"
+
+statement ok
+DROP TABLE IF EXISTS users
