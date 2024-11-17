@@ -16,7 +16,7 @@ impl DB for Context {
                 let rows = result
                     .rows()
                     .iter()
-                    .map(|r| r.iter().map(|v| v.to_string_display()).collect())
+                    .map(|r| r.iter().map(|v| v.to_string_unquoted()).collect())
                     .collect();
                 let types = result.schema.fields.into_iter().map(|f| f.ty).collect();
                 Ok(sqllogictest::DBOutput::Rows { types, rows })

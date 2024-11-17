@@ -36,7 +36,7 @@ impl LogicalExpr {
     pub fn to_field(&self, schema: &Schema) -> Field {
         match self {
             LogicalExpr::Literal(v) => Field::new(
-                &v.to_string_display(),
+                &v.to_string_unquoted(),
                 v.get_type(),
                 Constraints::nullable(true),
             ),

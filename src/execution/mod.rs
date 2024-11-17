@@ -440,7 +440,7 @@ impl Executable for CreateTable {
 impl Executable for Filter {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let input = self.input.execute(ctx)?;
-        let mask = self.expr.evaluate(&input);
+        let mask = self.expr.evaluate(&input)?;
 
         let output = input
             .cols
@@ -617,19 +617,22 @@ impl BinaryExpr {
 }
 
 impl BooleanBinaryExpr {
-    fn eval_op(&self, left: &Value, right: &Value) -> bool {
+    fn eval_op(&self, left: &Value, right: &Value) -> Result<bool> {
         match &self.op {
-            BinaryOperator::Eq => left == right,
-            BinaryOperator::NotEq => left != right,
-            BinaryOperator::Gt => left > right,
-            BinaryOperator::Lt => left < right,
-            BinaryOperator::GtEq => left >= right,
-            BinaryOperator::LtEq => left <= right,
-            e => todo!("{}", e),
+            BinaryOperator::Eq => Ok(left == right),
+            BinaryOperator::NotEq => Ok(left != right),
+            BinaryOperator::Gt => Ok(left > right),
+            BinaryOperator::Lt => Ok(left < right),
+            BinaryOperator::GtEq => Ok(left >= right),
+            BinaryOperator::LtEq => Ok(left <= right),
+            e => bail!(Error::Unsupported(format!(
+                "Binary Operator evaluation {}",
+                e
+            ))),
         }
     }
 
-    fn evaluate(self, input: &ResultSet) -> Vec<bool> {
+    fn evaluate(self, input: &ResultSet) -> Result<Vec<bool>> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
                 let fields = input.fields();
@@ -639,10 +642,11 @@ impl BooleanBinaryExpr {
                 let left = &input.cols()[index1];
                 let right = &input.cols()[index2];
 
-                left.iter()
+                Ok(left
+                    .iter()
                     .zip(right)
                     .map(|(l, r)| self.eval_op(l, r))
-                    .collect()
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Column(c2)) => {
                 let index2 = input
@@ -652,7 +656,10 @@ impl BooleanBinaryExpr {
                     .unwrap();
                 let right = &input.cols()[index2];
 
-                right.iter().map(|r| self.eval_op(v1, r)).collect()
+                Ok(right
+                    .iter()
+                    .map(|r| self.eval_op(v1, r))
+                    .collect::<Result<_>>()?)
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
                 let index1 = input
@@ -664,9 +671,9 @@ impl BooleanBinaryExpr {
                 left.iter().map(|l| self.eval_op(l, v2)).collect()
             }
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
-                [self.eval_op(v1, v2)].repeat(input.len())
+                Ok([self.eval_op(v1, v2)?].repeat(input.len()))
             }
-            e => todo!("{:?}", e),
+            (l, r) => bail!(Error::Unsupported(format!("{:?} {} {:?}", l, self.op, r))),
         }
     }
 }

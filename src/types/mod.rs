@@ -132,7 +132,7 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn to_string_display(&self) -> String {
+    pub fn to_string_unquoted(&self) -> String {
         match self {
             Value::UInt(v) => v.to_string(),
             Value::Int(v) => v.to_string(),
