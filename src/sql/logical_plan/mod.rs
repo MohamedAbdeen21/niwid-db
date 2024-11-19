@@ -847,14 +847,21 @@ impl TryFrom<Expr> for LogicalExpr {
                 }
             }
             Expr::Value(value) => {
-                if let SqlValue::Number(s, _) = value {
-                    return Ok(LogicalExpr::Literal(build_number(&s, false)));
+                match value {
+                    SqlValue::Number(s, _) => {
+                        return Ok(LogicalExpr::Literal(build_number(&s, false)))
+                    }
+                    SqlValue::Null => return Ok(LogicalExpr::Literal(Value::Null)),
+                    _ => (),
                 }
 
                 let (ty, v) = match value {
                     SqlValue::SingleQuotedString(s) => (Types::Str, s),
                     SqlValue::Boolean(b) => (Types::Bool, b.to_string()),
-                    _ => bail!(Error::Unsupported("Unsupported value type".into())),
+                    e => bail!(Error::Unsupported(format!(
+                        "Unsupported value in Expr: {}",
+                        e
+                    ))),
                 };
 
                 Ok(LogicalExpr::Literal(ValueFactory::from_string(&ty, &v)))
@@ -884,7 +891,7 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
             if let Expr::Value(SqlValue::Number(n, _)) = *expr.clone() {
                 Ok(LogicalExpr::Literal(build_number(&n, true)))
             } else {
-                bail!(Error::Unsupported("Unsupported value type".into()))
+                bail!(Error::Unsupported("Expected a number".into()))
             }
         }
         Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(build_number(n, false))),

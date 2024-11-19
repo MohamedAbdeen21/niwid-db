@@ -104,7 +104,7 @@ async fn execute_query(
                 }
                 Err(e) => {
                     let _ = writer.write_all(format!("Error: {}\n", e).as_bytes()).await;
-                    panic!("{:?}", e);
+                    println!("Error: {}", e);
                 }
             };
         } else {

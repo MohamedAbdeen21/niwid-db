@@ -221,7 +221,8 @@ impl Value {
 
     pub fn equ(&self, other: &Self) -> Result<bool> {
         match (self, other) {
-            (_, Value::Null) | (Value::Null, _) => Ok(true),
+            (Value::Null, Value::Null) => Ok(true),
+            (_, Value::Null) | (Value::Null, _) => Ok(false),
             (Value::UInt(l), Value::UInt(r)) => Ok(l == r),
             (Value::Int(l), Value::Int(r)) => Ok(l == r),
             (Value::Float(l), Value::Float(r)) => Ok(l == r),

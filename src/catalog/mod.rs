@@ -1,6 +1,7 @@
 mod versioned_map;
 
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
+use crate::errors::Error;
 use crate::pages::PageId;
 use crate::printdbg;
 use crate::table::Table;
@@ -9,7 +10,7 @@ use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, Tuple, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use crate::types::{AsBytes, Types, Value, ValueFactory};
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
@@ -142,7 +143,7 @@ impl Catalog {
         if exists && ignore_if_exists {
             return Ok(());
         } else if exists {
-            return Err(anyhow!("Table {} already exists", table_name));
+            bail!(Error::TableExists(table_name));
         }
 
         let mut table = Table::new(
@@ -238,7 +239,7 @@ impl Catalog {
     pub fn truncate_table(&mut self, table_name: String, txn: Option<TxnId>) -> Result<()> {
         let table = match self.get_table_mut(&table_name, txn) {
             Some(table) => table,
-            None => return Err(anyhow!("Table {} doesn't exist", table_name)),
+            None => bail!(Error::TableNotFound(table_name)),
         };
 
         let dup = table?.truncate()?;
