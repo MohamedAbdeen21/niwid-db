@@ -36,3 +36,12 @@ SELECT a FROM test;
 ----
 1
 3
+
+statement ok
+UPDATE test SET a = 4 WHERE a = 2;
+
+query U
+SELECT a FROM test;
+----
+1
+3
