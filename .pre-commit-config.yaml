@@ -19,5 +19,5 @@ repos:
         name: Run tests
         entry: cargo test --all --release
         language: rust
-        types: [rust]
+        files: \.(rs|slt)$
         pass_filenames: false

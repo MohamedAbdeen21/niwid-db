@@ -130,8 +130,6 @@ impl Catalog {
         }
     }
 
-    // TODO: put catalog table into the txn too,
-    // ATM adding a table in a txn shows it in another txns catalog
     pub fn add_table(
         &mut self,
         table_name: String,
