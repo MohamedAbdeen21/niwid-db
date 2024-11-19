@@ -141,6 +141,12 @@ impl Schema {
                     ));
                 };
 
+                if unique && !not_null {
+                    bail!(Error::Unimplemented(
+                        "Null in Unique field. Use NOT NULL for now.".into()
+                    ))
+                };
+
                 Ok(Field::new(
                     &name.value,
                     type_,

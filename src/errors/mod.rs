@@ -14,6 +14,7 @@ pub enum Error {
     TransactionActive,
     NoActiveTransaction,
     DivisionByZero,
+    DuplicateKey(String, String),
 }
 
 impl std::fmt::Display for Error {
@@ -38,6 +39,9 @@ impl std::fmt::Display for Error {
                 )
             }
             Error::DivisionByZero => write!(f, "Division by zero."),
+            Error::DuplicateKey(key, column) => {
+                write!(f, "Duplicate key {key} in column {column}.")
+            }
         }
     }
 }

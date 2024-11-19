@@ -31,7 +31,7 @@ impl BPlusTree {
                 .unwrap();
         }
 
-        let mut page = tree.load_page(root_page_id, txn).unwrap();
+        let mut page = tree.load_page_mut(root_page_id, txn).unwrap();
         page.set_type(PageType::Leaf);
         tree.unpin_page(root_page_id, txn);
 
@@ -52,14 +52,9 @@ impl BPlusTree {
 
     pub fn delete(&mut self, txn: Option<TxnId>, key: impl Into<Key>) -> Result<()> {
         let key = key.into();
-        let root = self.load_page(self.root_page_id, txn).unwrap();
+        let root = self.load_page_mut(self.root_page_id, txn).unwrap();
 
-        let mut leaf = self.find_leaf(txn, root, key);
-        if let Some(txn) = txn {
-            self.txn_manager
-                .lock()
-                .touch_page(txn, leaf.get_page_id())?;
-        }
+        let mut leaf = self.find_leaf_mut(txn, root, key);
 
         leaf.delete(key)?;
 
@@ -93,7 +88,6 @@ impl BPlusTree {
         }
     }
 
-    /// unpins the input page once the search is done
     fn find_leaf(&self, txn: Option<TxnId>, page: IndexPage, key: Key) -> IndexPage {
         match page.get_type() {
             PageType::Inner => {
@@ -107,15 +101,25 @@ impl BPlusTree {
         }
     }
 
+    /// unpins the input page once the search is done
+    fn find_leaf_mut(&self, txn: Option<TxnId>, page: IndexPage, key: Key) -> IndexPage {
+        match page.get_type() {
+            PageType::Inner => {
+                let child_id = page.find_leaf(key);
+                self.unpin_page(page.get_page_id(), txn);
+                let child: IndexPage = self.load_page_mut(child_id, txn).unwrap();
+                self.find_leaf_mut(txn, child, key)
+            }
+            PageType::Leaf => page,
+            PageType::Invalid => unreachable!("Page type was not initialized properly"),
+        }
+    }
+
     /// returns a new pinned leaf page
     fn new_leaf_page(&self, txn: Option<TxnId>) -> Result<IndexPage> {
         let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
-        let mut new_page = self.load_page(new_page_id, txn)?; // increment pin count
+        let mut new_page = self.load_page_mut(new_page_id, txn)?; // increment pin count
         new_page.set_type(PageType::Leaf);
-
-        if let Some(txn) = txn {
-            self.txn_manager.lock().touch_page(txn, new_page_id)?;
-        }
 
         Ok(new_page)
     }
@@ -123,17 +127,25 @@ impl BPlusTree {
     /// returns a new pinned inner page
     fn new_inner_page(&self, txn: Option<TxnId>) -> Result<IndexPage> {
         let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
-        let mut new_page = self.load_page(new_page_id, txn)?; // increment pin count
+        let mut new_page = self.load_page_mut(new_page_id, txn)?; // increment pin count
         new_page.set_type(PageType::Inner);
-
-        if let Some(txn) = txn {
-            self.txn_manager.lock().touch_page(txn, new_page_id)?;
-        }
 
         Ok(new_page)
     }
 
     fn load_page(&self, page_id: PageId, txn_id: Option<TxnId>) -> Result<IndexPage> {
+        Ok(self
+            .bpm
+            .lock()
+            .fetch_frame(page_id, txn_id)?
+            .reader()
+            .into())
+    }
+
+    fn load_page_mut(&self, page_id: PageId, txn_id: Option<TxnId>) -> Result<IndexPage> {
+        if let Some(txn) = txn_id {
+            self.txn_manager.lock().touch_page(txn, page_id)?;
+        };
         Ok(self
             .bpm
             .lock()
@@ -155,12 +167,6 @@ impl BPlusTree {
         key: Key,
         value: LeafValue,
     ) -> Result<Option<(IndexPage, Key)>> {
-        if let Some(txn) = txn {
-            self.txn_manager
-                .lock()
-                .touch_page(txn, page.get_page_id())?;
-        }
-
         let res = match page.get_type() {
             PageType::Leaf if page.is_full() => {
                 let new_page = self.new_leaf_page(txn)?;
@@ -178,7 +184,7 @@ impl BPlusTree {
             }
             PageType::Inner => {
                 let child_id = page.find_leaf(key);
-                let mut child = self.load_page(child_id, txn)?;
+                let mut child = self.load_page_mut(child_id, txn)?;
                 let ret = match self.insert_into_page(txn, &mut child, key, value)? {
                     None => Ok(None),
                     Some((new_page, new_key)) if page.is_full() => {
@@ -248,7 +254,7 @@ impl BPlusTree {
         value: TupleId,
     ) -> Result<()> {
         let key = key.into();
-        let mut page = self.load_page(self.root_page_id, txn)?;
+        let mut page = self.load_page_mut(self.root_page_id, txn)?;
 
         let value = LeafValue::new(value.0, value.1);
 

@@ -9,8 +9,8 @@ use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
-use crate::types::{Str, StrAddr, Types, ValueFactory};
-use anyhow::{anyhow, bail, Result};
+use crate::types::{Str, StrAddr, Types, Value, ValueFactory};
+use anyhow::{anyhow, bail, ensure, Result};
 
 pub mod table_iterator;
 
@@ -304,6 +304,8 @@ impl Table {
         Ok(())
     }
 
+    /// Returns None if no uniqueness is defined for the schema.
+    /// Or Some(Key) if the tuple is unique, where Key is the unique value.
     pub fn check_uniqueness(&self, tuple: &Tuple) -> Result<Option<Key>> {
         for (i, field) in self.schema.fields.iter().enumerate() {
             if field.constraints.unique {
@@ -315,7 +317,7 @@ impl Table {
 
                 return match self.index.as_ref().unwrap().search(self.active_txn, key) {
                     None => Ok(Some(key)),
-                    Some(_) => Err(anyhow!("Duplicate value in unique field {}", field.name)),
+                    Some(_) => bail!(Error::DuplicateKey(format!("{}", key), field.name.clone())),
                 };
             }
         }
@@ -343,11 +345,11 @@ impl Table {
             .writer()
             .into();
 
-        let id = last_page.insert_tuple(&tuple);
+        let inserted_tuple_id = last_page.insert_tuple(&tuple);
 
         self.bpm.lock().unpin(&self.last_page, self.active_txn);
 
-        if let Ok(id) = id {
+        if let Ok(id) = inserted_tuple_id {
             if let Some(key) = key {
                 self.index
                     .as_mut()
@@ -385,6 +387,8 @@ impl Table {
             self.txn_manager.lock().touch_page(id, self.last_page)?;
         }
 
+        let tuple = self.get_tuple(id).unwrap();
+
         let mut page: TablePage = self
             .bpm
             .lock()
@@ -393,6 +397,11 @@ impl Table {
             .into();
 
         page.delete_tuple(slot_id);
+
+        if let Some(id) = self.get_unique_column_id() {
+            let key = tuple.get_value_at(id, &self.schema).unwrap().unwrap().u32();
+            self.index.as_mut().unwrap().delete(self.active_txn, key)?;
+        }
 
         if self.active_txn.is_none() {
             self.bpm.lock().flush(Some(page_id))?;
@@ -403,16 +412,57 @@ impl Table {
         Ok(())
     }
 
+    #[inline]
+    fn get_unique_column_id(&self) -> Option<u8> {
+        self.schema
+            .fields
+            .iter()
+            .position(|field| field.constraints.unique)
+            .map(|i| i as u8)
+    }
+
     pub fn update(&mut self, tuple_id: Option<TupleId>, new_tuple: Tuple) -> Result<TupleId> {
-        if self.active_txn.is_none() {
-            panic!("Table: No active transaction");
+        ensure!(
+            self.active_txn.is_some(),
+            Error::Internal("Table: No active transaction".into())
+        );
+
+        let id = tuple_id.unwrap(); //TODO: Handle None
+
+        self.check_nullability(&new_tuple)?;
+        let key = self.check_uniqueness(&new_tuple);
+
+        // value is not unique, does it collide with
+        // the old (to be deleted) tuple or an existing tuple?
+        if key.is_err() {
+            let unique_column_id = self.get_unique_column_id().unwrap();
+
+            let new_key = new_tuple.get_value_at(unique_column_id, &self.schema)?;
+            let old_tuple = self.get_tuple(id).unwrap();
+            let old_key = old_tuple.get_value_at(unique_column_id, &self.schema)?;
+
+            let unique_column_changed = old_key != new_key;
+
+            // collided with a different tuple
+            if unique_column_changed {
+                let value = match new_key {
+                    Some(new_key) => new_key,
+                    None => Value::Null,
+                };
+
+                let field_name = self
+                    .schema
+                    .fields
+                    .get(unique_column_id as usize)
+                    .unwrap()
+                    .name
+                    .clone();
+
+                bail!(Error::DuplicateKey(format!("{}", value), field_name))
+            }
         }
 
-        match tuple_id {
-            None => todo!(),
-            Some(id) => self.delete(id)?,
-        }
-
+        self.delete(id)?;
         let tuple_id = self.insert(new_tuple)?;
 
         Ok(tuple_id)

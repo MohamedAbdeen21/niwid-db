@@ -1,6 +1,6 @@
 statement ok
 CREATE TABLE "users" (
-	"id" UINT UNIQUE,
+	"id" UINT UNIQUE NOT NULL,
 	"name" TEXT
 );
 

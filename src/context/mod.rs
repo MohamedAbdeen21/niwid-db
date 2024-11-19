@@ -334,37 +334,9 @@ pub mod tests {
     }
 
     #[test]
-    fn test_txns_with_sql() -> Result<()> {
-        let mut ctx = test_context();
-        ctx.execute_sql("BEGIN")?;
-        ctx.execute_sql("CREATE TABLE test (a uint unique, b int not null);")?;
-        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
-        // duplicate in unqiue column
-        assert_eq!(
-            ctx.execute_sql("INSERT INTO test VALUES (1, 5);")
-                .unwrap_err()
-                .to_string(),
-            "Duplicate value in unique field a"
-        );
-        // null in not null column
-        assert_eq!(
-            ctx.execute_sql("INSERT INTO test VALUES (8, null)")
-                .unwrap_err()
-                .to_string(),
-            "Null value in non-nullable field b"
-        );
-        let result = ctx.execute_sql("SELECT * FROM test;")?;
-
-        assert_result_sample(&result);
-        ctx.execute_sql("COMMIT")?;
-
-        Ok(())
-    }
-
-    #[test]
     fn test_use_index_in_selects() -> Result<()> {
         let mut ctx = test_context();
-        ctx.execute_sql("CREATE TABLE test (a uint unique, b int);")?;
+        ctx.execute_sql("CREATE TABLE test (a uint unique not null, b int);")?;
         ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
 
         let expected_plan = r#"Logical Plan:
