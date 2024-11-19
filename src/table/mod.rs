@@ -298,7 +298,7 @@ impl Table {
             if !field.constraints.nullable
                 && tuple.get_value_at(i as u8, &self.schema).unwrap().is_none()
             {
-                return Err(anyhow!("Null value in non-nullable field {}", field.name));
+                bail!(Error::NullNotAllowed(field.name.clone()));
             }
         }
         Ok(())

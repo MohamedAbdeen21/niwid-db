@@ -143,7 +143,7 @@ impl Schema {
 
                 if unique && !not_null {
                     bail!(Error::Unimplemented(
-                        "Null in Unique field. Use NOT NULL for now.".into()
+                        "Nulls are not allowed in Unique columns. Use NOT NULL for now.".into()
                     ))
                 };
 

@@ -7,13 +7,13 @@ INSERT INTO test VALUES (1, 2.3, -4, true);
 statement error Duplicate key 1 in column a
 INSERT INTO test VALUES (1, 2.3, -4, true);
 
-statement error Null value in non-nullable field b.
+statement error NULL is not allowed in column b.
 INSERT INTO test VALUES (2, null, -4, true);
 
 statement ok
 INSERT INTO test VALUES (2, 3.4, 5, false);
 
-statement error Null value in non-nullable field b
+statement error NULL is not allowed in column b
 UPDATE test SET b = null WHERE a = 1;
 
 statement error Duplicate key 1 in column a

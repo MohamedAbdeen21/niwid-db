@@ -320,20 +320,6 @@ pub mod tests {
     }
 
     #[test]
-    fn test_nullability() -> Result<()> {
-        let mut ctx = test_context();
-        ctx.execute_sql("CREATE TABLE test (a int not null, b int);")?;
-        ctx.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4), (4, null);")?;
-        assert_eq!(
-            ctx.execute_sql("INSERT INTO test VALUES (null, 10)")
-                .unwrap_err()
-                .to_string(),
-            "Null value in non-nullable field a"
-        );
-        Ok(())
-    }
-
-    #[test]
     fn test_use_index_in_selects() -> Result<()> {
         let mut ctx = test_context();
         ctx.execute_sql("CREATE TABLE test (a uint unique not null, b int);")?;
