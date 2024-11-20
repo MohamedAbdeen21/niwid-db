@@ -7,6 +7,7 @@ pub enum Error {
     TupleExists,
     TupleNotFound,
     TableNotFound(String),
+    ColumnNotFound(String),
     Unimplemented(String),
     Unsupported(String),
     Expected(String, String),
@@ -44,6 +45,7 @@ impl std::fmt::Display for Error {
                 write!(f, "Duplicate key {key} in column {column}.")
             }
             Error::NullNotAllowed(col) => write!(f, "NULL is not allowed in column {col}."),
+            Error::ColumnNotFound(col) => write!(f, "Column {col} not found."),
         }
     }
 }

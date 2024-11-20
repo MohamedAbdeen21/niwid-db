@@ -100,8 +100,8 @@ impl LogicalPlanBuilder {
         let filter = match selection {
             Some(expr) => build_expr(&expr)?,
             None => {
-                return Err(anyhow!(
-                    "Delete statement must have a where clause, else use truncate"
+                bail!(Error::Unsupported(
+                    "DELETE must contain a WHERE, else use TRUNCATE".into()
                 ))
             }
         };
@@ -117,8 +117,9 @@ impl LogicalPlanBuilder {
 
         let table_name = match &tables.first().unwrap().relation {
             TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-            _ => bail!(anyhow!(Error::Unimplemented("Joins".into()))),
-            // e => todo!("{:?}", e),
+            _ => bail!(anyhow!(Error::Unsupported(
+                "Anything other than `DELETE FROM table_name [condition];`".into()
+            ))),
         };
 
         let schema = self
@@ -168,7 +169,9 @@ impl LogicalPlanBuilder {
                 };
                 ( column, left, Some(right), true)
             }
-            _ => return Err(anyhow!("Invalid index scan, must be of form {{col}} {{op}} {{value}} or {{value}} {{op}} {{col}} or {{col}} BETWEEN {{expr}}"))
+            _ => bail!(Error::Unsupported(
+                "Invalid index scan, must be of form {{col}} {{op}} {{value}} or {{value}} {{op}} {{col}} or {{col}} BETWEEN {{expr}}".into()
+            )),
         };
 
         if let Some(ref rv) = rvalue {
@@ -187,10 +190,12 @@ impl LogicalPlanBuilder {
 
         if let Some(field) = schema.fields.iter().find(|f| f.name == col) {
             if !field.constraints.unique {
-                return Err(anyhow!("Index scan only supported on unique fields"));
+                bail!(Error::Unsupported(
+                    "Index scan only supported on unique fields".into()
+                ));
             }
         } else {
-            return Err(anyhow!("Column {} not found in table {}", col, table_name));
+            bail!(Error::ColumnNotFound(col));
         }
 
         let lvalue = Some(lvalue.u32());
@@ -213,7 +218,10 @@ impl LogicalPlanBuilder {
 
             BinaryOperator::And => (lvalue, true, rvalue, true),
 
-            e => todo!("not supported {:?}", e),
+            e => bail!(Error::Unsupported(format!(
+                "Operator {} in PREWHERE clause",
+                e
+            ))),
         };
 
         Ok(LogicalPlan::IndexScan(IndexScan::new(
@@ -411,7 +419,9 @@ impl LogicalPlanBuilder {
 
         let table_name = match table.relation {
             TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-            e => todo!("{:?}", e),
+            _ => bail!(anyhow!(Error::Unsupported(
+                "Anything other than `UPDATE table_name ...;`".into()
+            ))),
         };
 
         let assignments = self.build_assignemnt(assignments.into_iter().next().unwrap())?;
@@ -582,7 +592,7 @@ impl LogicalPlanBuilder {
                                 join_schema,
                             )))
                         }
-                        _ => todo!(),
+                        _ => bail!(Error::Unsupported("Only supports tables with joins".into())),
                     },
                     None => root,
                 };
@@ -601,7 +611,7 @@ impl LogicalPlanBuilder {
     ) -> Result<LogicalPlan> {
         let select = match *body {
             SetExpr::Select(select) => select,
-            _ => unimplemented!(),
+            _ => unreachable!("Should only be called on SetExpr::Select"),
         };
 
         let mut root = self.build_source(select.from.first(), select.prewhere, txn_id)?;

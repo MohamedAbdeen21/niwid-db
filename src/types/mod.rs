@@ -288,7 +288,7 @@ impl Value {
             Value::Int(Int(v)) => *v != 0,
             Value::Float(Float(v)) => *v != 0.0,
             Value::Str(Str(v)) => !v.is_empty(),
-            Value::Char(Char(_)) => todo!(),
+            Value::Char(Char(_)) => true,
             Value::StrAddr(_) => unreachable!(),
         }
     }
@@ -301,10 +301,10 @@ impl AsBytes for Value {
             Value::Char(v) => v.to_bytes(),
             Value::Str(v) => v.to_bytes(),
             Value::StrAddr(v) => v.to_bytes().into_boxed_slice(),
-            Value::Null => unreachable!("can't convert null to bytes"),
             Value::UInt(v) => v.to_bytes(),
             Value::Int(v) => v.to_bytes(),
             Value::Float(v) => v.to_bytes(),
+            Value::Null => unreachable!("can't convert null to bytes"),
         }
     }
 
@@ -312,7 +312,7 @@ impl AsBytes for Value {
     where
         Self: Sized,
     {
-        unimplemented!("Use ValueFactory instead");
+        unreachable!("This is a stub method. Use ValueFactory, or `lit!` macro instead");
     }
 }
 

@@ -136,9 +136,4 @@ mod tests {
         assert_eq!(map.remove(Some(2), &"table1".to_string()), None);
         Ok(())
     }
-
-    // #[test]
-    // fn test_cow() -> Result<()> {
-    //     todo!()
-    // }
 }
