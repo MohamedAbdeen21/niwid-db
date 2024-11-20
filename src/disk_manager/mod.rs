@@ -216,7 +216,7 @@ impl DiskManager {
 #[cfg(test)]
 impl Drop for DiskManager {
     fn drop(&mut self) {
-        let _ = remove_dir_all(self.path.clone());
+        remove_dir_all(self.path.clone()).unwrap_or_default();
     }
 }
 

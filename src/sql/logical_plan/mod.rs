@@ -456,6 +456,7 @@ impl LogicalPlanBuilder {
         Ok(root)
     }
 
+    // TODO: allow multiple assignments at once
     fn build_assignemnt(&self, assignment: Assignment) -> Result<(String, LogicalExpr)> {
         let Assignment { target, value } = assignment;
 
