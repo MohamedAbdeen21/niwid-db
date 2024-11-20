@@ -845,16 +845,16 @@ mod tests {
         let mut ctx = test_context();
 
         let values = vec![
-            vec![lit!(UInt, "1"), lit!(Str, "hello"), lit!(Char, "a")],
-            vec![lit!(UInt, "2"), lit!(Str, "world"), lit!(Char, "b")],
-            vec![lit!(UInt, "3"), lit!(Str, "hello"), lit!(Char, "c")],
-            vec![lit!(UInt, "4"), lit!(Str, "world"), lit!(Char, "d")],
+            vec![lit!(UInt, "1"), lit!(Str, "hello"), lit!(Str, "a")],
+            vec![lit!(UInt, "2"), lit!(Str, "world"), lit!(Str, "b")],
+            vec![lit!(UInt, "3"), lit!(Str, "hello"), lit!(Str, "c")],
+            vec![lit!(UInt, "4"), lit!(Str, "world"), lit!(Str, "d")],
         ];
 
         let schema = Schema::new(vec![
             Field::new("col_1", Types::UInt, Constraints::unique(true)),
             Field::new("col_2", Types::Str, Constraints::nullable(false)),
-            Field::new("col_3", Types::Char, Constraints::nullable(false)),
+            Field::new("col_3", Types::Str, Constraints::nullable(false)),
         ]);
 
         let root = identity_plan(&values, &schema.fields);

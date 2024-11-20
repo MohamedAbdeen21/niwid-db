@@ -17,7 +17,6 @@ pub enum Types {
     Int,
     Float,
     Bool,
-    Char,
     /// string is stored as a [`TupleId`] to a blob page
     Str,
     StrAddr,
@@ -30,7 +29,7 @@ impl Types {
     pub fn size(&self) -> usize {
         match self {
             Types::Null => unreachable!("Nulls should be mapped correctly during Tuple creation"),
-            Types::Char | Types::Bool => 1,
+            Types::Bool => 1,
             Types::Str | Types::StrAddr => TUPLE_ID_SIZE,
             Types::UInt | Types::Int | Types::Float => 4,
         }
@@ -42,7 +41,6 @@ impl Types {
             Types::Int => "INT".to_string(),
             Types::Float => "FLOAT".to_string(),
             Types::Bool => "BOOLEAN".to_string(),
-            Types::Char => "CHAR".to_string(),
             Types::Str => "TEXT".to_string(),
             Types::StrAddr | Types::Null => unreachable!(),
         }
@@ -58,9 +56,7 @@ impl Types {
                 | (Types::Int, Types::Int)
                 | (Types::Float, Types::Float)
                 | (Types::Bool, Types::Bool)
-                | (Types::Char, Types::Char)
                 | (Types::Str, Types::Str)
-                // | (Types::UInt, Types::Int)
                 | (Types::Int, Types::UInt)
                 | (Types::StrAddr, Types::StrAddr)
                 | (Types::Null, _)
@@ -73,8 +69,7 @@ impl Types {
             "UINT" | "INT UNSIGNED" => Types::UInt,
             "INT" => Types::Int,
             "FLOAT" => Types::Float,
-            "BOOLEAN" => Types::Bool,
-            "CHAR" => Types::Char,
+            "BOOLEAN" | "BOOL" => Types::Bool,
             "VARCHAR" | "TEXT" => Types::Str,
             _ => panic!("Unsupported type: {}", s),
         }
@@ -115,7 +110,7 @@ impl Value {
     }
 }
 
-impl_value_methods!(Int(i32), Float(f32), UInt(u32), Bool(bool), Char(char),);
+impl_value_methods!(Int(i32), Float(f32), UInt(u32), Bool(bool));
 
 pub type StrAddr = TupleId;
 
@@ -125,7 +120,6 @@ pub enum Value {
     Int(Int),
     Float(Float),
     Bool(Bool),
-    Char(Char),
     Str(Str),
     StrAddr(StrAddr),
     Null,
@@ -138,7 +132,6 @@ impl Value {
             Value::Int(v) => v.to_string(),
             Value::Float(v) => v.to_string(),
             Value::Bool(v) => v.to_string(),
-            Value::Char(v) => v.to_string(),
             Value::Str(v) => v.to_string(),
             Value::Null => "null".to_string(),
             Value::StrAddr(_) => unreachable!(),
@@ -227,17 +220,9 @@ impl Value {
             (Value::Int(l), Value::Int(r)) => Ok(l == r),
             (Value::Float(l), Value::Float(r)) => Ok(l == r),
             (Value::Bool(l), Value::Bool(r)) => Ok(l == r),
-            (Value::Char(l), Value::Char(r)) => Ok(l == r),
             (Value::Str(l), Value::Str(r)) => Ok(l == r),
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(*l as u32 == *r),
             (Value::UInt(UInt(l)), Value::Int(Int(r))) => Ok(*l == *r as u32),
-            (Value::Char(Char(l)), Value::Str(Str(r))) => {
-                if r.len() != 1 {
-                    Ok(false)
-                } else {
-                    Ok(*l == r.chars().next().unwrap())
-                }
-            }
             (l, r) => bail!(Error::Unimplemented(format!("{} = {}", l, r))),
         }
     }
@@ -256,7 +241,6 @@ impl PartialOrd for Value {
             (Value::Int(l), Value::Int(r)) => l.partial_cmp(r),
             (Value::Float(l), Value::Float(r)) => l.partial_cmp(r),
             (Value::Bool(l), Value::Bool(r)) => l.partial_cmp(r),
-            (Value::Char(l), Value::Char(r)) => l.partial_cmp(r),
             (Value::Str(l), Value::Str(r)) => l.partial_cmp(r),
             (Value::Null, Value::Null) => Some(std::cmp::Ordering::Equal),
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => l.partial_cmp(&(*r as i32)),
@@ -270,7 +254,6 @@ impl Value {
     pub fn get_type(&self) -> Types {
         match self {
             Value::Bool(_) => Types::Bool,
-            Value::Char(_) => Types::Char,
             Value::Str(_) => Types::Str,
             Value::StrAddr(_) => Types::StrAddr,
             Value::UInt(_) => Types::UInt,
@@ -288,7 +271,6 @@ impl Value {
             Value::Int(Int(v)) => *v != 0,
             Value::Float(Float(v)) => *v != 0.0,
             Value::Str(Str(v)) => !v.is_empty(),
-            Value::Char(Char(_)) => true,
             Value::StrAddr(_) => unreachable!(),
         }
     }
@@ -298,7 +280,6 @@ impl AsBytes for Value {
     fn to_bytes(&self) -> Box<[u8]> {
         match self {
             Value::Bool(v) => v.to_bytes(),
-            Value::Char(v) => v.to_bytes(),
             Value::Str(v) => v.to_bytes(),
             Value::StrAddr(v) => v.to_bytes().into_boxed_slice(),
             Value::UInt(v) => v.to_bytes(),
@@ -324,7 +305,6 @@ impl Display for Value {
             Value::UInt(v) => write!(f, "{:?}", v.0),
             Value::Float(v) => write!(f, "{:?}", v.0),
             Value::Bool(v) => write!(f, "{:?}", v.0),
-            Value::Char(v) => write!(f, "{:?}", v.0),
             Value::Str(v) => write!(f, "{:?}", v.0),
             Value::StrAddr(v) => write!(f, "{:?}", v),
         }
@@ -514,7 +494,6 @@ macro_rules! impl_fn {
             Types::Bool => Value::Bool(Bool::$method($($arg)?)),
             Types::UInt => Value::UInt(UInt::$method($($arg)?)),
             Types::Int => Value::Int(Int::$method($($arg)?)),
-            Types::Char => Value::Char(Char::$method($($arg)?)),
             Types::StrAddr => Value::StrAddr(TupleId::$method($($arg)?)),
             Types::Null => unreachable!(),
         }
@@ -578,7 +557,6 @@ mod test {
                 'U' => Some(Types::UInt),
                 'B' => Some(Types::Bool),
                 'F' => Some(Types::Float),
-                'C' => Some(Types::Char),
                 _ => None,
             }
         }
@@ -590,7 +568,6 @@ mod test {
                 Types::UInt => 'U',
                 Types::Bool => 'B',
                 Types::Float => 'F',
-                Types::Char => 'C',
                 Types::StrAddr | Types::Null => unreachable!(),
             }
         }

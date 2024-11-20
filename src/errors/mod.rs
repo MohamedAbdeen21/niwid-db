@@ -11,6 +11,7 @@ pub enum Error {
     Unimplemented(String),
     Unsupported(String),
     Expected(String, String),
+    /// expected, actual
     TypeMismatch(Vec<Types>, Vec<Types>),
     TransactionActive,
     NoActiveTransaction,
@@ -37,7 +38,8 @@ impl std::fmt::Display for Error {
             Error::TypeMismatch(expected, actual) => {
                 write!(
                     f,
-                    "Type mismatch: Expected {expected:?}, but got {actual:?}."
+                    "Type mismatch: Expected {:?}, but got {:?}.",
+                    expected, actual,
                 )
             }
             Error::DivisionByZero => write!(f, "Division by zero."),
