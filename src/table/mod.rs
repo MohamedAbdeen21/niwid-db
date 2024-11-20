@@ -9,7 +9,7 @@ use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
-use crate::types::{Str, StrAddr, Types, Value, ValueFactory};
+use crate::types::{Str, StrAddr, Types, ValueFactory};
 use anyhow::{anyhow, bail, ensure, Result};
 
 pub mod table_iterator;
@@ -296,7 +296,7 @@ impl Table {
     fn check_nullability(&self, tuple: &Tuple) -> Result<()> {
         for (i, field) in self.schema.fields.iter().enumerate() {
             if !field.constraints.nullable
-                && tuple.get_value_at(i as u8, &self.schema).unwrap().is_none()
+                && tuple.get_value_at(i as u8, &self.schema).unwrap().is_null()
             {
                 bail!(Error::NullNotAllowed(field.name.clone()));
             }
@@ -313,7 +313,7 @@ impl Table {
                 // unwrap on option because nullability is checked first and
                 // uniquness disallows null values
                 // also, schema forces unique columns to be of type u32
-                let key = tuple.get_value_at(i as u8, &self.schema)?.unwrap().u32();
+                let key = tuple.get_value_at(i as u8, &self.schema)?.u32();
 
                 return match self.index.as_ref().unwrap().search(self.active_txn, key) {
                     None => Ok(Some(key)),
@@ -399,7 +399,7 @@ impl Table {
         page.delete_tuple(slot_id);
 
         if let Some(id) = self.get_unique_column_id() {
-            let key = tuple.get_value_at(id, &self.schema).unwrap().unwrap().u32();
+            let key = tuple.get_value_at(id, &self.schema)?.u32();
             self.index.as_mut().unwrap().delete(self.active_txn, key)?;
         }
 
@@ -445,11 +445,6 @@ impl Table {
 
             // collided with a different tuple
             if unique_column_changed {
-                let value = match new_key {
-                    Some(new_key) => new_key,
-                    None => Value::Null,
-                };
-
                 let field_name = self
                     .schema
                     .fields
@@ -458,7 +453,7 @@ impl Table {
                     .name
                     .clone();
 
-                bail!(Error::DuplicateKey(format!("{}", value), field_name))
+                bail!(Error::DuplicateKey(format!("{}", new_key), field_name))
             }
         }
 
@@ -648,7 +643,7 @@ mod tests {
         let mut counter = 0;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
-            let tuple_bytes = tuple.get_value_of("str", &schema)?.unwrap();
+            let tuple_bytes = tuple.get_value_of("str", &schema)?;
             let string = table.fetch_string(tuple_bytes.str_addr());
             assert_eq!(
                 string,

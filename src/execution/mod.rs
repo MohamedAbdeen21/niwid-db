@@ -271,15 +271,20 @@ impl Executable for Update {
 
         let (_, mask) = self.selection.evaluate(&input)?;
 
-        let (selected_col, expr) = self.assignments;
+        let (selected_cols, exprs): (Vec<String>, Vec<_>) = self.assignments.into_iter().unzip();
 
         let schema = table.get_schema();
 
-        let updated_col_id = schema
-            .fields
-            .iter()
-            .position(|f| f.name == selected_col)
-            .ok_or_else(|| anyhow!("Column {} does not exist", selected_col))?;
+        let updated_cols_ids = selected_cols
+            .into_iter()
+            .map(|col| {
+                schema
+                    .fields
+                    .iter()
+                    .position(|f| f.name == col)
+                    .ok_or_else(|| anyhow!("Column {} does not exist", col))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let selected_rows = input
             .rows()
@@ -300,8 +305,10 @@ impl Executable for Update {
 
             let mut new_tuple = row[2..].to_vec();
 
-            for value in expr.evaluate(&input)?.1 {
-                new_tuple[updated_col_id] = value;
+            for (updated_col_id, expr) in updated_cols_ids.iter().zip(exprs.iter()) {
+                for value in expr.evaluate(&input)?.1 {
+                    new_tuple[*updated_col_id] = value;
+                }
             }
 
             let new_tuple = Tuple::new(new_tuple, &schema);

@@ -218,8 +218,9 @@ pub mod tests {
 
         ctx1.execute_sql("BEGIN")?;
         ctx1.execute_sql("CREATE TABLE test (a int, b int);")?;
-        let catalog = ctx1.execute_sql("SELECT * FROM __CATALOG__")?;
-        assert!(!catalog.is_empty()); // TODO: Check actual values
+        let catalog = ctx1.execute_sql("SELECT table_name FROM __CATALOG__")?;
+        assert_eq!(catalog.rows().len(), 1);
+        assert_eq!(catalog.rows()[0][0], lit!(Str, "test"));
         ctx1.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
 
         let result = ctx1.execute_sql("SELECT * FROM test;")?;

@@ -275,7 +275,7 @@ pub struct Update {
     // to be the only way to access tuples, mainly for str indirection
     pub input: LogicalPlan,
     pub table_name: String,
-    pub assignments: (String, LogicalExpr),
+    pub assignments: Vec<(String, LogicalExpr)>,
     pub selection: LogicalExpr,
 }
 
@@ -283,7 +283,7 @@ impl Update {
     pub fn new(
         input: LogicalPlan,
         table_name: String,
-        assignments: (String, LogicalExpr),
+        assignments: Vec<(String, LogicalExpr)>,
         filter: LogicalExpr,
     ) -> Self {
         Self {
@@ -300,11 +300,14 @@ impl Update {
 
     pub fn print(&self, indent: usize) -> String {
         format!(
-            "{} Update: {} [#{} = {}]\n{}",
+            "{} Update: {} [{}]\n{}",
             "-".repeat(indent * 2),
             self.table_name,
-            self.assignments.0,
-            self.assignments.1.print(),
+            self.assignments
+                .iter()
+                .map(|(col, value)| format!("#{} = {}", col, value.print()))
+                .collect::<Vec<_>>()
+                .join(", "),
             self.input.print_indent(indent + 1)
         )
     }

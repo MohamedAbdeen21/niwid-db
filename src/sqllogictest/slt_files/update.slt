@@ -45,3 +45,19 @@ SELECT a FROM test;
 ----
 1
 3
+
+query UFIB
+SELECT a, b, c, d FROM test;
+----
+1 2.3 -4 true
+3 3.4 5 true
+
+statement ok
+UPDATE test SET a = 5, b = 6.7, c = 8, d = false WHERE a = 1;
+
+query UFIB
+SELECT a, b, c, d FROM test;
+----
+3 3.4 5 true
+5 6.7 8 false
+

@@ -74,7 +74,7 @@ impl Tuple {
         self.data.is_empty()
     }
 
-    pub fn get_value_of(&self, field: &str, schema: &Schema) -> Result<Option<Value>> {
+    pub fn get_value_of(&self, field: &str, schema: &Schema) -> Result<Value> {
         let field_id = schema
             .fields
             .iter()
@@ -105,13 +105,13 @@ impl Tuple {
         Ok(values)
     }
 
-    pub fn get_value_at(&self, id: u8, schema: &Schema) -> Result<Option<Value>> {
+    pub fn get_value_at(&self, id: u8, schema: &Schema) -> Result<Value> {
         if id as usize >= schema.fields.len() {
             return Err(anyhow!("field id out of bounds"));
         }
 
         if (self._null_bitmap >> id) & 1 == 1 {
-            return Ok(None);
+            return Ok(Value::Null);
         }
 
         let types: Vec<_> = schema.fields.iter().map(|f| &f.ty).collect();
@@ -128,7 +128,7 @@ impl Tuple {
 
         let slice = &self.data[offset..offset + dtype.size()];
         let value = ValueFactory::from_bytes(dtype, slice);
-        Ok(Some(value))
+        Ok(value)
     }
 
     pub fn get_data(&self) -> &[u8] {

@@ -408,10 +408,6 @@ impl LogicalPlanBuilder {
         selection: Option<Expr>,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
-        if assignments.len() > 1 {
-            return Err(anyhow!("Multiple assignments are not supported"));
-        };
-
         let filter = match selection {
             Some(expr) => build_expr(&expr)?,
             None => LogicalExpr::Literal(lit!(Bool, "true".to_string())),
@@ -424,7 +420,10 @@ impl LogicalPlanBuilder {
             ))),
         };
 
-        let assignments = self.build_assignemnt(assignments.into_iter().next().unwrap())?;
+        let assignments = assignments
+            .into_iter()
+            .map(|a| self.build_assignemnt(a))
+            .collect::<Result<Vec<_>>>()?;
 
         let schema = self
             .catalog
@@ -432,20 +431,20 @@ impl LogicalPlanBuilder {
             .get_schema(&table_name, txn_id)
             .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
 
-        if !schema.fields.iter().any(|f| *f.name == assignments.0) {
-            return if schema.is_qualified() {
-                Err(anyhow!(
-                    "Please use qualified column names {}.{}",
-                    table_name,
-                    assignments.0
-                ))
-            } else {
-                Err(anyhow!(
-                    "Column {} does not exist in table {}",
-                    assignments.0,
-                    table_name
-                ))
-            };
+        for (col, _) in assignments.iter() {
+            if !schema.fields.iter().any(|f| &f.name == col) {
+                if schema.is_qualified() {
+                    bail!(Error::ColumnNotFound(format!(
+                        "Please use qualified column names {}.{}",
+                        table_name, col
+                    )))
+                } else {
+                    bail!(Error::ColumnNotFound(format!(
+                        "Column {} does not exist in table {}",
+                        col, table_name
+                    )))
+                };
+            }
         }
 
         let root = LogicalPlan::Scan(Scan::new(table_name.clone(), schema));
