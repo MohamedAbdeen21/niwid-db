@@ -6,8 +6,9 @@
 
 1. [Features](#features)
 2. [Getting Started](#getting-started)
-3. [Some Implementation Details](#some-implementation-details)
-4. [Contributing](#contributing)
+3. [Examples](#examples)
+4. [Some Implementation Details](#some-implementation-details)
+5. [Contributing](#contributing)
 
 ## Features
 
@@ -15,7 +16,7 @@
 
 - **Transaction Management**: Supports **commits** and **rollbacks** to execute or discard changes within a transaction block to ensure transactional atomicity and isolation.
 
-- **Custom Execution Engine**: A simple query engine that processes SQL statements, validates the query and datatypes, and performs basic DDL, TCL, and DML operations. Also supports "EXPLAIN" and "EXPLAIN ANALYZE". Unoptimized logical plans are executed directly, no physical plan generation or optimizations yet.
+- **Custom Execution Engine**: A simple query engine that processes SQL statements, validates the query and datatypes, and performs basic DDL, TCL, and DML operations. Also supports `EXPLAIN` and `EXPLAIN ANALYZE`. Unoptimized logical plans are executed directly, no physical plan generation or optimizations yet.
 
 - **SQL Parsing**: The only part not written from scratch. Leverages the `sqlparser-rs` crate for SQL syntax parsing.
 
@@ -71,12 +72,14 @@ UPDATE users SET email = 'bob@example.com' WHERE id = 1;
 ROLLBACK; -- Discards the update
 ```
 
+## Examples
+
 For more examples, check out [the sqllogictests](https://github.com/MohamedAbdeen21/niwid-db/tree/main/src/sqllogictest/slt_files). If you're not familiar with slt files, check out [how to read sqllogictests](https://github.com/MohamedAbdeen21/niwid-db/blob/main/src/sqllogictest/README.md)
 
 ## Some implementation details
 
 - Slotted pages, with string indirection and a B+ Tree Index.
-- LRU eviction policy
+- LRU page eviction policy
 - Shadow-Paging for ACID. No MVCC, OCC, 2PL, or WAL.
 - Simple query engine, directly execute the raw logicial plan. No optimizer, or physical plan builder. The project focused on
 exploring the internals of the database, not the query engine.
