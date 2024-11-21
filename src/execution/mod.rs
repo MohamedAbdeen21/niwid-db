@@ -632,7 +632,9 @@ impl BooleanBinaryExpr {
             BinaryOperator::Lt => Ok(left < right),
             BinaryOperator::GtEq => Ok(left >= right),
             BinaryOperator::LtEq => Ok(left <= right),
-            e => bail!(Error::Unsupported(format!(
+            BinaryOperator::And => Ok(left.is_truthy() && right.is_truthy()),
+            BinaryOperator::Or => Ok(left.is_truthy() || right.is_truthy()),
+            e => bail!(Error::Unimplemented(format!(
                 "Binary Operator evaluation {}",
                 e
             ))),
@@ -679,7 +681,19 @@ impl BooleanBinaryExpr {
             (LogicalExpr::Literal(v1), LogicalExpr::Literal(v2)) => {
                 Ok([self.eval_op(v1, v2)?].repeat(input.len()))
             }
-            (l, r) => bail!(Error::Unsupported(format!("{:?} {} {:?}", l, self.op, r))),
+            (LogicalExpr::BinaryExpr(v1), LogicalExpr::BinaryExpr(v2)) => {
+                let left = v1.evaluate(input)?;
+                let right = v2.evaluate(input)?;
+                Ok(left
+                    .into_iter()
+                    .zip(right)
+                    .map(|(l, r)| self.eval_op(&l, &r))
+                    .collect::<Result<Vec<_>>>()?)
+            }
+            (l, r) => bail!(Error::Unimplemented(format!(
+                "Boolean Expr Eval: {:?} {} {:?}",
+                l, self.op, r
+            ))),
         }
     }
 }

@@ -876,8 +876,13 @@ impl TryFrom<Expr> for LogicalExpr {
 
                 Ok(LogicalExpr::Literal(ValueFactory::from_string(&ty, &v)))
             }
+            Expr::BinaryOp { left, right, op } => {
+                let l: LogicalExpr = (*left).try_into()?;
+                let r: LogicalExpr = (*right).try_into()?;
+                Ok(LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(l, op, r))))
+            }
             e => bail!(Error::Unimplemented(format!(
-                "Casting Expr {} to LogicalExpr",
+                "Casting Expr {:?} to LogicalExpr",
                 e
             ))),
         }

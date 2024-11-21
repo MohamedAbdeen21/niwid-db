@@ -23,11 +23,39 @@ INSERT INTO test VALUES (4, 5.6, 7, 'd');
 statement ok
 INSERT INTO test VALUES (5, 6.7, 8, 'e');
 
+# Usually, the query optimizer decides when to
+# use the index. In this case, we don't have an optimizer
+# and therefore need to explicitly call the index with `PREWHERE`
 query US
-SELECT a, d FROM test;
+SELECT a, d FROM test PREWHERE (a >= 1);
 ----
 1 a
 2 b
 3 c
 4 d
 5 e
+
+query U
+SELECT a FROM test PREWHERE (a < 3);
+----
+1
+2
+
+query U
+SELECT a FROM test PREWHERE (a BETWEEN 1 AND 4);
+----
+1
+2
+3
+4
+
+query US
+SELECT a FROM test PREWHERE (a = 5);
+----
+5
+
+query U
+SELECT a FROM test PREWHERE (a <= 4) WHERE a = 1 OR a = 2;
+----
+1
+2
