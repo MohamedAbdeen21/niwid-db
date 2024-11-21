@@ -61,7 +61,7 @@ CREATE TABLE users (
     email TEXT UNIQUE
 );
 
-INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com');
+INSERT INTO users VALUES (1, 'Alice', 'alice@example.com');
 ```
 
 You can also use transactions to batch operations:
