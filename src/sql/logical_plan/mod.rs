@@ -332,6 +332,10 @@ impl LogicalPlanBuilder {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        if rows.is_empty() {
+            return Err(anyhow!("VALUES must have at least one row"));
+        }
+
         let fields = rows
             .first()
             .unwrap()

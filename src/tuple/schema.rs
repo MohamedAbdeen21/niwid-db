@@ -134,7 +134,7 @@ impl Schema {
                     }
                 }
 
-                let type_ = Types::from_sql(&data_type.to_string());
+                let type_ = Types::from_sql(&data_type.to_string())?;
                 if unique && type_ != Types::UInt {
                     bail!(Error::Unsupported(
                         "Unique field must be of type uint, sorry".into()
@@ -181,6 +181,7 @@ impl Schema {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::Error;
     use anyhow::Result;
     use sqlparser::ast::{CreateTable, Statement};
     use sqlparser::dialect::GenericDialect;
@@ -201,8 +202,6 @@ mod tests {
             schema.to_sql()
         );
 
-        // println!("SQL: {}", sql);
-
         let statment = Parser::new(&GenericDialect)
             .try_with_sql(&sql)?
             .parse_statement()?;
@@ -211,7 +210,7 @@ mod tests {
             Statement::CreateTable(CreateTable { columns, .. }) => {
                 assert_eq!(Schema::from_sql(columns)?, schema);
             }
-            _ => panic!(),
+            e => bail!(Error::Expected("CreateTable".into(), e.to_string())),
         }
 
         Ok(())

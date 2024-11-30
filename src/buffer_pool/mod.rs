@@ -337,7 +337,11 @@ impl BufferPoolManager {
             .inspect(|f| {
                 let pins = f.get_pin_count();
                 if pins != 0 {
-                    panic!("Frame {} has pin count {}", f.get_page_id(), pins);
+                    panic!(
+                        "Internal Error: Frame {} has pin count {}",
+                        f.get_page_id(),
+                        pins
+                    );
                 }
             })
             .map(|f| f.reader())

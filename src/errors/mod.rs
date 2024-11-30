@@ -10,6 +10,7 @@ pub enum Error {
     ColumnNotFound(String),
     Unimplemented(String),
     Unsupported(String),
+    /// expected, actual
     Expected(String, String),
     /// expected, actual
     TypeMismatch(Vec<Types>, Vec<Types>),

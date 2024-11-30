@@ -379,8 +379,10 @@ impl Executable for Values {
             })
             .collect::<Result<Vec<_>>>()?
             .into_iter()
-            .reduce(|a, b| a.union(b))
-            .unwrap_or_default();
+            .try_fold(
+                ResultSet::from_rows(self.schema.fields, vec![]), // Start with the default ResultSet
+                |acc, rs| acc.union(rs),
+            )?;
 
         Ok(output)
     }
@@ -811,7 +813,7 @@ mod tests {
             Field::new("col_2", Types::Str, Constraints::nullable(false)),
         ]);
         let expected = ResultSet::from_rows(schema.fields.clone(), values);
-        let plan = Values::new(input, Schema::default());
+        let plan = Values::new(input, schema);
 
         let output = plan.execute(&mut ctx).unwrap();
 

@@ -1,5 +1,8 @@
 use std::mem::take;
 
+use anyhow::{bail, Result};
+
+use crate::errors::Error;
 use crate::tuple::schema::{Field, Schema};
 use crate::types::Value;
 
@@ -99,14 +102,17 @@ impl ResultSet {
         self.len() == 0
     }
 
-    pub fn union(mut self, other: ResultSet) -> Self {
+    pub fn union(mut self, other: ResultSet) -> Result<Self> {
         if self
             .fields()
             .iter()
             .zip(other.fields())
             .any(|(f1, f2)| !f1.ty.is_compatible(&f2.ty))
         {
-            panic!("Schema mismatch");
+            bail!(Error::TypeMismatch(
+                self.fields().iter().map(|f| f.ty.clone()).collect(),
+                other.fields().iter().map(|f| f.ty.clone()).collect()
+            ));
         }
 
         for (i, col) in other.cols.into_iter().enumerate() {
@@ -114,7 +120,7 @@ impl ResultSet {
         }
 
         self.cap = self.cols.first().map_or(0, Vec::len);
-        self
+        Ok(self)
     }
 
     pub fn select(mut self, indexes: Vec<usize>) -> Self {

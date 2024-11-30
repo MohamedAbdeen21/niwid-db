@@ -64,15 +64,15 @@ impl Types {
         )
     }
 
-    pub fn from_sql(s: &str) -> Self {
-        match s.to_uppercase().as_str() {
+    pub fn from_sql(s: &str) -> Result<Self> {
+        Ok(match s.to_uppercase().as_str() {
             "UINT" | "INT UNSIGNED" => Types::UInt,
             "INT" => Types::Int,
             "FLOAT" => Types::Float,
             "BOOLEAN" | "BOOL" => Types::Bool,
             "VARCHAR" | "TEXT" => Types::Str,
-            _ => panic!("Unsupported type: {}", s),
-        }
+            _ => bail!(Error::Unsupported(format!("Unsupported type: {}", s))),
+        })
     }
 }
 
@@ -84,7 +84,7 @@ macro_rules! impl_value_methods {
                     if let Value::$variant(v) = self {
                         v.0.clone()
                     } else {
-                        panic!("forced conversion error: {:?} => {}", self, stringify!($variant))
+                        panic!("Internal Error: forced conversion error: {:?} => {}", self, stringify!($variant))
                     }
                 }
             )*
@@ -99,7 +99,10 @@ impl Value {
         } else if let Value::StrAddr(v) = self {
             *v
         } else {
-            panic!("forced conversion error: {:?} => StrAddr", self)
+            panic!(
+                "Internal Error: forced conversion error: {:?} => StrAddr",
+                self
+            )
         }
     }
 }
@@ -342,8 +345,6 @@ pub struct Float(pub f32);
 pub struct Bool(pub bool);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Str(pub String);
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Char(pub char);
 
 impl Primitive for UInt {
     fn default() -> Self {
@@ -424,29 +425,6 @@ impl AsBytes for Bool {
     }
 }
 
-impl Primitive for Char {
-    fn default() -> Self {
-        Char('\0')
-    }
-
-    fn from_string(s: &str) -> Self {
-        if s.len() != 1 {
-            panic!("Invalid input to char: {}", s);
-        }
-        Char(s.chars().next().unwrap())
-    }
-}
-
-impl AsBytes for Char {
-    fn to_bytes(&self) -> Box<[u8]> {
-        vec![self.0 as u8].into_boxed_slice()
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Self {
-        Char(bytes[0] as char)
-    }
-}
-
 impl Primitive for Str {
     fn default() -> Self {
         Str(String::new())
@@ -515,7 +493,6 @@ impl_display!(UInt);
 impl_display!(Int);
 impl_display!(Bool);
 impl_display!(Str);
-impl_display!(Char);
 
 #[macro_export]
 macro_rules! lit {

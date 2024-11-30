@@ -236,7 +236,7 @@ impl TablePage {
         let _rguard = self.latch.rguard();
         let slot = self.get_slot(slot).unwrap_or_else(|| {
             panic!(
-                "Page: {} Asked for invalid slot {} size {}\n{:?}",
+                "Internal Error: Page {} Asked for invalid slot {} size {}\n{:?}",
                 self.page_id,
                 slot,
                 self.header().get_num_tuples(),
