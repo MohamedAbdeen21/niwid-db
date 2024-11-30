@@ -10,7 +10,7 @@ use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{Str, StrAddr, Types, ValueFactory};
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{bail, ensure, Result};
 
 pub mod table_iterator;
 
@@ -139,7 +139,7 @@ impl Table {
 
     fn insert_string(&mut self, bytes: &[u8]) -> Result<TupleId> {
         if bytes.len() > PAGE_END - SLOT_SIZE {
-            return Err(anyhow!("Tuple is too long"));
+            bail!(Error::TupleTooBig(PAGE_END - SLOT_SIZE, bytes.len()));
         }
 
         let tuple = Tuple::new(
@@ -262,7 +262,7 @@ impl Table {
             self.active_txn = None;
             Ok(())
         } else {
-            Err(anyhow!("Table: No active transaction"))
+            bail!(Error::NoActiveTransaction);
         }
     }
 
@@ -326,7 +326,10 @@ impl Table {
 
     pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
         if tuple.len() > PAGE_END - (SLOT_SIZE + META_SIZE) {
-            return Err(anyhow!("Tuple is too long"));
+            bail!(Error::TupleTooBig(
+                PAGE_END - (SLOT_SIZE + META_SIZE),
+                tuple.len()
+            ));
         }
 
         self.check_nullability(&tuple)?;
@@ -491,7 +494,7 @@ mod tests {
     use crate::tuple::schema::{Field, Schema};
     use crate::txn_manager::tests::test_arc_transaction_manager;
     use crate::{lit, types::*};
-    use anyhow::Result;
+    use anyhow::{anyhow, Result};
 
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
         let bpm = test_arc_bpm(size);

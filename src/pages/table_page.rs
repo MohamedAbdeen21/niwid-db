@@ -3,7 +3,7 @@ use super::{Page, SlotId, PAGE_SIZE};
 use crate::errors::Error;
 use crate::latch::Latch;
 use crate::tuple::{Entry, Tuple, TupleId, TupleMetaData};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use core::panic;
 use std::{mem, slice, sync::Arc};
 
@@ -168,7 +168,10 @@ impl TablePage {
         let entry_size = tuple.len() + META_SIZE;
         if entry_size + SLOT_SIZE > self.free_space() {
             self.latch.wunlock();
-            return Err(anyhow!("Not enough space to insert tuple"));
+            bail!(Error::TupleTooBig(
+                self.free_space(),
+                entry_size + SLOT_SIZE
+            ));
         }
 
         let last_offset = self.last_tuple_offset();

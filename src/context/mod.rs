@@ -5,7 +5,7 @@ use crate::sql::logical_plan::optimizer::optimize_logical_plan;
 use crate::sql::logical_plan::LogicalPlanBuilder;
 use crate::sql::parser::parse;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{bail, ensure, Result};
 
 pub struct Context {
     catalog: ArcCatalog,
@@ -59,7 +59,7 @@ impl Context {
 
     pub fn commit_txn(&mut self) -> Result<()> {
         if self.active_txn.is_none() {
-            return Err(anyhow!("Context: No active transaction"));
+            bail!(Error::NoActiveTransaction);
         }
 
         self.txn_manager.lock().commit(self.active_txn.unwrap())?;

@@ -394,7 +394,10 @@ impl Executable for Insert {
         let input = self.input.execute(ctx)?;
 
         if input.fields().len() != self.table_schema.fields.len() {
-            return Err(anyhow!("Column count mismatch"));
+            bail!(Error::Expected(
+                format!("{} values", self.table_schema.fields.len()),
+                input.fields().len().to_string(),
+            ));
         }
 
         for row in input.rows() {

@@ -1,8 +1,9 @@
+use crate::errors::Error;
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
 use crate::printdbg;
 use crate::txn_manager::TxnId;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -90,7 +91,9 @@ impl DiskManager {
 
     pub fn write_to_file<T: DiskWritable>(&self, page: &T, txn_id: Option<TxnId>) -> Result<()> {
         if page.get_page_id() == INVALID_PAGE {
-            return Err(anyhow!("Asked to write a page with invalid ID"));
+            bail!(Error::Internal(
+                "Asked to write a page with invalid ID".into()
+            ));
         }
 
         let root = match txn_id {

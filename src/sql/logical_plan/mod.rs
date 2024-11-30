@@ -112,7 +112,9 @@ impl LogicalPlanBuilder {
         };
 
         if tables.len() != 1 {
-            return Err(anyhow!("Delete statement must have a single table"));
+            bail!(Error::Unsupported(
+                "Only one table per DELETE statement".into()
+            ));
         }
 
         let table_name = match &tables.first().unwrap().relation {
@@ -251,11 +253,13 @@ impl LogicalPlanBuilder {
             return Err(anyhow!("Did you mean 'TRUNCATE TABLE'?"));
         }
 
+        // TODO: handle multiple tables
         if table_names.len() != 1 {
-            return Err(anyhow!("Only single table can be truncated"));
+            bail!(Error::Unsupported(
+                "Only one table per TRUNCATE statement".into()
+            ));
         }
 
-        // TODO: handle multiple tables
         let table_name = table_names
             .first()
             .unwrap()
@@ -267,7 +271,7 @@ impl LogicalPlanBuilder {
             .clone();
 
         if self.catalog.read().get_table(&table_name, txn_id).is_none() {
-            return Err(anyhow!("Table {} does not exist", table_name));
+            bail!(Error::TableNotFound(table_name));
         }
 
         Ok(LogicalPlan::Truncate(Truncate::new(table_name)))
@@ -326,14 +330,21 @@ impl LogicalPlanBuilder {
                 row.into_iter()
                     .map(|expr| match expr {
                         Expr::Value(_) | Expr::UnaryOp { .. } => build_expr(&expr),
-                        e => Err(anyhow!("Unsupported expression in VALUES: {:?}", e)),
+                        e => bail!(Error::Unsupported(format!(
+                            "Unsupported expression in VALUES: {:?}",
+                            e
+                        ))),
                     })
                     .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?;
 
+        // should never happen because sqlparser doesn't allow empty rows
         if rows.is_empty() {
-            return Err(anyhow!("VALUES must have at least one row"));
+            bail!(Error::Expected(
+                "VALUES to have at least one row".into(),
+                "No rows".into(),
+            ))
         }
 
         let fields = rows
@@ -650,7 +661,7 @@ impl LogicalPlanBuilder {
                     .join(".");
 
                 if !root.schema().fields.iter().any(|f| f.name == name) {
-                    return Err(anyhow!("Column {} does not exist", name));
+                    bail!(Error::ColumnNotFound(name.clone()));
                 }
 
                 Ok(BooleanBinaryExpr::new(
@@ -806,7 +817,7 @@ impl LogicalPlanBuilder {
                                 e => unreachable!("{:?}", e),
                             };
                             if !schema.fields.iter().any(|f| &f.name == name) {
-                                vec![Err(anyhow!("Column {} doesn't exist", name))]
+                                vec![Err(anyhow!(Error::ColumnNotFound(name.clone())))]
                             } else {
                                 vec![Ok(expr)]
                             }

@@ -1,11 +1,12 @@
 pub mod constraints;
 pub mod schema;
 
+use crate::errors::Error;
 use crate::pages::{PageId, SlotId};
 use crate::tuple::schema::Schema;
 use crate::types::{AsBytes, Types, Value};
 use crate::{pages::traits::Serialize, types::ValueFactory};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use std::{mem, slice};
 
 /// Tuple Meta Data + the Tuple itself
@@ -107,7 +108,7 @@ impl Tuple {
 
     pub fn get_value_at(&self, id: u8, schema: &Schema) -> Result<Value> {
         if id as usize >= schema.fields.len() {
-            return Err(anyhow!("field id out of bounds"));
+            bail!(Error::Internal("field id out of bounds".into()));
         }
 
         if (self._null_bitmap >> id) & 1 == 1 {

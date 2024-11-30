@@ -28,6 +28,9 @@ SELECT a FROM test;
 statement ok
 INSERT INTO test VALUES (1, 2.3, -4, true);
 
+statement error Expected 4 values, but got 1.
+INSERT INTO test VALUES (1);
+
 statement error Type mismatch: Expected \[UInt, Float, Int, Bool\], but got \[Int, Float, Int, Bool\].
 INSERT INTO test VALUES (-1, 2.3, -4, false);
 

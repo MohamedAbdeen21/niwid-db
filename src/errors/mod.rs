@@ -4,6 +4,8 @@ use crate::types::Types;
 pub enum Error {
     Internal(String),
     TableExists(String),
+    /// expected, actual
+    TupleTooBig(usize, usize),
     TupleExists,
     TupleNotFound,
     TableNotFound(String),
@@ -49,6 +51,10 @@ impl std::fmt::Display for Error {
             }
             Error::NullNotAllowed(col) => write!(f, "NULL is not allowed in column {col}."),
             Error::ColumnNotFound(col) => write!(f, "Column {col} not found."),
+            Error::TupleTooBig(expecetd, actual) => write!(
+                f,
+                "Tuple is too big. Expected {expecetd} bytes, but got {actual} bytes."
+            ),
         }
     }
 }
