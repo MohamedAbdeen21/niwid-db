@@ -39,6 +39,8 @@ A SQL logic test file contain multiple blocks, blocks are categorized as:
        - `U`: Unsigned Integer result.
        - `B`: Boolean result.
 
+Note: Comments in a SQL logic test file are prefixed with `#`.
+
 ### Example
 
 ```sql

@@ -1,0 +1,42 @@
+statement ok
+CREATE TABLE test (a UINT, b FLOAT, c INT, d boolean);
+
+statement error sql parser error: Expected: an expression:, found: \).
+INSERT INTO test VALUES ();
+
+statement error Expected 4 values, but got 1.
+INSERT INTO test VALUES (1);
+
+statement error Type mismatch: Expected \[UInt, Float, Int, Bool\], but got \[Int, Float, Int, Bool\].
+INSERT INTO test VALUES (-1, 2.3, -4, false);
+
+statement ok
+INSERT INTO test VALUES (null, null, null, null);
+
+statement ok
+CREATE TABLE test2 (a UINT UNIQUE NOT NULL, b FLOAT NOT NULL, c INT, d boolean);
+
+statement ok
+INSERT INTO test2 VALUES (1, 2.3, -4, true);
+
+statement error Duplicate key 1 in column a
+INSERT INTO test2 VALUES (1, 3.4567, 0, false);
+
+statement error NULL is not allowed in column b.
+INSERT INTO test2 VALUES (2, null, -4, true);
+
+# multiple inserts
+statement ok
+INSERT INTO test2 VALUES (2, 1.2, -2, true), (3, 3.4, -3, false); ;
+
+query UFIB
+SELECT * FROM test;
+----
+null null null null
+
+query UFIB
+SELECT * FROM test2;
+----
+1 2.3 -4 true
+2 1.2 -2 true
+3 3.4 -3 false

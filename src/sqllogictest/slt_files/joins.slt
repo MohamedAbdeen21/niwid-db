@@ -1,0 +1,43 @@
+statement ok
+CREATE TABLE a (id INT, name TEXT);
+
+statement ok
+CREATE TABLE b (id INT, name TEXT);
+
+statement ok
+INSERT INTO a VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd');
+
+statement ok
+INSERT INTO b VALUES (1, 'z'), (2, 'y'), (3, 'x'), (5, 'w');
+
+# must use qualified column names for ALL columns
+# if the two tables share at least 1 column name
+query IS
+SELECT a.id, b.name FROM a JOIN b ON a.id = b.id;
+----
+1 z
+2 y
+3 x
+
+# must use unqualified column names for ALL columns
+# if the two tables have unique column names
+statement ok
+CREATE TABLE c (id_fk INT, msg TEXT);
+
+statement ok
+INSERT INTO c VALUES (1, 'a'), (2, 'b'), (3, 'c'), (4, 'd');
+
+query IS
+SELECT id, name FROM a INNER JOIN c ON id = id_fk;
+----
+1 a
+2 b
+3 c
+4 d
+
+query IS
+SELECT id, name FROM a INNER JOIN c ON id = id_fk WHERE id >= 2;
+----
+2 b
+3 c
+4 d
