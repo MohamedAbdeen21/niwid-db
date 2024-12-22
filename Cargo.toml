@@ -2,6 +2,7 @@
 name = "idk"
 version = "0.2.0"
 edition = "2021"
+default-run = "idk-server"
 
 [dependencies]
 anyhow = "1.0.86"
@@ -14,6 +15,17 @@ sqlparser = "0.51.0"
 backtrace = "0.3.74"
 tokio = {version = "1.40.0", features = ["net", "io-util", "rt-multi-thread", "macros"]}
 arrayvec = "0.7.6"
+serde_json =  {version = "1.0.134" }
+lambda_runtime =  {version = "0.13.0", features = ["anyhow"] }
+lambda_http = {version = "0.14.0", features = ["apigw_http"] }
+
+[[bin]]
+name = "idk-lambda"
+path = "src/lambda/main.rs"
+
+[[bin]]
+name = "idk-server"
+path = "src/main.rs"
 
 [dev-dependencies]
 rand = "0.8.5"

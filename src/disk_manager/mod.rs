@@ -8,7 +8,7 @@ use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-pub const DISK_STORAGE: &str = "data/data/";
+pub const DISK_STORAGE: &str = "/tmp/data";
 
 #[cfg(test)]
 pub fn test_path() -> String {

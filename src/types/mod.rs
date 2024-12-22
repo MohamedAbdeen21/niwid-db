@@ -321,9 +321,6 @@ impl Value {
 }
 
 pub trait AsBytes: Debug + 'static + Display {
-    fn is_null(&self) -> bool {
-        false
-    }
     fn to_bytes(&self) -> Box<[u8]>;
     fn from_bytes(bytes: &[u8]) -> Self
     where

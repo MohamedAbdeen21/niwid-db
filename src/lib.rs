@@ -1,19 +1,22 @@
 mod buffer_pool;
 mod catalog;
-pub mod context;
 mod disk_manager;
-pub mod errors;
+mod errors;
 mod execution;
 mod indexes;
 mod latch;
 mod pages;
 mod sql;
+mod table;
+mod tuple;
+mod txn_manager;
+mod types;
+
 #[cfg(test)]
 mod sqllogictest;
-mod table;
-pub mod tuple;
-mod txn_manager;
-pub mod types;
+
+pub mod context;
+pub mod server;
 
 #[macro_export]
 macro_rules! printdbg {
