@@ -20,7 +20,7 @@ use anyhow::{anyhow, bail, Result};
 use result_set::ResultSet;
 use sqlparser::ast::BinaryOperator;
 
-pub trait Executable {
+trait Executable {
     /// Context is passed for client controls like
     /// start/commit/rollback transactions, most other
     /// plans only need access to the active_txn id field or catalog, not the whole context
@@ -445,7 +445,10 @@ impl Executable for CreateTable {
         catalog
             .write()
             .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
-        Ok(ResultSet::default())
+
+        // TODO: Change all other executions to return info instead of an empty default
+        // for the UI
+        Ok(ResultSet::from_info("Table created"))
     }
 }
 

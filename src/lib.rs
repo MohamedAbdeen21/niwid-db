@@ -2,7 +2,6 @@ mod buffer_pool;
 mod catalog;
 mod disk_manager;
 mod errors;
-mod execution;
 mod indexes;
 mod latch;
 mod pages;
@@ -16,6 +15,7 @@ mod types;
 mod sqllogictest;
 
 pub mod context;
+pub mod execution;
 pub mod server;
 
 #[macro_export]

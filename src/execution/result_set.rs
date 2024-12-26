@@ -38,6 +38,13 @@ impl ResultSet {
         &self.schema.fields
     }
 
+    pub fn from_info(info: &str) -> Self {
+        Self {
+            info: info.to_string(),
+            ..Default::default()
+        }
+    }
+
     pub fn from_rows(fields: Vec<Field>, rows: Vec<Vec<Value>>) -> Self {
         let cols = (0..fields.len())
             .map(|i| rows.iter().map(|row| row[i].clone()).collect())
