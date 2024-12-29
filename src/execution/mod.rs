@@ -49,15 +49,15 @@ impl LogicalPlan {
             LogicalPlan::IndexScan(i) => i.execute(ctx),
             LogicalPlan::StartTxn => {
                 ctx.start_txn()?;
-                Ok(ResultSet::default())
+                Ok(ResultSet::with_info("Transaction started".into()))
             }
             LogicalPlan::CommitTxn => {
                 ctx.commit_txn()?;
-                Ok(ResultSet::default())
+                Ok(ResultSet::with_info("Transaction committed".into()))
             }
             LogicalPlan::RollbackTxn => {
                 ctx.rollback_txn()?;
-                Ok(ResultSet::default())
+                Ok(ResultSet::with_info("Transaction rolled back".into()))
             }
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.execute(ctx),
@@ -101,7 +101,7 @@ impl Executable for Delete {
 
         table.start_txn(txn_id)?;
 
-        for row in selected_rows {
+        for row in selected_rows.iter() {
             let tuple_id = (row[0].u32(), row[1].u32() as u16);
 
             if let Err(err) = table.delete(tuple_id) {
@@ -120,7 +120,10 @@ impl Executable for Delete {
             ctx.commit_txn()?;
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!(
+            "Deleted {} rows",
+            selected_rows.len()
+        )))
     }
 }
 
@@ -173,7 +176,7 @@ impl Executable for IndexScan {
 
         let mut cols: Vec<Vec<Value>> = vec![vec![]; schema.fields.len() + 2];
 
-        // TODO: pass the tuple_id as tuple for udpate to use
+        // TODO: pass the tuple_id as tuple type for update to use
         // need to define a tuple type first though
         tuples
             .into_iter()
@@ -300,7 +303,7 @@ impl Executable for Update {
 
         table.start_txn(txn_id)?;
 
-        for row in selected_rows {
+        for row in selected_rows.iter() {
             let tuple_id = (row[0].u32(), row[1].u32() as u16);
 
             let mut new_tuple = row[2..].to_vec();
@@ -329,7 +332,10 @@ impl Executable for Update {
             ctx.commit_txn()?;
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!(
+            "Updated {} rows",
+            selected_rows.len()
+        )))
     }
 }
 
@@ -340,13 +346,14 @@ impl Executable for Truncate {
             .write()
             .truncate_table(self.table_name, txn_id)?;
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info("Table truncated".into()))
     }
 }
 
 impl Executable for DropTables {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
+        let count = self.table_names.len();
         for table_name in self.table_names {
             if ctx
                 .get_catalog()
@@ -358,7 +365,7 @@ impl Executable for DropTables {
             }
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!("Dropped {} tables", count)))
     }
 }
 
@@ -400,6 +407,8 @@ impl Executable for Insert {
             ));
         }
 
+        let count = input.len();
+
         for row in input.rows() {
             let tuple = Tuple::new(row, &self.table_schema);
 
@@ -411,29 +420,41 @@ impl Executable for Insert {
                 .insert(tuple)?;
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!("Inserted {} rows", count)))
     }
 }
 
 impl Executable for Explain {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let plan = self.input.print();
-        // println!("Logical plan:\n{}", self.input.print());
-        // time the execution time
         if self.analyze {
             let start = std::time::Instant::now();
+
             let mut result = self.input.execute(ctx)?;
+
+            let elapsed = start.elapsed();
+            let (value, unit) = if elapsed.as_secs() > 0 {
+                (elapsed.as_secs_f64(), "s")
+            } else if elapsed.as_millis() > 0 {
+                (elapsed.as_millis() as f64, "ms")
+            } else if elapsed.as_micros() > 0 {
+                (elapsed.as_micros() as f64, "μs")
+            } else {
+                (elapsed.as_nanos() as f64, "ns")
+            };
+
             let info = format!(
-                "Execution time: {:?}\nLogical Plan:\n{}",
-                start.elapsed(),
-                plan
+                "Execution time: {} {}\n\nLogical Plan:\n{}",
+                value, unit, plan
             );
             result.set_info(info);
             Ok(result)
         } else {
-            let mut empty = ResultSet::default();
-            empty.set_info(plan);
-            Ok(empty)
+            let mut msg = "Use EXPLAIN ANALYZE to execute the query and get the execution time\n\n"
+                .to_string();
+            msg.push_str(&plan);
+
+            Ok(ResultSet::with_info(msg))
         }
     }
 }
@@ -446,9 +467,7 @@ impl Executable for CreateTable {
             .write()
             .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
 
-        // TODO: Change all other executions to return info instead of an empty default
-        // for the UI
-        Ok(ResultSet::from_info("Table created"))
+        Ok(ResultSet::with_info("Table created".into()))
     }
 }
 
@@ -739,7 +758,7 @@ impl Executable for Scan {
 
         let mut cols: Vec<Vec<Value>> = vec![vec![]; schema.fields.len() + 2];
 
-        // TODO: pass the tuple_id as tuple for udpate to use
+        // TODO: pass the tuple_id as tuple type for update to use
         // need to define a tuple type first though
         table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
             let mut values = vec![

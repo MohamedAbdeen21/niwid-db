@@ -38,9 +38,9 @@ impl ResultSet {
         &self.schema.fields
     }
 
-    pub fn from_info(info: &str) -> Self {
+    pub fn with_info(info: String) -> Self {
         Self {
-            info: info.to_string(),
+            info,
             ..Default::default()
         }
     }

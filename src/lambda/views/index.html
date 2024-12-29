@@ -11,33 +11,37 @@
 		rel="stylesheet">
 	<script src="https://unpkg.com/htmx.org@2.0.4"
 		integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous">
-		</script>
+	</script>
 	<script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
 	<link rel="stylesheet" href="/css/">
 	<title>Online SQL Database</title>
 </head>
 
 <body>
-	<div class="container">
+	<div class="container" hx-indicator="#query-container">
 		<div id="query-container" class="box">
 			<form hx-post="/query" hx-ext="json-enc" hx-swap="none" hx-select-oob="#query-results, #additional-info">
-				<textarea id="sql-query" name="query" placeholder="Write your SQL query here..."></textarea>
-				<button type="submit">Run Query</button>
+				<textarea id="sql-query" name="query" placeholder="Write your SQL queries here..."></textarea>
+				<button type="submit">
+					<span class="indicator-replace">Run Query</span>
+					<span class="indicator"></span>
+				</button>
 			</form>
 		</div>
 
 		<div id="query-results" class="box">
-			<!-- Query results will appear here -->
-		</div>
-
-		<div id="debugger" class="box">
-			<!-- Debug logs will appear here -->
+			<p class="center">
+				Query results will appear here
+			</p>
 		</div>
 
 		<div id="additional-info" class="box">
-			<!-- Query plan or additional information will appear here -->
+			<p class="center">
+				Errors, messages, and query plans will appear here
+			</p>
 		</div>
 	</div>
+
 </body>
 
 </html>

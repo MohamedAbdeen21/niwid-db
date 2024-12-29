@@ -1,0 +1,15 @@
+.error {
+	color: #f44336;
+	font-weight: bold;
+	animation: error-fade 2s forwards;
+}
+
+@keyframes error-fade {
+	0% {
+		color: #f44336;
+	}
+
+	100% {
+		color: #f0f0f0;
+	}
+}

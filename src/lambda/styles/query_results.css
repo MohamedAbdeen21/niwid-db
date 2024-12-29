@@ -1,0 +1,41 @@
+#query-container button:hover {
+	background-color: #d32f2f;
+}
+
+#query-results table {
+	border-collapse: collapse;
+	margin: 1em 0;
+	width: 100%;
+	font-size: 16px;
+	text-align: left;
+	overflow-x: auto;
+	overflow-y: auto;
+	max-width: 100%;
+	background-color: #2f2f2f;
+	color: #f0f0f0;
+}
+
+#query-results th,
+#query-results td {
+	border: 1px solid #444444;
+	padding: 8px;
+	max-height: 40px;
+}
+
+#query-results th {
+	background-color: #f44336;
+	font-weight: bold;
+	text-align: center;
+}
+
+#query-results tr:nth-child(even) {
+	background-color: #444444;
+}
+
+#query-results tr:hover {
+	background-color: #555555;
+}
+
+#query-results td {
+	white-space: nowrap;
+}

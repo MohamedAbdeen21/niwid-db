@@ -15,8 +15,8 @@ struct AdditionalInfo {
     error: Option<String>,
 }
 
-pub fn format_result(result: ResultSet) -> String {
-    // TODO: Each execution plan should fill the info field accordingly
+pub fn format_result_and_info(result: ResultSet) -> String {
+    // Each execution plan should fill the info field accordingly
     // this is used as a fallback message
     if result.is_empty() && result.get_info().is_empty() {
         return QueryResultTemplate::default().render().unwrap() + format_message("OK").as_str();

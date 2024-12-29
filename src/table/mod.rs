@@ -309,7 +309,6 @@ impl Table {
     pub fn check_uniqueness(&self, tuple: &Tuple) -> Result<Option<Key>> {
         for (i, field) in self.schema.fields.iter().enumerate() {
             if field.constraints.unique {
-                // TODO:
                 // unwrap on option because nullability is checked first and
                 // uniquness disallows null values
                 // also, schema forces unique columns to be of type u32

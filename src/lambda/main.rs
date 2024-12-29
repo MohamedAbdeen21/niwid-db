@@ -1,7 +1,7 @@
 mod html_formatter;
 
 use anyhow::Result;
-use html_formatter::{format_error, format_result};
+use html_formatter::{format_error, format_result_and_info};
 use idk::context::Context;
 use lambda_http::{run, service_fn, Body, Error, Request, RequestPayloadExt, Response};
 use lambda_runtime::diagnostic::Diagnostic;
@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 
 // concat the css into a single string in compile time
 const CSS: &str = concat!(
-    include_str!("./views/style.css"),
-    include_str!("./views/query_results.css"),
+    include_str!("./styles/style.css"),
+    include_str!("./styles/query_results.css"),
+    include_str!("./styles/additional_info.css"),
 );
 
 #[tokio::main]
@@ -74,7 +75,7 @@ async fn execute_query(query: &str) -> Result<Response<Body>, Error> {
     let mut ctx = Context::default();
 
     let html = match ctx.execute_sql(query) {
-        Ok(result) => format_result(result),
+        Ok(result) => format_result_and_info(result),
         Err(err) => format_error(err.to_string()),
     };
 

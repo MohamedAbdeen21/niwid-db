@@ -136,7 +136,7 @@ pub mod tests {
             result
                 .get_info()
                 .lines()
-                .skip(1)
+                .skip(2)
                 .collect::<Vec<_>>()
                 .join("\n"),
             plan

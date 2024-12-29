@@ -31,8 +31,8 @@ lazy_static! {
 }
 
 pub struct Catalog {
-    pub tables: VersionedMap<String, (TupleId, Table)>, // TODO: handle ownership
-    schema: Schema,                                     // A catalog is itself a table
+    pub tables: VersionedMap<String, (TupleId, Table)>,
+    schema: Schema, // A catalog is itself a table
     txn_tables: HashMap<TxnId, HashSet<String>>,
     bpm: ArcBufferPool,
     txn_manager: ArcTransactionManager,
@@ -46,7 +46,7 @@ impl Catalog {
     /// Catalog is a table itself, this gives access to the underlying table
     pub fn table(&mut self) -> &mut Table {
         // No need to track version for catalog, catalog always has the same
-        // tuple_id and can never be deleted (TODO:)
+        // tuple_id and can never be deleted
         self.tables
             .get_mut(None, &CATALOG_NAME.to_string())
             .map(|(_, t)| t)
