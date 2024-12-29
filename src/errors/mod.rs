@@ -19,7 +19,7 @@ pub enum Error {
     TransactionActive,
     NoActiveTransaction,
     DivisionByZero,
-    DuplicateKey(String, String),
+    DuplicateValue(String, String),
     NullNotAllowed(String),
 }
 
@@ -46,8 +46,8 @@ impl std::fmt::Display for Error {
                 )
             }
             Error::DivisionByZero => write!(f, "Division by zero."),
-            Error::DuplicateKey(key, column) => {
-                write!(f, "Duplicate key {key} in column {column}.")
+            Error::DuplicateValue(value, column) => {
+                write!(f, "Duplicate value {value} in column {column}.")
             }
             Error::NullNotAllowed(col) => write!(f, "NULL is not allowed in column {col}."),
             Error::ColumnNotFound(col) => write!(f, "Column {col} not found."),

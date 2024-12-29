@@ -1,0 +1,11 @@
+<div id="additional-info" class="box">
+	<p>
+		{% if let Some(error) = error %}
+		{{error}}
+		{% endif %}
+
+		{% if let Some(message) = message %}
+	<pre>{{message}}</pre>
+	{% endif %}
+	</p>
+</div>

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 // concat the css into a single string in compile time
 const CSS: &str = concat!(
     include_str!("./views/style.css"),
-    include_str!("./views/style2.css"),
+    include_str!("./views/query_results.css"),
 );
 
 #[tokio::main]

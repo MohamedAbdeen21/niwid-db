@@ -317,7 +317,10 @@ impl Table {
 
                 return match self.index.as_ref().unwrap().search(self.active_txn, key) {
                     None => Ok(Some(key)),
-                    Some(_) => bail!(Error::DuplicateKey(format!("{}", key), field.name.clone())),
+                    Some(_) => bail!(Error::DuplicateValue(
+                        format!("{}", key),
+                        field.name.clone()
+                    )),
                 };
             }
         }
@@ -456,7 +459,7 @@ impl Table {
                     .name
                     .clone();
 
-                bail!(Error::DuplicateKey(format!("{}", new_key), field_name))
+                bail!(Error::DuplicateValue(format!("{}", new_key), field_name))
             }
         }
 

@@ -90,16 +90,23 @@ impl Context {
     }
 
     pub fn execute_sql(&mut self, sql: impl Into<String>) -> Result<ResultSet> {
-        let statment = parse(sql)?;
+        let sql: String = sql.into();
+        let statements = parse(sql.clone())?;
 
-        // println!("SQL: {:?}", statment);
+        statements
+            .into_iter()
+            .map(|statement| {
+                let plan_builder = LogicalPlanBuilder::new(self.catalog.clone());
 
-        let plan_builder = LogicalPlanBuilder::new(self.catalog.clone());
+                let plan = plan_builder.build_initial_plan(statement, self.active_txn)?;
+                let plan = optimize_logical_plan(plan);
 
-        let plan = plan_builder.build_initial_plan(statment, self.active_txn)?;
-        let plan = optimize_logical_plan(plan);
-
-        plan.execute(self)
+                plan.execute(self)
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .last()
+            .ok_or(Error::Expected("At least one statement".into(), sql).into())
     }
 }
 
