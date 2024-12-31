@@ -45,3 +45,17 @@
 </body>
 
 </html>
+
+<script>
+	document.addEventListener("DOMContentLoaded", () => {
+		const form = document.querySelector("form");
+		const textarea = document.getElementById("sql-query");
+
+		textarea.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" && (event.shiftKey || event.ctrlKey)) {
+				event.preventDefault();
+				form.requestSubmit();
+			}
+		});
+	});
+</script>

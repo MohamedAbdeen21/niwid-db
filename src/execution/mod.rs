@@ -743,6 +743,10 @@ impl Executable for Projection {
             .reduce(|a, b| a.concat(b))
             .unwrap_or_default();
 
+        if output.is_empty() {
+            return Ok(ResultSet::with_info("Empty Table".to_string()));
+        }
+
         Ok(output)
     }
 }
