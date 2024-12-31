@@ -6,9 +6,7 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link
-		href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap"
-		rel="stylesheet">
+	<link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
 	<script src="https://unpkg.com/htmx.org@2.0.4"
 		integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous">
 	</script>
@@ -21,7 +19,7 @@
 	<div class="container" hx-indicator="#query-container">
 		<div id="query-container" class="box">
 			<form hx-post="/query" hx-ext="json-enc" hx-swap="none" hx-select-oob="#query-results, #additional-info">
-				<textarea id="sql-query" name="query" placeholder="Write your SQL queries here..."></textarea>
+				<textarea id="sql-query" name="query" placeholder="Write your SQL queries here... [Shift+Enter to submit]"></textarea>
 				<button type="submit">
 					<span class="indicator-replace">Run Query</span>
 					<span class="indicator"></span>
@@ -52,7 +50,7 @@
 		const textarea = document.getElementById("sql-query");
 
 		textarea.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" && (event.shiftKey || event.ctrlKey)) {
+			if ((event.shiftKey || event.ctrlKey) && event.key === "Enter") {
 				event.preventDefault();
 				form.requestSubmit();
 			}
