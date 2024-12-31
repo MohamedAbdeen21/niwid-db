@@ -34,7 +34,7 @@ async fn handle_client(event: Request) -> Result<Response<Body>, Error> {
 
     match path {
         "/" => serve_frontend().await,
-        "/css/" => serve_css().await,
+        "/css" => serve_css().await,
         "/query" => execute_query(&event.json::<Item>().unwrap().unwrap().query).await,
         _ => {
             let resp = Response::builder()
