@@ -42,7 +42,7 @@
 
 2. Run the server:
    ```bash
-   cargo run --release
+   cargo run --release --bin idk-server
    ```
 
 3. Connect to the server from a different terminal:
@@ -74,7 +74,10 @@ ROLLBACK; -- Discards the update
 
 ## Examples
 
-For more examples, check out [the sqllogictests](https://github.com/MohamedAbdeen21/niwid-db/tree/main/src/sqllogictest/slt_files). If you're not familiar with slt files, check out [how to read sqllogictests](https://github.com/MohamedAbdeen21/niwid-db/blob/main/src/sqllogictest/README.md)
+For more examples, check out:
+
+- [the sqllogictests](https://github.com/MohamedAbdeen21/niwid-db/tree/main/src/sqllogictest/slt_files). If you're not familiar with slt files, check out [how to read sqllogictests](https://github.com/MohamedAbdeen21/niwid-db/blob/main/src/sqllogictest/README.md)
+- Examples panel in the [demo website](https://dhgs8bhyvg.execute-api.us-east-1.amazonaws.com/)
 
 ## Some implementation details
 
@@ -85,6 +88,7 @@ For more examples, check out [the sqllogictests](https://github.com/MohamedAbdee
 exploring the internals of the database, not the query engine.
 - Catalog as a read-only Table, check it out using `SELECT * FROM __CATALOG__`;
 - Using `sqlparser.rs`, this is the only part not written from scratch. I wrote my fair share of parsers (and I did some contributing to sqlparser-rs), but again, this was not the main focus of the project.
+- Demo website made with [HTMX](https://htmx.org/) and [Askama](https://docs.rs/askama/latest/askama/).
 
 ## Contributing
 
