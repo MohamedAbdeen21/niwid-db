@@ -342,11 +342,16 @@ impl Executable for Update {
 impl Executable for Truncate {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
-        ctx.get_catalog()
-            .write()
-            .truncate_table(self.table_name, txn_id)?;
 
-        Ok(ResultSet::with_info("Table truncated".into()))
+        let count = self.table_names.len();
+
+        for table_name in self.table_names {
+            ctx.get_catalog()
+                .write()
+                .truncate_table(table_name, txn_id)?;
+        }
+
+        Ok(ResultSet::with_info(format!("Truncated {} tables", count)))
     }
 }
 

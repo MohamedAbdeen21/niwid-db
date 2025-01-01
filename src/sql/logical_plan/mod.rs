@@ -246,13 +246,9 @@ impl LogicalPlanBuilder {
     fn build_truncate(
         &self,
         table_names: Vec<TruncateTableTarget>,
-        table: bool,
+        _table: bool,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
-        if !table {
-            return Err(anyhow!("Did you mean 'TRUNCATE TABLE'?"));
-        }
-
         // TODO: handle multiple tables
         if table_names.len() != 1 {
             bail!(Error::Unsupported(
@@ -260,21 +256,22 @@ impl LogicalPlanBuilder {
             ));
         }
 
-        let table_name = table_names
-            .first()
-            .unwrap()
-            .name
-            .0
-            .first()
-            .unwrap()
-            .value
-            .clone();
+        let catalog = self.catalog.read();
 
-        if self.catalog.read().get_table(&table_name, txn_id).is_none() {
-            bail!(Error::TableNotFound(table_name));
-        }
+        let names = table_names
+            .into_iter()
+            .map(|t| t.name.0.first().unwrap().value.clone())
+            .map(|name| {
+                catalog
+                    .get_table(&name, txn_id)
+                    .ok_or(Error::TableNotFound(name).into())
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(|t| t.name.clone())
+            .collect();
 
-        Ok(LogicalPlan::Truncate(Truncate::new(table_name)))
+        Ok(LogicalPlan::Truncate(Truncate::new(names)))
     }
 
     fn build_drop(

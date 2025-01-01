@@ -15,7 +15,7 @@ use anyhow::{bail, ensure, Result};
 pub mod table_iterator;
 
 pub struct Table {
-    name: String,
+    pub name: String,
     pub first_page: PageId,
     pub last_page: PageId,
     blob_page: PageId,

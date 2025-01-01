@@ -314,12 +314,12 @@ impl Update {
 }
 
 pub struct Truncate {
-    pub table_name: String,
+    pub table_names: Vec<String>,
 }
 
 impl Truncate {
-    pub fn new(table_name: String) -> Self {
-        Self { table_name }
+    pub fn new(table_names: Vec<String>) -> Self {
+        Self { table_names }
     }
 
     pub fn schema(&self) -> Schema {
@@ -327,7 +327,15 @@ impl Truncate {
     }
 
     pub fn print(&self, indent: usize) -> String {
-        format!("{} Truncate: {}", "-".repeat(indent * 2), self.table_name)
+        format!(
+            "{} Truncate: [{}]",
+            "-".repeat(indent * 2),
+            self.table_names
+                .iter()
+                .map(|v| format!("#{}", v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
