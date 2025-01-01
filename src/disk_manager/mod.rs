@@ -8,8 +8,10 @@ use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-// TODO: config for local server
-pub const DISK_STORAGE: &str = "data/test";
+pub const DISK_STORAGE: &str = match option_env!("DISK_STORAGE") {
+    Some(path) => path,
+    None => "data/",
+};
 
 #[cfg(test)]
 pub fn test_path() -> String {

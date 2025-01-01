@@ -1,0 +1,11 @@
+<div id="examples-sidebar">
+	<ul>
+		{% for example in examples %}
+		<li class="example"><pre>{{ example|safe }}</pre></li>
+		{% endfor %}
+	</ul>
+</div>
+
+<button id="examples-button">
+	Examples
+</button>

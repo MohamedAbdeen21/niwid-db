@@ -16,38 +16,11 @@
 </head>
 
 <body>
-	<div id="examples-sidebar">
-		<ul>
-			{% for example in examples %}
-			<li class="example"><pre>{{ example|safe }}</pre></li>
-			{% endfor %}
-		</ul>
-	</div>
+	{% include "examples_sidebar.html" %}
 
 	<div class="container" hx-indicator="#query-container">
-		<button id="examples-button">
-			Examples
-		</button>
-
 		<div id="query-container" class="box">
-			<form hx-post="/query" hx-ext="json-enc" hx-swap="none" hx-select-oob="#query-results, #additional-info">
-				<textarea id="sql-query" name="query" placeholder="Write your SQL queries here... [Shift+Enter to submit]"></textarea>
-
-				<button type="submit" id="submit-query-button">
-					<span class="indicator-replace">Run Query</span>
-					<span class="indicator"></span>
-				</button>
-
-				<div id="logos">
-					<a href="https://github.com/MohamedAbdeen21/niwid-db" id="github-logo" target="_blank" aria-label="GitHub" class="logo">
-						<img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="GitHub" />
-					</a>
-
-					<a id="linkedin-logo" href="https://www.linkedin.com/in/mohamed-abdeen-554671214/" target="_blank" class="logo">
-						<img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" alt="LinkedIn Logo">
-					</a>
-				</div>
-			</form>
+			{% include "query_form.html" %}
 		</div>
 
 		<div id="query-results" class="box">
@@ -74,11 +47,11 @@
 		const isOpen = examplesSidebar.style.left === "0px";
 
 		if (isOpen) {
-			examplesSidebar.style.left = "-30%";
+			examplesSidebar.style.left = "-300px";
 			examplesButton.style.left = "0px";
 		} else {
 			examplesSidebar.style.left = "0px";
-			examplesButton.style.left = "30%";
+			examplesButton.style.left = "300px";
 		}
 	}
 
