@@ -535,9 +535,14 @@ impl BinaryExpr {
             BinaryOperator::Minus => Ok(left.sub(right)?),
             BinaryOperator::Multiply => Ok(left.mul(right)?),
             BinaryOperator::Divide => Ok(left.div(right)?),
-            BinaryOperator::Eq => Ok(lit!(Bool, left.equ(right)?.to_string())),
+            BinaryOperator::Eq => Ok(lit!(Bool, (left == right).to_string())),
             BinaryOperator::And => Ok(lit!(Bool, left.and(right)?.to_string())),
             BinaryOperator::Or => Ok(lit!(Bool, left.or(right)?.to_string())),
+            BinaryOperator::Lt => Ok(lit!(Bool, (left < right).to_string())),
+            BinaryOperator::Gt => Ok(lit!(Bool, (left > right).to_string())),
+            BinaryOperator::LtEq => Ok(lit!(Bool, (left <= right).to_string())),
+            BinaryOperator::GtEq => Ok(lit!(Bool, (left >= right).to_string())),
+            BinaryOperator::NotEq => Ok(lit!(Bool, (left != right).to_string())),
             e => bail!(Error::Unsupported(format!("Operator evaluation {}", e))),
         }
     }
@@ -702,6 +707,7 @@ impl BooleanBinaryExpr {
                     .collect::<Result<_>>()
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
+                println!("{:?} {:?}", c1, v2);
                 let index1 = input
                     .fields()
                     .iter()

@@ -41,13 +41,13 @@ pub struct IndexPageData {
     is_dirty: bool,
     page_type: PageType,
     next: PageId,
-    pub keys: ArrayVec<Key, KEYS_PER_NODE>,
-    pub values: ArrayVec<LeafValue, FACTOR>,
+    keys: ArrayVec<Key, KEYS_PER_NODE>,
+    values: ArrayVec<LeafValue, FACTOR>,
 }
 
 #[derive(Debug)]
 pub struct IndexPage {
-    pub data: *mut IndexPageData,
+    data: *mut IndexPageData,
     latch: Arc<Latch>,
     page_id: PageId,
 }
@@ -162,8 +162,9 @@ impl IndexPage {
         self.data_mut().keys.truncate(mid_index);
         self.data_mut().values.truncate(mid_index + 1);
 
-        assert!(self.get_type() == &PageType::Inner);
+        assert_eq!(self.get_type(), &PageType::Inner);
         new_page.set_type(PageType::Inner);
+        assert_eq!(new_page.get_type(), &PageType::Inner);
 
         new_page.set_next_page_id(self.get_next_page_id());
         self.set_next_page_id(new_page.get_page_id());
@@ -188,8 +189,9 @@ impl IndexPage {
         self.data_mut().keys.truncate(mid_index);
         self.data_mut().values.truncate(mid_index);
 
-        assert!(self.get_type() == &PageType::Leaf);
+        assert_eq!(self.get_type(), &PageType::Leaf);
         new_page.set_type(PageType::Leaf);
+        assert_eq!(new_page.get_type(), &PageType::Leaf);
 
         new_page.set_next_page_id(self.get_next_page_id());
         self.set_next_page_id(new_page.get_page_id());

@@ -33,6 +33,7 @@ impl BPlusTree {
 
         let mut page = tree.load_page_mut(root_page_id, txn).unwrap();
         page.set_type(PageType::Leaf);
+        assert_eq!(page.get_type(), &PageType::Leaf);
         tree.unpin_page(root_page_id, txn);
 
         tree
@@ -120,6 +121,7 @@ impl BPlusTree {
         let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
         let mut new_page = self.load_page_mut(new_page_id, txn)?; // increment pin count
         new_page.set_type(PageType::Leaf);
+        assert_eq!(new_page.get_type(), &PageType::Leaf);
 
         Ok(new_page)
     }
@@ -129,6 +131,7 @@ impl BPlusTree {
         let new_page_id = self.bpm.lock().new_page()?.writer().get_page_id();
         let mut new_page = self.load_page_mut(new_page_id, txn)?; // increment pin count
         new_page.set_type(PageType::Inner);
+        assert_eq!(new_page.get_type(), &PageType::Inner);
 
         Ok(new_page)
     }
@@ -146,6 +149,7 @@ impl BPlusTree {
         if let Some(txn) = txn_id {
             self.txn_manager.lock().touch_page(txn, page_id)?;
         };
+
         Ok(self
             .bpm
             .lock()

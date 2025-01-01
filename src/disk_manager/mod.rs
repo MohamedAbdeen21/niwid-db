@@ -43,7 +43,7 @@ impl DiskManager {
     pub fn new(path: &str) -> Self {
         let path = Path::new(path);
 
-        create_dir_all(path).unwrap();
+        create_dir_all(path).unwrap_or_else(|_| panic!("Failed to write to {}", path.display()));
 
         let disk = Self {
             path: path.to_str().unwrap().to_string(),

@@ -246,8 +246,14 @@ impl PartialOrd for Value {
             (Value::Bool(l), Value::Bool(r)) => l.partial_cmp(r),
             (Value::Str(l), Value::Str(r)) => l.partial_cmp(r),
             (Value::Null, Value::Null) => Some(std::cmp::Ordering::Equal),
+            (Value::Null, _) => Some(std::cmp::Ordering::Less),
+            (_, Value::Null) => Some(std::cmp::Ordering::Greater),
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => l.partial_cmp(&(*r as i32)),
             (Value::UInt(UInt(l)), Value::Int(Int(r))) => (*l as i32).partial_cmp(r),
+            (Value::UInt(UInt(l)), Value::Float(Float(r))) => (*l as f32).partial_cmp(r),
+            (Value::Float(Float(l)), Value::UInt(UInt(r))) => l.partial_cmp(&(*r as f32)),
+            (Value::Int(Int(l)), Value::Float(Float(r))) => (*l as f32).partial_cmp(r),
+            (Value::Float(Float(l)), Value::Int(Int(r))) => l.partial_cmp(&(*r as f32)),
             _ => None,
         }
     }
