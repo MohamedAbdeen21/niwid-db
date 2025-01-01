@@ -712,7 +712,6 @@ impl BooleanBinaryExpr {
                     .collect::<Result<_>>()
             }
             (LogicalExpr::Column(c1), LogicalExpr::Literal(v2)) => {
-                println!("{:?} {:?}", c1, v2);
                 let index1 = input
                     .fields()
                     .iter()

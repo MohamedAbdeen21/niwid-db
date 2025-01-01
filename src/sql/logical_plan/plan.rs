@@ -109,12 +109,22 @@ impl Limit {
     }
 
     pub fn print(&self, indent: usize) -> String {
-        format!(
-            "{} Limit: {}\n{}",
-            "-".repeat(indent * 2),
-            self.limit,
-            self.input.print_indent(indent + 1)
-        )
+        if self.offset == 0 {
+            format!(
+                "{} Limit: {}\n{}",
+                "-".repeat(indent * 2),
+                self.limit,
+                self.input.print_indent(indent + 1)
+            )
+        } else {
+            format!(
+                "{} Limit: {} Offset: {}\n{}\n",
+                "-".repeat(indent * 2),
+                self.limit,
+                self.offset,
+                self.input.print_indent(indent + 1),
+            )
+        }
     }
 }
 
