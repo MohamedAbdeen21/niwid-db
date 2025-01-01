@@ -36,6 +36,11 @@ impl BPlusTree {
         assert_eq!(page.get_type(), &PageType::Leaf);
         tree.unpin_page(root_page_id, txn);
 
+        // flush the page type
+        if txn.is_none() {
+            tree.bpm.lock().flush(Some(root_page_id)).unwrap();
+        }
+
         tree
     }
 
