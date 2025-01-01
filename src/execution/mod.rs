@@ -83,7 +83,7 @@ impl Executable for Delete {
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
+            .ok_or(Error::TableNotFound(self.table_name))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
 
@@ -270,7 +270,7 @@ impl Executable for Update {
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
+            .ok_or(Error::TableNotFound(self.table_name))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
 
@@ -285,7 +285,7 @@ impl Executable for Update {
                     .fields
                     .iter()
                     .position(|f| f.name == col)
-                    .ok_or_else(|| anyhow!("Column {} does not exist", col))
+                    .ok_or(Error::ColumnNotFound(col).into())
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -416,7 +416,7 @@ impl Executable for Insert {
                 .get_catalog()
                 .write()
                 .get_table_mut(&self.table_name, txn_id)
-                .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??
+                .ok_or_else(|| Error::TableNotFound(self.table_name.clone()))??
                 .insert(tuple)?;
         }
 
@@ -549,11 +549,11 @@ impl BinaryExpr {
                 let index1 = fields
                     .iter()
                     .position(|col| &col.name == c1)
-                    .ok_or(anyhow!("Column {} does not exist", c1))?;
+                    .ok_or(Error::ColumnNotFound(c1.clone()))?;
                 let index2 = fields
                     .iter()
                     .position(|col| &col.name == c2)
-                    .ok_or(anyhow!("Column {} does not exist", c2))?;
+                    .ok_or(Error::ColumnNotFound(c2.clone()))?;
                 let col1 = &input.cols()[index1];
                 let col2 = &input.cols()[index2];
                 Ok(col1
@@ -567,7 +567,7 @@ impl BinaryExpr {
                     .fields()
                     .iter()
                     .position(|col| &col.name == c2)
-                    .ok_or(anyhow!("Column {} does not exist", c2))?;
+                    .ok_or(Error::ColumnNotFound(c2.clone()))?;
                 let col = &input.cols()[index];
                 Ok(col
                     .iter()
@@ -579,7 +579,7 @@ impl BinaryExpr {
                     .fields()
                     .iter()
                     .position(|col| &col.name == c1)
-                    .ok_or(anyhow!("Column {} does not exist", c1))?;
+                    .ok_or(Error::ColumnNotFound(c1.clone()))?;
                 let col = &input.cols()[index];
                 Ok(col
                     .iter()

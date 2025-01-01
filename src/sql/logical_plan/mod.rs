@@ -119,16 +119,16 @@ impl LogicalPlanBuilder {
 
         let table_name = match &tables.first().unwrap().relation {
             TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-            _ => bail!(anyhow!(Error::Unsupported(
+            _ => bail!(Error::Unsupported(
                 "Anything other than `DELETE FROM table_name [condition];`".into()
-            ))),
+            )),
         };
 
         let schema = self
             .catalog
             .read()
             .get_schema(&table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
+            .ok_or(Error::TableNotFound(table_name.clone()))?;
 
         let root = LogicalPlan::Scan(Scan::new(table_name.clone(), schema));
 
@@ -392,7 +392,11 @@ impl LogicalPlanBuilder {
     ) -> Result<LogicalPlan> {
         let input = self.build_query(source, txn_id)?.unwrap();
         let table_name = table_name.0.first().unwrap().value.clone();
-        let schema = self.catalog.read().get_schema(&table_name, txn_id).unwrap();
+        let schema = self
+            .catalog
+            .read()
+            .get_schema(&table_name, txn_id)
+            .ok_or(Error::TableNotFound(table_name.clone()))?;
 
         let input_schema = input.schema();
         let input_types: Vec<_> = input_schema.fields.iter().map(|f| f.ty.clone()).collect();
@@ -430,9 +434,9 @@ impl LogicalPlanBuilder {
 
         let table_name = match table.relation {
             TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-            _ => bail!(anyhow!(Error::Unsupported(
+            _ => bail!(Error::Unsupported(
                 "Anything other than `UPDATE table_name ...;`".into()
-            ))),
+            )),
         };
 
         let assignments = assignments
@@ -444,7 +448,7 @@ impl LogicalPlanBuilder {
             .catalog
             .read()
             .get_schema(&table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
+            .ok_or(Error::TableNotFound(table_name.clone()))?;
 
         for (col, _) in assignments.iter() {
             if !schema.fields.iter().any(|f| &f.name == col) {
@@ -521,7 +525,7 @@ impl LogicalPlanBuilder {
                     .catalog
                     .read()
                     .get_schema(&left_name, txn_id)
-                    .ok_or(anyhow!("Table {} does not exist", left_name))?;
+                    .ok_or(Error::TableNotFound(left_name.clone()))?;
 
                 let root = if let Some(pre) = prewhere {
                     let expr = build_expr(&pre)?;
@@ -549,7 +553,7 @@ impl LogicalPlanBuilder {
                                 .catalog
                                 .read()
                                 .get_schema(&right_name, txn_id)
-                                .ok_or(anyhow!("Table {} does not exist", right_name))?;
+                                .ok_or(Error::TableNotFound(right_name.clone()))?;
 
                             let right_scan = LogicalPlan::Scan(Scan::new(
                                 right_name.clone(),
@@ -766,7 +770,7 @@ impl LogicalPlanBuilder {
                         vec![if schema.is_qualified() {
                             Err(anyhow!("Please use qualified column names {}", name))
                         } else {
-                            Err(anyhow!("Column {} does not exist in table", name))
+                            Err(Error::ColumnNotFound(name).into())
                         }]
                     } else {
                         vec![Ok(LogicalExpr::Column(ident.value.clone()))]

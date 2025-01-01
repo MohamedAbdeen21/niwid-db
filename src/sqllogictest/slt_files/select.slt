@@ -13,7 +13,7 @@ SELECT true, false;
 ----
 true false
 
-statement error Table test does not exist
+statement error Table test not found
 SELECT a FROM test;
 
 statement ok
