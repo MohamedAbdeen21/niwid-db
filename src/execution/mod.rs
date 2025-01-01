@@ -463,11 +463,16 @@ impl Executable for CreateTable {
     fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let catalog = ctx.get_catalog();
-        catalog
-            .write()
-            .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
+        let created =
+            catalog
+                .write()
+                .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
 
-        Ok(ResultSet::with_info("Table created".into()))
+        if created {
+            Ok(ResultSet::with_info("Table created".into()))
+        } else {
+            Ok(ResultSet::with_info("Table already exists".into()))
+        }
     }
 }
 

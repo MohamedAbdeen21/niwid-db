@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 // TODO: config for local server
-pub const DISK_STORAGE: &str = "/mnt/lambda";
+pub const DISK_STORAGE: &str = "data/test";
 
 #[cfg(test)]
 pub fn test_path() -> String {

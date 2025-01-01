@@ -1,6 +1,8 @@
 use askama::Template;
 use idk::execution::result_set::ResultSet;
 
+use crate::examples::EXAMPLES;
+
 #[derive(Template, Default)]
 #[template(path = "query_result.html")]
 struct QueryResultTemplate {
@@ -13,6 +15,24 @@ struct QueryResultTemplate {
 struct AdditionalInfo {
     message: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "index.html")]
+struct Index {
+    examples: Vec<String>,
+}
+
+impl Default for Index {
+    fn default() -> Self {
+        Index {
+            examples: EXAMPLES.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
+pub fn format_index() -> String {
+    Index::default().render().unwrap()
 }
 
 pub fn format_result_and_info(result: ResultSet) -> String {

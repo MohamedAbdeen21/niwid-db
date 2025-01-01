@@ -16,14 +16,37 @@
 </head>
 
 <body>
+	<div id="examples-sidebar">
+		<ul>
+			{% for example in examples %}
+			<li class="example"><pre>{{ example|safe }}</pre></li>
+			{% endfor %}
+		</ul>
+	</div>
+
 	<div class="container" hx-indicator="#query-container">
+		<button id="examples-button">
+			Examples
+		</button>
+
 		<div id="query-container" class="box">
 			<form hx-post="/query" hx-ext="json-enc" hx-swap="none" hx-select-oob="#query-results, #additional-info">
 				<textarea id="sql-query" name="query" placeholder="Write your SQL queries here... [Shift+Enter to submit]"></textarea>
-				<button type="submit">
+
+				<button type="submit" id="submit-query-button">
 					<span class="indicator-replace">Run Query</span>
 					<span class="indicator"></span>
 				</button>
+
+				<div id="logos">
+					<a href="https://github.com/MohamedAbdeen21/niwid-db" id="github-logo" target="_blank" aria-label="GitHub" class="logo">
+						<img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="GitHub" />
+					</a>
+
+					<a id="linkedin-logo" href="https://www.linkedin.com/in/mohamed-abdeen-554671214/" target="_blank" class="logo">
+						<img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" alt="LinkedIn Logo">
+					</a>
+				</div>
 			</form>
 		</div>
 
@@ -41,10 +64,24 @@
 	</div>
 
 </body>
-
 </html>
 
 <script>
+	const examplesSidebar = document.getElementById("examples-sidebar");
+	const examplesButton = document.getElementById("examples-button");
+
+	function toggleExamplesSidebar() {
+		const isOpen = examplesSidebar.style.left === "0px";
+
+		if (isOpen) {
+			examplesSidebar.style.left = "-30%";
+			examplesButton.style.left = "0px";
+		} else {
+			examplesSidebar.style.left = "0px";
+			examplesButton.style.left = "30%";
+		}
+	}
+
 	document.addEventListener("DOMContentLoaded", () => {
 		const form = document.querySelector("form");
 		const textarea = document.getElementById("sql-query");
@@ -56,4 +93,38 @@
 			}
 		});
 	});
+
+	document.addEventListener("DOMContentLoaded", () => {
+		examplesButton.addEventListener("click", () => toggleExamplesSidebar());
+	});
+
+	document.addEventListener("DOMContentLoaded", () => {
+		const examples = document.querySelectorAll("#examples-sidebar ul li");
+		const sqlQuery = document.getElementById("sql-query");
+
+		examples.forEach((example) => {
+			example.addEventListener("click", () => {
+				sqlQuery.value = example.textContent;
+				toggleExamplesSidebar();
+			});
+		});
+	})
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const keywords = [
+            "SELECT", "FROM", "WHERE", "CREATE", "TABLE", "INSERT", "INTO", "VALUES", "UNIQUE", "NOT", "NULL",
+			"IF", "EXISTS", "UINT", "INT", "TEXT", "BOOLEAN", "BOOL", "FLOAT", "OR", "AND"
+        ];
+
+        const highlightSql = (code) => {
+            const regex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi');
+            return code.replaceAll(regex, (match) => `<span class="keyword">${match}</span>`);
+		};
+
+
+		const examples = document.querySelectorAll('.example');
+		examples.forEach((example) => {
+			example.innerHTML = highlightSql(example.innerHTML);
+		});
+	})
 </script>

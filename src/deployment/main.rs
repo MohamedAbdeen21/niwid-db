@@ -1,7 +1,8 @@
+mod examples;
 mod html_formatter;
 
 use anyhow::Result;
-use html_formatter::{format_error, format_result_and_info};
+use html_formatter::{format_error, format_index, format_result_and_info};
 use idk::context::Context;
 use lambda_http::{run, service_fn, Body, Error, Request, RequestPayloadExt, Response};
 use lambda_runtime::diagnostic::Diagnostic;
@@ -58,12 +59,12 @@ async fn serve_css() -> Result<Response<Body>, Error> {
 }
 
 async fn serve_frontend() -> Result<Response<Body>, Error> {
-    let file = include_str!("./views/index.html").to_string();
+    let html = format_index();
 
     let resp = Response::builder()
         .status(200)
         .header("content-type", "text/html")
-        .body(file.into())
+        .body(html.into())
         .map_err(Box::new)?;
 
     Ok(resp)

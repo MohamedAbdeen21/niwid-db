@@ -136,10 +136,10 @@ impl Catalog {
         schema: &Schema,
         ignore_if_exists: bool,
         txn: Option<TxnId>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let exists = self.get_table(&table_name, txn).is_some();
         if exists && ignore_if_exists {
-            return Ok(());
+            return Ok(false);
         } else if exists {
             bail!(Error::TableExists(table_name));
         }
@@ -175,7 +175,7 @@ impl Catalog {
         self.tables
             .insert(txn, table_name.to_string(), (tuple_id, table));
 
-        Ok(())
+        Ok(true)
     }
 
     pub fn get_schema(&self, table_name: &str, txn: Option<TxnId>) -> Option<Schema> {
