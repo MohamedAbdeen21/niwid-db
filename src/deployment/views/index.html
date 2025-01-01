@@ -43,17 +43,30 @@
 	const examplesSidebar = document.getElementById("examples-sidebar");
 	const examplesButton = document.getElementById("examples-button");
 
+    function closeExamplesSidebar() {
+        examplesSidebar.style.left = "-300px";
+        examplesButton.style.left = "0px";
+    }
+
 	function toggleExamplesSidebar() {
 		const isOpen = examplesSidebar.style.left === "0px";
 
 		if (isOpen) {
-			examplesSidebar.style.left = "-300px";
-			examplesButton.style.left = "0px";
+			closeExamplesSidebar();
 		} else {
 			examplesSidebar.style.left = "0px";
 			examplesButton.style.left = "300px";
 		}
 	}
+
+    document.addEventListener("click", (event) => {
+        const isClickInsideSidebar = examplesSidebar.contains(event.target);
+        const isClickOnButton = examplesButton.contains(event.target);
+
+        if (!isClickInsideSidebar && !isClickOnButton) {
+            closeExamplesSidebar();
+        }
+    });
 
 	document.addEventListener("DOMContentLoaded", () => {
 		const form = document.querySelector("form");
@@ -72,33 +85,39 @@
 	});
 
 	document.addEventListener("DOMContentLoaded", () => {
-		const examples = document.querySelectorAll("#examples-sidebar ul li");
-		const sqlQuery = document.getElementById("sql-query");
+		const examples = document.querySelectorAll(".example");
+		const textarea = document.getElementById("sql-query");
 
 		examples.forEach((example) => {
 			example.addEventListener("click", () => {
-				sqlQuery.value = example.textContent;
+				textarea.value = example.textContent;
 				toggleExamplesSidebar();
-				sqlQuery.focus();
+				textarea.focus();
 			});
 		});
 	})
 
-    document.addEventListener('DOMContentLoaded', () => {
-        const keywords = [
-            "SELECT", "FROM", "WHERE", "CREATE", "TABLE", "INSERT", "INTO", "VALUES", "UNIQUE", "NOT", "NULL",
-			"IF", "EXISTS", "UINT", "INT", "TEXT", "BOOLEAN", "BOOL", "FLOAT", "OR", "AND"
-        ];
+	document.addEventListener('DOMContentLoaded', () => {
+		const keywords = [
+			"SELECT", "FROM", "WHERE", "CREATE", "TABLE", "INSERT", "INTO", "VALUES", "UNIQUE", "NOT", "NULL",
+			"IF", "EXISTS", "UINT", "INT", "TEXT", "BOOLEAN", "BOOL", "FLOAT", "OR", "AND", "DELETE", "UPDATE",
+			"TRUNCATE", "DROP", "LIMIT", "OFFSET"
+		];
 
-        const highlightSql = (code) => {
-            const regex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi');
-            return code.replaceAll(regex, (match) => `<span class="keyword">${match}</span>`);
+		const highlightSql = (code) => {
+			const keywordRegex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi');
+			const commentRegex = /(--[^\n]*|\/\*[\s\S]*?\*\/)/g;
+
+
+			code = code.replaceAll(keywordRegex, (match) => `<span class="keyword">${match}</span>`);
+			code = code.replaceAll(commentRegex, (match) => `<span class="comment">${match}</span>`);
+
+			return code
 		};
-
 
 		const examples = document.querySelectorAll('.example');
 		examples.forEach((example) => {
 			example.innerHTML = highlightSql(example.innerHTML);
 		});
-	})
+	});
 </script>

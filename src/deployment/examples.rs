@@ -4,7 +4,7 @@ pub const EXAMPLES: &[&str] = &[
     "SELECT name, id FROM users;",
     "SELECT * FROM users\nWHERE id < 2;",
     "SELECT * FROM users\nWHERE id = 1\n\tOR name = 'Jane Doe';",
-    "-- Prewhere forces an index search\n-- Can do ranges as well\nSELECT * FROM users PREWHERE (id BETWEEN 1 AND 2);",
+    "-- Prewhere forces an index search\n-- Can do ranges as well\n-- Index is automatically created on UNIQUE columns\nSELECT * FROM users PREWHERE (id BETWEEN 1 AND 2);",
     "DELETE FROM users\nWHERE id = 1;",
     "TRUNCATE TABLE users;",
     "DROP TABLE IF EXISTS users;",

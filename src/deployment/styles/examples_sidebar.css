@@ -57,3 +57,13 @@
 	color: #f44336;
 	font-weight: bold;
 }
+
+.comment {
+	color: gray;
+	font-style: italic;
+}
+
+.comment .keyword {
+	color: gray;
+	font-style: italic;
+}
