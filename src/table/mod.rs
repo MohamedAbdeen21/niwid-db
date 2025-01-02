@@ -310,7 +310,7 @@ impl Table {
             if field.constraints.unique {
                 // unwrap on option because nullability is checked first and
                 // uniquness disallows null values
-                // also, schema forces unique columns to be of type u32
+                // also, schema forces unique columns to be castable to u32 (int, uint, float)
                 let key = tuple.get_value_at(i as u8, &self.schema)?;
 
                 return match self
