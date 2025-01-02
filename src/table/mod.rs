@@ -1,7 +1,6 @@
 use crate::buffer_pool::ArcBufferPool;
 use crate::errors::Error;
 use crate::indexes::b_plus_tree::btree::BPlusTree;
-use crate::pages::indexes::b_plus_tree::Key;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
 use crate::pages::{PageId, INVALID_PAGE};
 use crate::printdbg;
@@ -9,7 +8,7 @@ use crate::tuple::schema::Field;
 use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
-use crate::types::{Str, StrAddr, Types, ValueFactory};
+use crate::types::{Str, StrAddr, Types, Value, ValueFactory};
 use anyhow::{bail, ensure, Result};
 
 pub mod table_iterator;
@@ -306,15 +305,20 @@ impl Table {
 
     /// Returns None if no uniqueness is defined for the schema.
     /// Or Some(Key) if the tuple is unique, where Key is the unique value.
-    pub fn check_uniqueness(&self, tuple: &Tuple) -> Result<Option<Key>> {
+    pub fn check_uniqueness(&self, tuple: &Tuple) -> Result<Option<Value>> {
         for (i, field) in self.schema.fields.iter().enumerate() {
             if field.constraints.unique {
                 // unwrap on option because nullability is checked first and
                 // uniquness disallows null values
                 // also, schema forces unique columns to be of type u32
-                let key = tuple.get_value_at(i as u8, &self.schema)?.u32();
+                let key = tuple.get_value_at(i as u8, &self.schema)?;
 
-                return match self.index.as_ref().unwrap().search(self.active_txn, key) {
+                return match self
+                    .index
+                    .as_ref()
+                    .unwrap()
+                    .search(self.active_txn, key.as_u32())
+                {
                     None => Ok(Some(key)),
                     Some(_) => bail!(Error::DuplicateValue(
                         format!("{}", key),
@@ -359,7 +363,7 @@ impl Table {
                 self.index
                     .as_mut()
                     .unwrap()
-                    .insert(self.active_txn, key, id)?;
+                    .insert(self.active_txn, key.as_u32(), id)?;
             };
             if self.active_txn.is_none() {
                 self.bpm.lock().flush(Some(self.last_page))?;
@@ -404,7 +408,7 @@ impl Table {
         page.delete_tuple(slot_id);
 
         if let Some(id) = self.get_unique_column_id() {
-            let key = tuple.get_value_at(id, &self.schema)?.u32();
+            let key = tuple.get_value_at(id, &self.schema)?.as_u32();
             self.index.as_mut().unwrap().delete(self.active_txn, key)?;
         }
 

@@ -56,8 +56,7 @@ impl BPlusTree {
         }
     }
 
-    pub fn delete(&mut self, txn: Option<TxnId>, key: impl Into<Key>) -> Result<()> {
-        let key = key.into();
+    pub fn delete(&mut self, txn: Option<TxnId>, key: Key) -> Result<()> {
         let root = self.load_page_mut(self.root_page_id, txn).unwrap();
 
         let mut leaf = self.find_leaf_mut(txn, root, key);
@@ -78,8 +77,7 @@ impl BPlusTree {
         LeafValue::new(page_id, 0)
     }
 
-    pub fn search(&self, txn: Option<TxnId>, key: impl Into<Key>) -> Option<TupleId> {
-        let key = key.into();
+    pub fn search(&self, txn: Option<TxnId>, key: Key) -> Option<TupleId> {
         let page: IndexPage = self.load_page(self.root_page_id, txn).unwrap();
 
         let leaf = self.find_leaf(txn, page, key);
@@ -256,13 +254,7 @@ impl BPlusTree {
         Ok(())
     }
 
-    pub fn insert(
-        &mut self,
-        txn: Option<TxnId>,
-        key: impl Into<Key>,
-        value: TupleId,
-    ) -> Result<()> {
-        let key = key.into();
+    pub fn insert(&mut self, txn: Option<TxnId>, key: Key, value: TupleId) -> Result<()> {
         let mut page = self.load_page_mut(self.root_page_id, txn)?;
 
         let value = LeafValue::new(value.0, value.1);
@@ -295,11 +287,10 @@ impl BPlusTree {
     pub fn scan_from(
         &self,
         txn: Option<TxnId>,
-        key: impl Into<Key>,
+        key: Key,
         mut f: impl FnMut(&(Key, TupleId)) -> Result<()>,
     ) -> Result<()> {
         // unpinned by search
-        let key = key.into();
         let root = self.load_page(self.root_page_id, txn)?;
         let page = self.find_leaf(txn, root, key);
         let index = match page.find_index(key) {

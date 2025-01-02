@@ -177,14 +177,14 @@ impl LogicalPlanBuilder {
         };
 
         if let Some(ref rv) = rvalue {
-            if !matches!(rv, Value::UInt(_)) {
+            if !matches!(rv, Value::UInt(_) | Value::Int(_) | Value::Float(_)) {
                 bail!(Error::Unsupported(
                     "Index scan only supported on UInt".into()
                 ));
             }
         }
 
-        if !matches!(lvalue, Value::UInt(_)) {
+        if !matches!(lvalue, Value::UInt(_) | Value::Int(_) | Value::Float(_)) {
             bail!(Error::Unsupported(
                 "Index scan only supported on UInt".into()
             ));
@@ -200,8 +200,8 @@ impl LogicalPlanBuilder {
             bail!(Error::ColumnNotFound(col));
         }
 
-        let lvalue = Some(lvalue.u32());
-        let rvalue = rvalue.map(|v| v.u32());
+        let lvalue = Some(lvalue.as_u32());
+        let rvalue = rvalue.map(|v| v.as_u32());
 
         let (left, lincl, right, rincl) = match op {
             BinaryOperator::Eq => (lvalue, true, lvalue, true),

@@ -76,6 +76,24 @@ impl Types {
     }
 }
 
+macro_rules! impl_cast_to_u32 {
+    ($($variant:ident),+ $(,)?) => {
+        impl Value {
+            pub fn as_u32(&self) -> u32 {
+                match self {
+                    $(
+                        Value::$variant(v) => v.0 as u32,
+                    )+
+                    _ => panic!(
+                        "Internal Error: forced cast error: {:?} => u32",
+                        self,
+                    ),
+                }
+            }
+        }
+    };
+}
+
 macro_rules! impl_value_methods {
     ($($variant:ident($ty:ident)),+ $(,)?) => {
         impl Value {
@@ -114,6 +132,7 @@ impl Value {
 }
 
 impl_value_methods!(Int(i32), Float(f32), UInt(u32), Bool(bool));
+impl_cast_to_u32!(Int, Float, UInt);
 
 pub type StrAddr = TupleId;
 
@@ -131,10 +150,10 @@ pub enum Value {
 impl Value {
     pub fn to_string_unquoted(&self) -> String {
         match self {
-            Value::UInt(v) => v.to_string(),
+            Value::Float(_) => format!("{}", self), // print the exact value, without truncation
             Value::Int(v) => v.to_string(),
-            Value::Float(v) => v.to_string(),
             Value::Bool(v) => v.to_string(),
+            Value::UInt(v) => v.to_string(),
             Value::Str(v) => v.to_string(),
             Value::Null => "null".to_string(),
             Value::StrAddr(_) => unreachable!(),

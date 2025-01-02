@@ -135,15 +135,15 @@ impl Schema {
                 }
 
                 let type_ = Types::from_sql(&data_type.to_string())?;
-                if unique && type_ != Types::UInt {
+                if unique && !matches!(type_, Types::UInt | Types::Int | Types::Float) {
                     bail!(Error::Unsupported(
-                        "Unique field must be of type uint, sorry".into()
+                        "Unique field must be of type uint, int, or float".into()
                     ));
                 };
 
                 if unique && !not_null {
                     bail!(Error::Unimplemented(
-                        "Nulls are not allowed in Unique columns. Use NOT NULL for now.".into()
+                        "Nulls are not allowed in Unique columns. Add NOT NULL constraint.".into()
                     ))
                 };
 

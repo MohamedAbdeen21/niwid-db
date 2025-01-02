@@ -7,7 +7,7 @@ pub const EXAMPLES: &[&str] = &[
     "SELECT * FROM users\nWHERE id = 1\n\tOR name = 'Jane Doe';",
     "-- PREWHERE forces an index search\n-- Can also do ranges\n-- Index is automatically created on UNIQUE columns\nSELECT * FROM users PREWHERE (id BETWEEN 1 AND 2);",
     "CREATE TABLE IF NOT EXISTS addresses (\n\tuser_id UINT,\n\taddress TEXT,\n\tactive BOOL\n);",
-    "INSERT INTO addresses(user_id, address, current) VALUES\n(1, '123 Main St', true),\n(1, '456 Elm St', false),\n(2, '789 Oak St', true);",
+    "INSERT INTO addresses VALUES\n(1, '123 Main St', true),\n(1, '456 Elm St', false),\n(2, '789 Oak St', true);",
     "-- EXPLAIN shows the query plan without executing it\n-- ANALYZE executes the plan and times it\nEXPLAIN ANALYZE SELECT address\nFROM users\nINNER JOIN addresses\n\tON id = user_id\nWHERE active\nLIMIT 1 OFFSET 1;",
     "UPDATE addresses\nSET address = '123 Main St'\nWHERE user_id = 2;",
     "DELETE FROM addresses\nWHERE user_id <= 1;",
