@@ -383,11 +383,13 @@ impl LogicalPlanBuilder {
         &self,
         table_name: ObjectName,
         source: Option<Box<Query>>,
-        _columns: Vec<Ident>,
+        columns: Vec<Ident>,
         _returning: Option<Vec<SelectItem>>,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
         let input = self.build_query(source, txn_id)?.unwrap();
+        let input_schema = input.schema();
+
         let table_name = table_name.0.first().unwrap().value.clone();
         let schema = self
             .catalog
@@ -395,8 +397,34 @@ impl LogicalPlanBuilder {
             .get_schema(&table_name, txn_id)
             .ok_or(Error::TableNotFound(table_name.clone()))?;
 
-        let input_schema = input.schema();
-        let input_types: Vec<_> = input_schema.fields.iter().map(|f| f.ty.clone()).collect();
+        let columns = if columns.is_empty() {
+            schema.fields.iter().map(|f| f.name.clone()).collect()
+        } else {
+            let names: Vec<_> = columns.into_iter().map(|i| i.value).collect();
+            let non_existant: Vec<_> = names
+                .iter()
+                .filter(|i| !schema.fields.iter().any(|f| f.name == **i))
+                .collect();
+
+            if !non_existant.is_empty() {
+                bail!(Error::ColumnsNotFound(
+                    non_existant.into_iter().cloned().collect()
+                ));
+            }
+
+            names
+        };
+
+        let insert = Insert::new(
+            input,
+            columns,
+            table_name,
+            schema.clone(),
+            Schema::default(),
+        );
+
+        let input_types =
+            insert.reorder(input_schema.fields.iter().map(|f| f.ty.clone()).collect())?;
         let table_types: Vec<_> = schema.fields.iter().map(|f| f.ty.clone()).collect();
 
         if table_types
@@ -407,12 +435,7 @@ impl LogicalPlanBuilder {
             bail!(Error::TypeMismatch(table_types, input_types));
         }
 
-        let root = LogicalPlan::Insert(Box::new(Insert::new(
-            input,
-            table_name,
-            schema,
-            Schema::default(),
-        )));
+        let root = LogicalPlan::Insert(Box::new(insert));
 
         Ok(root)
     }

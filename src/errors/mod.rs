@@ -10,6 +10,7 @@ pub enum Error {
     TupleNotFound,
     TableNotFound(String),
     ColumnNotFound(String),
+    ColumnsNotFound(Vec<String>),
     Unimplemented(String),
     Unsupported(String),
     /// expected, actual
@@ -55,6 +56,9 @@ impl std::fmt::Display for Error {
                 f,
                 "Tuple is too big. Expected {expecetd} bytes, but got {actual} bytes."
             ),
+            Error::ColumnsNotFound(cols) => {
+                write!(f, "Columns {cols:?} not found.")
+            }
         }
     }
 }

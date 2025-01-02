@@ -1,8 +1,11 @@
-use crate::{
-    execution::result_set::ResultSet, pages::indexes::b_plus_tree::Key, tuple::schema::Schema,
-};
+use std::collections::HashMap;
+
+use crate::pages::indexes::b_plus_tree::Key;
+use crate::tuple::schema::Schema;
+use crate::{errors::Error, execution::result_set::ResultSet};
 
 use super::expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
+use anyhow::Result;
 
 pub enum LogicalPlan {
     Projection(Box<Projection>),
@@ -421,6 +424,7 @@ impl Values {
 
 pub struct Insert {
     pub input: LogicalPlan,
+    pub columns: Vec<String>,
     pub table_name: String,
     pub table_schema: Schema,
     pub returning_schema: Schema, // RETURNING statement
@@ -429,12 +433,14 @@ pub struct Insert {
 impl Insert {
     pub fn new(
         input: LogicalPlan,
+        columns: Vec<String>,
         table_name: String,
         table_schema: Schema,
         schema: Schema,
     ) -> Self {
         Self {
             input,
+            columns,
             table_name,
             table_schema,
             returning_schema: schema,
@@ -451,12 +457,39 @@ impl Insert {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{} {}: {}\n{}",
+            "{} {}: {}[{}]\n{}",
             "-".repeat(indent * 2),
             self.name(),
+            self.columns
+                .iter()
+                .map(|c| format!("#{}", c))
+                .collect::<Vec<_>>()
+                .join(", "),
             self.table_name,
             self.input.print_indent(indent + 1)
         )
+    }
+
+    pub fn reorder<T>(&self, data: Vec<T>) -> Result<Vec<T>> {
+        if data.is_empty() || data.len() != self.columns.len() {
+            return Err(Error::Expected(
+                format!("{} values", self.columns.len()),
+                data.len().to_string(),
+            )
+            .into());
+        }
+
+        let mut mapping: HashMap<&String, T> = self.columns.iter().zip(data).collect();
+
+        self.table_schema
+            .fields
+            .iter()
+            .map(|f| {
+                mapping
+                    .remove(&f.name)
+                    .ok_or(Error::ColumnNotFound(f.name.clone()).into())
+            })
+            .collect::<Result<Vec<_>>>()
     }
 }
 

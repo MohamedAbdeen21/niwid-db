@@ -26,13 +26,13 @@ trait Executable {
     /// plans only need access to the active_txn id field or catalog, not the whole context
     /// I'm aware that I can pass an Option<Context> and Option<TxnId> to each plan
     /// and None to other plans, but that would make the API too ugly
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet>;
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet>;
 }
 
 impl LogicalPlan {
-    pub fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    pub fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         match self {
-            LogicalPlan::Projection(plan) => plan.execute(ctx),
+            LogicalPlan::Projection(plan) => (*plan).execute(ctx),
             LogicalPlan::Scan(scan) => scan.execute(ctx),
             LogicalPlan::Filter(filter) => filter.execute(ctx),
             LogicalPlan::CreateTable(create) => create.execute(ctx),
@@ -66,14 +66,14 @@ impl LogicalPlan {
 }
 
 impl Executable for Limit {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let input = self.input.execute(ctx)?;
         Ok(input.skip(self.offset).take(self.limit))
     }
 }
 
 impl Executable for Delete {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
 
         let input = self.input.execute(ctx)?;
@@ -83,7 +83,7 @@ impl Executable for Delete {
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
-            .ok_or(Error::TableNotFound(self.table_name))??;
+            .ok_or(Error::TableNotFound(self.table_name.clone()))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
 
@@ -128,7 +128,7 @@ impl Executable for Delete {
 }
 
 impl Executable for IndexScan {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let arc_catalog = ctx.get_catalog();
         let catalog = arc_catalog.read();
@@ -215,7 +215,7 @@ impl Executable for IndexScan {
 }
 
 impl Executable for Join {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let left_name = match self.left {
             LogicalPlan::Scan(Scan { ref table_name, .. }) => table_name.clone(),
             _ => unreachable!(),
@@ -260,7 +260,7 @@ impl Executable for Join {
 }
 
 impl Executable for Update {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
 
         let input = self.input.execute(ctx)?;
@@ -270,11 +270,12 @@ impl Executable for Update {
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
-            .ok_or(Error::TableNotFound(self.table_name))??;
+            .ok_or(Error::TableNotFound(self.table_name.clone()))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
 
-        let (selected_cols, exprs): (Vec<String>, Vec<_>) = self.assignments.into_iter().unzip();
+        let (selected_cols, exprs): (Vec<String>, Vec<_>) =
+            self.assignments.iter().cloned().unzip();
 
         let schema = table.get_schema();
 
@@ -340,12 +341,12 @@ impl Executable for Update {
 }
 
 impl Executable for Truncate {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
 
         let count = self.table_names.len();
 
-        for table_name in self.table_names {
+        for table_name in self.table_names.iter() {
             ctx.get_catalog()
                 .write()
                 .truncate_table(table_name, txn_id)?;
@@ -356,17 +357,17 @@ impl Executable for Truncate {
 }
 
 impl Executable for DropTables {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let count = self.table_names.len();
-        for table_name in self.table_names {
+        for table_name in self.table_names.iter() {
             if ctx
                 .get_catalog()
                 .write()
-                .drop_table(table_name.clone(), self.if_exists, txn_id)
+                .drop_table(table_name, self.if_exists, txn_id)
                 .is_none()
             {
-                bail!(Error::TableNotFound(table_name));
+                bail!(Error::TableNotFound(table_name.clone()));
             }
         }
 
@@ -375,13 +376,13 @@ impl Executable for DropTables {
 }
 
 impl Executable for Values {
-    fn execute(self, _: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, _: &mut Context) -> Result<ResultSet> {
         let input = ResultSet::with_capacity(1);
         let output = self
             .rows
-            .into_iter()
+            .iter()
             .map(|row| {
-                row.into_iter()
+                row.iter()
                     .map(|expr| expr.evaluate(&input))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
@@ -392,7 +393,7 @@ impl Executable for Values {
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .try_fold(
-                ResultSet::from_rows(self.schema.fields, vec![]), // Start with the default ResultSet
+                ResultSet::from_rows(self.schema.fields.clone(), vec![]), // Start with the default ResultSet
                 |acc, rs| acc.union(rs),
             )?;
 
@@ -401,7 +402,7 @@ impl Executable for Values {
 }
 
 impl Executable for Insert {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let input = self.input.execute(ctx)?;
 
@@ -415,6 +416,7 @@ impl Executable for Insert {
         let count = input.len();
 
         for row in input.rows() {
+            let row = self.reorder(row)?;
             let tuple = Tuple::new(row, &self.table_schema);
 
             let _tuple_id = ctx
@@ -430,7 +432,7 @@ impl Executable for Insert {
 }
 
 impl Executable for Explain {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let plan = self.input.print();
         if self.analyze {
             let start = std::time::Instant::now();
@@ -465,13 +467,15 @@ impl Executable for Explain {
 }
 
 impl Executable for CreateTable {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let catalog = ctx.get_catalog();
-        let created =
-            catalog
-                .write()
-                .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
+        let created = catalog.write().add_table(
+            &self.table_name,
+            &self.schema,
+            self.if_not_exists,
+            txn_id,
+        )?;
 
         if created {
             Ok(ResultSet::with_info("Table created".into()))
@@ -482,7 +486,7 @@ impl Executable for CreateTable {
 }
 
 impl Executable for Filter {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let input = self.input.execute(ctx)?;
         let mask = self.expr.evaluate(&input)?;
 
@@ -683,7 +687,7 @@ impl BooleanBinaryExpr {
         }
     }
 
-    fn evaluate(self, input: &ResultSet) -> Result<Vec<bool>> {
+    fn evaluate(&self, input: &ResultSet) -> Result<Vec<bool>> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
                 let fields = input.fields();
@@ -741,7 +745,7 @@ impl BooleanBinaryExpr {
 }
 
 impl Executable for Projection {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let input = if matches!(self.input, LogicalPlan::Empty) {
             ResultSet::with_capacity(1)
         } else {
@@ -767,7 +771,7 @@ impl Executable for Projection {
 }
 
 impl Executable for Scan {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let arc_catalog = ctx.get_catalog();
         let catalog = arc_catalog.read();
@@ -814,8 +818,8 @@ impl Executable for Scan {
 }
 
 impl Executable for Identity {
-    fn execute(self, _ctx: &mut Context) -> Result<ResultSet> {
-        Ok(self.input)
+    fn execute(&self, _ctx: &mut Context) -> Result<ResultSet> {
+        Ok(self.input.clone())
     }
 }
 

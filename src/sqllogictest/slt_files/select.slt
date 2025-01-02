@@ -93,3 +93,6 @@ query UFIB
 SELECT a, b, c, d FROM test WHERE c = -4;
 ----
 1 2.3 -4 true
+
+statement error Column e not found
+SELECT e FROM test;

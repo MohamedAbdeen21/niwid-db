@@ -132,16 +132,16 @@ impl Catalog {
 
     pub fn add_table(
         &mut self,
-        table_name: String,
+        table_name: &String,
         schema: &Schema,
         ignore_if_exists: bool,
         txn: Option<TxnId>,
     ) -> Result<bool> {
-        let exists = self.get_table(&table_name, txn).is_some();
+        let exists = self.get_table(table_name, txn).is_some();
         if exists && ignore_if_exists {
             return Ok(false);
         } else if exists {
-            bail!(Error::TableExists(table_name));
+            bail!(Error::TableExists(table_name.clone()));
         }
 
         let mut table = Table::new(
@@ -153,7 +153,7 @@ impl Catalog {
         )?;
         let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
         let tuple_data: Vec<Value> = vec![
-            ValueFactory::from_string(&Types::Str, &table_name),
+            ValueFactory::from_string(&Types::Str, table_name),
             ValueFactory::from_string(&Types::UInt, table.get_first_page_id().to_string()),
             ValueFactory::from_string(&Types::UInt, table.get_last_page_id().to_string()),
             ValueFactory::from_string(&Types::UInt, table.get_index_page_id().to_string()),
@@ -234,14 +234,14 @@ impl Catalog {
         Ok(())
     }
 
-    pub fn truncate_table(&mut self, table_name: String, txn: Option<TxnId>) -> Result<()> {
-        let table = match self.get_table_mut(&table_name, txn) {
+    pub fn truncate_table(&mut self, table_name: &String, txn: Option<TxnId>) -> Result<()> {
+        let table = match self.get_table_mut(table_name, txn) {
             Some(table) => table,
-            None => bail!(Error::TableNotFound(table_name)),
+            None => bail!(Error::TableNotFound(table_name.clone())),
         };
 
         let dup = table?.truncate()?;
-        let tuple_id = self.tables.get_mut(txn, &table_name).unwrap().0;
+        let tuple_id = self.tables.get_mut(txn, table_name).unwrap().0;
         self.tables
             .insert(txn, table_name.to_string(), (tuple_id, dup));
 
@@ -250,18 +250,18 @@ impl Catalog {
 
     pub fn drop_table(
         &mut self,
-        table_name: String,
+        table_name: &String,
         ignore_if_exists: bool,
         txn: Option<TxnId>,
     ) -> Option<()> {
-        let tuple_id = match self.tables.get(txn, &table_name) {
+        let tuple_id = match self.tables.get(txn, table_name) {
             Some((tuple_id, _)) => *tuple_id,
             None => return if ignore_if_exists { Some(()) } else { None },
         };
 
         self.table().delete(tuple_id).ok()?;
 
-        self.tables.remove(txn, &table_name);
+        self.tables.remove(txn, table_name);
 
         Some(())
     }
