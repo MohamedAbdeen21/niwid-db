@@ -1,8 +1,12 @@
+:root {
+	--sidebar-width: 350px;
+}
+
 #examples-sidebar {
 	position: fixed;
 	top: 0;
-	left: -300px;
-	width: 300px;
+	left: calc(var(--sidebar-width) * -1);
+	width: var(--sidebar-width);
 	height: 100%;
 	background-color: #333;
 	color: #fff;
@@ -10,6 +14,10 @@
 	transition: left 0.3s ease;
 	z-index: 1000;
 	border-right: 3px solid #444;
+}
+
+#examples-sidebar.open {
+	left: 0;
 }
 
 #examples-sidebar ul {
@@ -21,7 +29,7 @@
 	border-bottom: 1px solid #444;
 }
 
-#examples-sidebar li pre {
+.example pre {
 	white-space: pre-wrap;
 	word-wrap: break-word;
 	word-break: break-word;
@@ -51,6 +59,10 @@
 	padding: 10px 0px 10px;
 	transition: left 0.3s ease;
 	z-index: 1100;
+}
+
+#examples-button.open {
+	left: var(--sidebar-width);
 }
 
 .keyword {
