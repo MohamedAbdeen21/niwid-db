@@ -20,6 +20,7 @@ pub enum LogicalPlan {
     Truncate(Truncate),
     Update(Box<Update>),
     Delete(Box<Delete>),
+    Union(Box<Union>),
     Limit(Box<Limit>),
     IndexScan(IndexScan),
     StartTxn,
@@ -60,6 +61,7 @@ impl LogicalPlan {
             LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
             LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
+            LogicalPlan::Union(u) => u.print(indent),
             LogicalPlan::Limit(l) => l.print(indent),
             #[cfg(test)]
             LogicalPlan::Identity(_) => unreachable!(),
@@ -85,6 +87,7 @@ impl LogicalPlan {
             LogicalPlan::StartTxn => Schema::default(),
             LogicalPlan::CommitTxn => Schema::default(),
             LogicalPlan::RollbackTxn => Schema::default(),
+            LogicalPlan::Union(u) => u.schema(),
             LogicalPlan::Limit(l) => l.schema(),
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.schema(),
@@ -128,6 +131,30 @@ impl Limit {
                 self.input.print_indent(indent + 1),
             )
         }
+    }
+}
+
+pub struct Union {
+    pub left: LogicalPlan,
+    pub right: LogicalPlan,
+}
+
+impl Union {
+    pub fn new(left: LogicalPlan, right: LogicalPlan) -> Self {
+        Self { left, right }
+    }
+
+    pub fn schema(&self) -> Schema {
+        self.left.schema()
+    }
+
+    pub fn print(&self, indent: usize) -> String {
+        format!(
+            "{} Union:\n{}{}",
+            "-".repeat(indent * 2),
+            self.left.print_indent(indent + 1),
+            self.right.print_indent(indent + 1)
+        )
     }
 }
 
