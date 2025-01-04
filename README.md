@@ -57,9 +57,9 @@ niwid-db can execute SQL queries for managing tables, running transactions, and 
 Example:
 ```sql
 CREATE TABLE users (
-    id INT,
+    id INT PRIMARY KEY,
     name TEXT NOT NULL,
-    email TEXT UNIQUE
+    email TEXT,
 );
 
 INSERT INTO users VALUES (1, 'Alice', 'alice@example.com');
