@@ -13,7 +13,7 @@ SELECT true, false;
 ----
 true false
 
-statement error Table test does not exist
+statement error Table test not found
 SELECT a FROM test;
 
 statement ok
@@ -57,3 +57,42 @@ query UFIB
 SELECT a, b, c, d FROM test WHERE d = null;
 ----
 null null null null
+
+# Comparison operators
+query UFIB
+SELECT a, b, c, d FROM test WHERE a < 5;
+----
+1 2.3 -4 true
+null null null null
+
+query UFIB
+SELECT a, b, c, d FROM test WHERE b > 0;
+----
+1 2.3 -4 true
+
+query UFIB
+SELECT a, b, c, d FROM test WHERE c <= 10;
+----
+1 2.3 -4 true
+5 -6.789 10 false
+null null null null
+
+query UFIB
+SELECT a, b, c, d FROM test WHERE b >= -6.789;
+----
+1 2.3 -4 true
+5 -6.789 10 false
+
+query UFIB
+SELECT a, b, c, d FROM test WHERE d != true;
+----
+5 -6.789 10 false
+null null null null
+
+query UFIB
+SELECT a, b, c, d FROM test WHERE c = -4;
+----
+1 2.3 -4 true
+
+statement error Column e not found
+SELECT e FROM test;

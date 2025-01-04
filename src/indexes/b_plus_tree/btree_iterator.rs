@@ -48,9 +48,9 @@ impl Iterator for IndexPageIterator {
         self.index += 1;
 
         if value.is_deleted {
-            self.next();
+            self.next()
+        } else {
+            Some((key, value.tuple_id()))
         }
-
-        Some((key, value.tuple_id()))
     }
 }

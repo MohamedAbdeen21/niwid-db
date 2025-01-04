@@ -1,5 +1,6 @@
 pub mod result_set;
 
+use crate::catalog::CATALOG_NAME;
 use crate::context::Context;
 use crate::errors::Error;
 use crate::lit;
@@ -7,7 +8,7 @@ use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
     CreateTable, Delete, DropTables, Filter, Identity, IndexScan, Insert, Join, Limit, LogicalPlan,
-    Scan, Truncate, Update, Values,
+    Scan, Truncate, Union, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::constraints::Constraints;
@@ -26,13 +27,13 @@ trait Executable {
     /// plans only need access to the active_txn id field or catalog, not the whole context
     /// I'm aware that I can pass an Option<Context> and Option<TxnId> to each plan
     /// and None to other plans, but that would make the API too ugly
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet>;
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet>;
 }
 
 impl LogicalPlan {
-    pub fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    pub fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         match self {
-            LogicalPlan::Projection(plan) => plan.execute(ctx),
+            LogicalPlan::Projection(plan) => (*plan).execute(ctx),
             LogicalPlan::Scan(scan) => scan.execute(ctx),
             LogicalPlan::Filter(filter) => filter.execute(ctx),
             LogicalPlan::CreateTable(create) => create.execute(ctx),
@@ -45,19 +46,20 @@ impl LogicalPlan {
             LogicalPlan::Delete(d) => d.execute(ctx),
             LogicalPlan::Empty => Ok(ResultSet::default()),
             LogicalPlan::Join(j) => j.execute(ctx),
+            LogicalPlan::Union(u) => u.execute(ctx),
             LogicalPlan::Limit(l) => l.execute(ctx),
             LogicalPlan::IndexScan(i) => i.execute(ctx),
             LogicalPlan::StartTxn => {
                 ctx.start_txn()?;
-                Ok(ResultSet::default())
+                Ok(ResultSet::with_info("Transaction started".into()))
             }
             LogicalPlan::CommitTxn => {
                 ctx.commit_txn()?;
-                Ok(ResultSet::default())
+                Ok(ResultSet::with_info("Transaction committed".into()))
             }
             LogicalPlan::RollbackTxn => {
                 ctx.rollback_txn()?;
-                Ok(ResultSet::default())
+                Ok(ResultSet::with_info("Transaction rolled back".into()))
             }
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.execute(ctx),
@@ -65,15 +67,23 @@ impl LogicalPlan {
     }
 }
 
+impl Executable for Union {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
+        let left = self.left.execute(ctx)?;
+        let right = self.right.execute(ctx)?;
+        left.union(right)
+    }
+}
+
 impl Executable for Limit {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let input = self.input.execute(ctx)?;
         Ok(input.skip(self.offset).take(self.limit))
     }
 }
 
 impl Executable for Delete {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
 
         let input = self.input.execute(ctx)?;
@@ -83,7 +93,7 @@ impl Executable for Delete {
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
+            .ok_or(Error::TableNotFound(self.table_name.clone()))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
 
@@ -101,7 +111,7 @@ impl Executable for Delete {
 
         table.start_txn(txn_id)?;
 
-        for row in selected_rows {
+        for row in selected_rows.iter() {
             let tuple_id = (row[0].u32(), row[1].u32() as u16);
 
             if let Err(err) = table.delete(tuple_id) {
@@ -120,12 +130,15 @@ impl Executable for Delete {
             ctx.commit_txn()?;
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!(
+            "Deleted {} rows",
+            selected_rows.len()
+        )))
     }
 }
 
 impl Executable for IndexScan {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let arc_catalog = ctx.get_catalog();
         let catalog = arc_catalog.read();
@@ -173,7 +186,7 @@ impl Executable for IndexScan {
 
         let mut cols: Vec<Vec<Value>> = vec![vec![]; schema.fields.len() + 2];
 
-        // TODO: pass the tuple_id as tuple for udpate to use
+        // TODO: pass the tuple_id as tuple type for update to use
         // need to define a tuple type first though
         tuples
             .into_iter()
@@ -212,7 +225,7 @@ impl Executable for IndexScan {
 }
 
 impl Executable for Join {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let left_name = match self.left {
             LogicalPlan::Scan(Scan { ref table_name, .. }) => table_name.clone(),
             _ => unreachable!(),
@@ -257,7 +270,7 @@ impl Executable for Join {
 }
 
 impl Executable for Update {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
 
         let input = self.input.execute(ctx)?;
@@ -267,11 +280,12 @@ impl Executable for Update {
 
         let table = catalog
             .get_table_mut(&self.table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??;
+            .ok_or(Error::TableNotFound(self.table_name.clone()))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
 
-        let (selected_cols, exprs): (Vec<String>, Vec<_>) = self.assignments.into_iter().unzip();
+        let (selected_cols, exprs): (Vec<String>, Vec<_>) =
+            self.assignments.iter().cloned().unzip();
 
         let schema = table.get_schema();
 
@@ -282,7 +296,7 @@ impl Executable for Update {
                     .fields
                     .iter()
                     .position(|f| f.name == col)
-                    .ok_or_else(|| anyhow!("Column {} does not exist", col))
+                    .ok_or(Error::ColumnNotFound(col).into())
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -300,7 +314,7 @@ impl Executable for Update {
 
         table.start_txn(txn_id)?;
 
-        for row in selected_rows {
+        for row in selected_rows.iter() {
             let tuple_id = (row[0].u32(), row[1].u32() as u16);
 
             let mut new_tuple = row[2..].to_vec();
@@ -329,47 +343,56 @@ impl Executable for Update {
             ctx.commit_txn()?;
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!(
+            "Updated {} rows",
+            selected_rows.len()
+        )))
     }
 }
 
 impl Executable for Truncate {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
-        ctx.get_catalog()
-            .write()
-            .truncate_table(self.table_name, txn_id)?;
 
-        Ok(ResultSet::default())
+        let count = self.table_names.len();
+
+        for table_name in self.table_names.iter() {
+            ctx.get_catalog()
+                .write()
+                .truncate_table(table_name, txn_id)?;
+        }
+
+        Ok(ResultSet::with_info(format!("Truncated {} tables", count)))
     }
 }
 
 impl Executable for DropTables {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
-        for table_name in self.table_names {
+        let count = self.table_names.len();
+        for table_name in self.table_names.iter() {
             if ctx
                 .get_catalog()
                 .write()
-                .drop_table(table_name.clone(), self.if_exists, txn_id)
+                .drop_table(table_name, self.if_exists, txn_id)
                 .is_none()
             {
-                bail!(Error::TableNotFound(table_name));
+                bail!(Error::TableNotFound(table_name.clone()));
             }
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!("Dropped {} tables", count)))
     }
 }
 
 impl Executable for Values {
-    fn execute(self, _: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, _: &mut Context) -> Result<ResultSet> {
         let input = ResultSet::with_capacity(1);
         let output = self
             .rows
-            .into_iter()
+            .iter()
             .map(|row| {
-                row.into_iter()
+                row.iter()
                     .map(|expr| expr.evaluate(&input))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
@@ -380,7 +403,7 @@ impl Executable for Values {
             .collect::<Result<Vec<_>>>()?
             .into_iter()
             .try_fold(
-                ResultSet::from_rows(self.schema.fields, vec![]), // Start with the default ResultSet
+                ResultSet::from_rows(self.schema.fields.clone(), vec![]), // Start with the default ResultSet
                 |acc, rs| acc.union(rs),
             )?;
 
@@ -389,7 +412,7 @@ impl Executable for Values {
 }
 
 impl Executable for Insert {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let input = self.input.execute(ctx)?;
 
@@ -400,60 +423,80 @@ impl Executable for Insert {
             ));
         }
 
+        let count = input.len();
+
         for row in input.rows() {
+            let row = self.reorder(row)?;
             let tuple = Tuple::new(row, &self.table_schema);
 
             let _tuple_id = ctx
                 .get_catalog()
                 .write()
                 .get_table_mut(&self.table_name, txn_id)
-                .ok_or_else(|| anyhow!("Table {} does not exist", self.table_name))??
+                .ok_or_else(|| Error::TableNotFound(self.table_name.clone()))??
                 .insert(tuple)?;
         }
 
-        Ok(ResultSet::default())
+        Ok(ResultSet::with_info(format!("Inserted {} rows", count)))
     }
 }
 
 impl Executable for Explain {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let plan = self.input.print();
-        // println!("Logical plan:\n{}", self.input.print());
-        // time the execution time
         if self.analyze {
             let start = std::time::Instant::now();
+
             let mut result = self.input.execute(ctx)?;
+
+            let elapsed = start.elapsed();
+            let (value, unit) = if elapsed.as_secs() > 0 {
+                (elapsed.as_secs_f64(), "s")
+            } else if elapsed.as_millis() > 0 {
+                (elapsed.as_millis() as f64, "ms")
+            } else if elapsed.as_micros() > 0 {
+                (elapsed.as_micros() as f64, "μs")
+            } else {
+                (elapsed.as_nanos() as f64, "ns")
+            };
+
             let info = format!(
-                "Execution time: {:?}\nLogical Plan:\n{}",
-                start.elapsed(),
-                plan
+                "Execution time: {} {}\n\nLogical Plan:\n{}",
+                value, unit, plan
             );
             result.set_info(info);
             Ok(result)
         } else {
-            let mut empty = ResultSet::default();
-            empty.set_info(plan);
-            Ok(empty)
+            let mut msg = "Use EXPLAIN ANALYZE to execute the query and get the execution time\n\n"
+                .to_string();
+            msg.push_str(&plan);
+
+            Ok(ResultSet::with_info(msg))
         }
     }
 }
 
 impl Executable for CreateTable {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let catalog = ctx.get_catalog();
-        catalog
-            .write()
-            .add_table(self.table_name, &self.schema, self.if_not_exists, txn_id)?;
+        let created = catalog.write().add_table(
+            &self.table_name,
+            &self.schema,
+            self.if_not_exists,
+            txn_id,
+        )?;
 
-        // TODO: Change all other executions to return info instead of an empty default
-        // for the UI
-        Ok(ResultSet::from_info("Table created"))
+        if created {
+            Ok(ResultSet::with_info("Table created".into()))
+        } else {
+            Ok(ResultSet::with_info("Table already exists".into()))
+        }
     }
 }
 
 impl Executable for Filter {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let input = self.input.execute(ctx)?;
         let mask = self.expr.evaluate(&input)?;
 
@@ -511,9 +554,14 @@ impl BinaryExpr {
             BinaryOperator::Minus => Ok(left.sub(right)?),
             BinaryOperator::Multiply => Ok(left.mul(right)?),
             BinaryOperator::Divide => Ok(left.div(right)?),
-            BinaryOperator::Eq => Ok(lit!(Bool, left.equ(right)?.to_string())),
+            BinaryOperator::Eq => Ok(lit!(Bool, (left == right).to_string())),
             BinaryOperator::And => Ok(lit!(Bool, left.and(right)?.to_string())),
             BinaryOperator::Or => Ok(lit!(Bool, left.or(right)?.to_string())),
+            BinaryOperator::Lt => Ok(lit!(Bool, (left < right).to_string())),
+            BinaryOperator::Gt => Ok(lit!(Bool, (left > right).to_string())),
+            BinaryOperator::LtEq => Ok(lit!(Bool, (left <= right).to_string())),
+            BinaryOperator::GtEq => Ok(lit!(Bool, (left >= right).to_string())),
+            BinaryOperator::NotEq => Ok(lit!(Bool, (left != right).to_string())),
             e => bail!(Error::Unsupported(format!("Operator evaluation {}", e))),
         }
     }
@@ -525,11 +573,11 @@ impl BinaryExpr {
                 let index1 = fields
                     .iter()
                     .position(|col| &col.name == c1)
-                    .ok_or(anyhow!("Column {} does not exist", c1))?;
+                    .ok_or(Error::ColumnNotFound(c1.clone()))?;
                 let index2 = fields
                     .iter()
                     .position(|col| &col.name == c2)
-                    .ok_or(anyhow!("Column {} does not exist", c2))?;
+                    .ok_or(Error::ColumnNotFound(c2.clone()))?;
                 let col1 = &input.cols()[index1];
                 let col2 = &input.cols()[index2];
                 Ok(col1
@@ -543,7 +591,7 @@ impl BinaryExpr {
                     .fields()
                     .iter()
                     .position(|col| &col.name == c2)
-                    .ok_or(anyhow!("Column {} does not exist", c2))?;
+                    .ok_or(Error::ColumnNotFound(c2.clone()))?;
                 let col = &input.cols()[index];
                 Ok(col
                     .iter()
@@ -555,7 +603,7 @@ impl BinaryExpr {
                     .fields()
                     .iter()
                     .position(|col| &col.name == c1)
-                    .ok_or(anyhow!("Column {} does not exist", c1))?;
+                    .ok_or(Error::ColumnNotFound(c1.clone()))?;
                 let col = &input.cols()[index];
                 Ok(col
                     .iter()
@@ -649,7 +697,7 @@ impl BooleanBinaryExpr {
         }
     }
 
-    fn evaluate(self, input: &ResultSet) -> Result<Vec<bool>> {
+    fn evaluate(&self, input: &ResultSet) -> Result<Vec<bool>> {
         match (&self.left, &self.right) {
             (LogicalExpr::Column(c1), LogicalExpr::Column(c2)) => {
                 let fields = input.fields();
@@ -707,7 +755,7 @@ impl BooleanBinaryExpr {
 }
 
 impl Executable for Projection {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let input = if matches!(self.input, LogicalPlan::Empty) {
             ResultSet::with_capacity(1)
         } else {
@@ -724,12 +772,16 @@ impl Executable for Projection {
             .reduce(|a, b| a.concat(b))
             .unwrap_or_default();
 
+        if output.is_empty() {
+            return Ok(ResultSet::with_info("Empty Table".to_string()));
+        }
+
         Ok(output)
     }
 }
 
 impl Executable for Scan {
-    fn execute(self, ctx: &mut Context) -> Result<ResultSet> {
+    fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn();
         let arc_catalog = ctx.get_catalog();
         let catalog = arc_catalog.read();
@@ -739,7 +791,7 @@ impl Executable for Scan {
 
         let mut cols: Vec<Vec<Value>> = vec![vec![]; schema.fields.len() + 2];
 
-        // TODO: pass the tuple_id as tuple for udpate to use
+        // TODO: pass the tuple_id as tuple type for update to use
         // need to define a tuple type first though
         table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
             let mut values = vec![
@@ -764,6 +816,15 @@ impl Executable for Scan {
             Ok(())
         })?;
 
+        if self.table_name == CATALOG_NAME {
+            // deserialize the schema and print as sql
+            cols[6] = cols[6]
+                .iter()
+                .map(|v| Schema::from_bytes(v.str().as_bytes()).to_sql())
+                .map(|s| lit!(Str, s))
+                .collect();
+        }
+
         let mut fields = vec![
             Field::new("page_id", Types::UInt, Constraints::nullable(false)),
             Field::new("slot_id", Types::UInt, Constraints::nullable(false)),
@@ -776,8 +837,8 @@ impl Executable for Scan {
 }
 
 impl Executable for Identity {
-    fn execute(self, _ctx: &mut Context) -> Result<ResultSet> {
-        Ok(self.input)
+    fn execute(&self, _ctx: &mut Context) -> Result<ResultSet> {
+        Ok(self.input.clone())
     }
 }
 

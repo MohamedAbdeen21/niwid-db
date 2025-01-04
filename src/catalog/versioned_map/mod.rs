@@ -89,7 +89,7 @@ impl<K: std::cmp::Eq + std::hash::Hash + Clone, V> VersionedMap<K, V> {
     }
 
     /// rollback a version: discard all changes without applying them
-    pub fn rollback(&mut self, version: u64) {
+    pub(super) fn rollback(&mut self, version: u64) {
         self.versions.remove(&version);
     }
 }

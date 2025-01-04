@@ -10,6 +10,7 @@ pub enum Error {
     TupleNotFound,
     TableNotFound(String),
     ColumnNotFound(String),
+    ColumnsNotFound(Vec<String>),
     Unimplemented(String),
     Unsupported(String),
     /// expected, actual
@@ -19,7 +20,7 @@ pub enum Error {
     TransactionActive,
     NoActiveTransaction,
     DivisionByZero,
-    DuplicateKey(String, String),
+    DuplicateValue(String, String),
     NullNotAllowed(String),
 }
 
@@ -46,8 +47,8 @@ impl std::fmt::Display for Error {
                 )
             }
             Error::DivisionByZero => write!(f, "Division by zero."),
-            Error::DuplicateKey(key, column) => {
-                write!(f, "Duplicate key {key} in column {column}.")
+            Error::DuplicateValue(value, column) => {
+                write!(f, "Duplicate value {value} in column {column}.")
             }
             Error::NullNotAllowed(col) => write!(f, "NULL is not allowed in column {col}."),
             Error::ColumnNotFound(col) => write!(f, "Column {col} not found."),
@@ -55,6 +56,9 @@ impl std::fmt::Display for Error {
                 f,
                 "Tuple is too big. Expected {expecetd} bytes, but got {actual} bytes."
             ),
+            Error::ColumnsNotFound(cols) => {
+                write!(f, "Columns {cols:?} not found.")
+            }
         }
     }
 }

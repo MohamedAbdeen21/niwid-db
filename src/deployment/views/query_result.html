@@ -1,0 +1,20 @@
+<div id="query-results" class="box">
+	<table class="indication">
+		<thead>
+			<tr>
+				{% for header in headers %}
+				<th>{{ header.0 }} ({{ header.1 }})</th>
+				{% endfor %}
+			</tr>
+		</thead>
+		<tbody>
+			{% for row in rows %}
+			<tr>
+				{% for col in row %}
+				<td>{{ col }}</td>
+				{% endfor %}
+			</tr>
+			{% endfor %}
+		</tbody>
+	</table>
+</div>

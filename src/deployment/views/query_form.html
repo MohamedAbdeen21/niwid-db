@@ -1,0 +1,20 @@
+<form hx-post="/query" hx-ext="json-enc" hx-swap="none" hx-select-oob="#query-results, #additional-info">
+	<textarea id="sql-query" name="query" placeholder="Write your SQL queries here... [Shift+Enter to submit]"></textarea>
+
+	<div id="form-footer">
+		<div id="logos">
+			<a href="https://github.com/MohamedAbdeen21/niwid-db" id="github-logo" target="_blank" aria-label="GitHub" class="logo">
+				<img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png" alt="GitHub" />
+			</a>
+
+			<a id="linkedin-logo" href="https://www.linkedin.com/in/mohamed-abdeen-554671214/" target="_blank" class="logo">
+				<img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" alt="LinkedIn Logo">
+			</a>
+		</div>
+
+		<button type="submit" id="submit-query-button">
+			<span class="indicator-replace">Run Query</span>
+			<span class="indicator"></span>
+		</button>
+	</div>
+</form>

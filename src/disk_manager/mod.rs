@@ -8,7 +8,10 @@ use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-pub const DISK_STORAGE: &str = "/tmp/data";
+pub const DISK_STORAGE: &str = match option_env!("DISK_STORAGE") {
+    Some(path) => path,
+    None => "data/",
+};
 
 #[cfg(test)]
 pub fn test_path() -> String {
@@ -40,7 +43,7 @@ impl DiskManager {
     pub fn new(path: &str) -> Self {
         let path = Path::new(path);
 
-        create_dir_all(path).unwrap();
+        create_dir_all(path).unwrap_or_else(|_| panic!("Failed to write to {}", path.display()));
 
         let disk = Self {
             path: path.to_str().unwrap().to_string(),

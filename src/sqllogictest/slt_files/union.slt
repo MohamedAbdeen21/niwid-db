@@ -1,0 +1,103 @@
+statement ok
+CREATE TABLE table1 (a INT, b TEXT);
+
+statement ok
+CREATE TABLE table2 (c UINT, d TEXT);
+
+statement ok
+INSERT INTO table1 VALUES (-1, 'foo'), (2, 'bar');
+
+statement ok
+INSERT INTO table2 VALUES (1, 'baz'), (3, 'qux')
+
+# Basic UNION with INT and UINT columns
+query IS
+SELECT a, b FROM table1
+UNION
+SELECT c, d FROM table2;
+----
+-1 foo
+2 bar
+1 baz
+3 qux
+
+statement ok
+INSERT INTO table1 VALUES (NULL, 'hello');
+
+statement ok
+INSERT INTO table2 VALUES (NULL, 'world');
+
+query IS
+SELECT a, b FROM table1
+UNION
+SELECT c, d FROM table2;
+----
+-1 foo
+2 bar
+null hello
+1 baz
+3 qux
+null world
+
+# UNION with Boolean columns
+statement ok
+CREATE TABLE table3 (e BOOL, f TEXT);
+
+statement ok
+CREATE TABLE table4 (g BOOL, h TEXT);
+
+statement ok
+INSERT INTO table3 VALUES (true, 'yes'), (false, 'no');
+
+statement ok
+INSERT INTO table4 VALUES (true, 'yup'), (false, 'nop');
+
+query IS
+SELECT e, f FROM table3
+UNION
+SELECT g, h FROM table4;
+----
+true yes
+false no
+true yup
+false nop
+
+query IS
+SELECT -1, 'foo'
+UNION
+SELECT 42, 'bar';
+----
+-1 foo
+42 bar
+
+query IS
+SELECT true, 'yes'
+UNION
+SELECT false, 'no';
+----
+true yes
+false no
+
+query IS
+SELECT 3.14, 'pi'
+UNION
+SELECT 2.71, 'e';
+----
+3.14 pi
+2.71 e
+
+query IS
+SELECT NULL, 'hello'
+UNION
+SELECT NULL, 'world';
+----
+null hello
+null world
+
+query IS
+SELECT 1, 'one'
+UNION
+SELECT 1, 'one';
+----
+1 one
+1 one

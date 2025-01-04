@@ -16,7 +16,7 @@ mod sqllogictest;
 
 pub mod context;
 pub mod execution;
-pub mod server;
+pub mod local_server;
 
 #[macro_export]
 macro_rules! printdbg {

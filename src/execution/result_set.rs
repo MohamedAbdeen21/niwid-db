@@ -38,9 +38,9 @@ impl ResultSet {
         &self.schema.fields
     }
 
-    pub fn from_info(info: &str) -> Self {
+    pub fn with_info(info: String) -> Self {
         Self {
-            info: info.to_string(),
+            info,
             ..Default::default()
         }
     }
@@ -212,7 +212,7 @@ impl ResultSet {
             for (i, col) in self.cols.iter().enumerate() {
                 buf.push_str(&format!(
                     "| {:^width$} ",
-                    format!("{}", col[row_idx]),
+                    col[row_idx].to_string_unquoted(),
                     width = col_widths[i],
                 ));
             }

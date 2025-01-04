@@ -344,8 +344,11 @@ impl BufferPoolManager {
                     );
                 }
             })
-            .map(|f| f.reader())
-            .try_for_each(|p| self.disk_manager.write_to_file(p, None))
+            .map(|f| f.writer())
+            .try_for_each(|p| {
+                p.mark_clean();
+                self.disk_manager.write_to_file(p, None)
+            })
     }
 }
 

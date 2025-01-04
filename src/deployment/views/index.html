@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+	<script src="https://unpkg.com/htmx.org@2.0.4"
+		integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous">
+	</script>
+	<script src="https://unpkg.com/htmx.org/dist/ext/json-enc.js"></script>
+	<link rel="stylesheet" href="/css">
+	<title>Online SQL Database</title>
+</head>
+
+<body>
+	{% include "welcome.html" %}
+	{% include "examples_sidebar.html" %}
+
+	<div class="container" hx-indicator="#query-container">
+		<div id="query-container" class="box">
+			{% include "query_form.html" %}
+		</div>
+
+		<div id="query-results" class="box">
+			<p class="center">
+				Query results will appear here
+			</p>
+		</div>
+
+		<div id="additional-info" class="box">
+			<p class="center">
+				Errors, messages, and query plans will appear here
+			</p>
+		</div>
+	</div>
+
+	<script>
+		const popup = document.getElementById("welcome-popup");
+		const popupOkButton = document.getElementById("popup-ok-btn");
+		const examplesSidebar = document.getElementById("examples-sidebar");
+		const examplesButton = document.getElementById("examples-button");
+		const examples = document.querySelectorAll(".example");
+		const form = document.querySelector("form");
+		const textarea = document.getElementById("sql-query");
+		const keywords = [
+			"SELECT", "FROM", "WHERE", "CREATE", "TABLE", "INSERT", "INTO", "VALUES", "UNIQUE", "NOT", "NULL",
+			"IF", "EXISTS", "UINT", "INT", "TEXT", "BOOLEAN", "BOOL", "FLOAT", "OR", "AND", "DELETE", "UPDATE",
+			"TRUNCATE", "DROP", "LIMIT", "OFFSET", "AS", "PREWHERE", "JOIN", "INNER", "ON", "SET", "EXPLAIN", "ANALYZE",
+			"PRIMARY", "KEY", "UNION", "BEGIN", "COMMIT", "ROLLBACK"
+		];
+
+		function closeExamplesSidebar() {
+			examplesSidebar.classList.remove("open");
+			examplesButton.classList.remove("open");
+		};
+
+		function toggleExamplesSidebar() {
+			examplesSidebar.classList.toggle("open");
+			examplesButton.classList.toggle("open");
+		};
+
+		function highlightSql(code) {
+			const keywordRegex = new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi');
+			const commentRegex = /(--[^\n]*|\/\*[\s\S]*?\*\/)/g;
+
+			code = code.replaceAll(keywordRegex, (match) => `<span class="keyword">${match}</span>`);
+			code = code.replaceAll(commentRegex, (match) => `<span class="comment">${match}</span>`);
+
+			return code
+		};
+
+		function hasSeenWelcomePopup() {
+			return document.cookie.split('; ').some((cookie) => cookie.trim().startsWith('seenWelcomePopup='));
+		}
+
+		function setWelcomePopupCookie() {
+			const expiry = new Date();
+			expiry.setTime(expiry.getTime() + (365 * 24 * 60 * 60 * 1000)); // 1-year expiry
+			document.cookie = `seenWelcomePopup=true; expires=${expiry.toUTCString()}; path=/`;
+		}
+
+		document.addEventListener("click", (event) => {
+			const isClickInsideSidebar = examplesSidebar.contains(event.target);
+			const isClickOnButton = examplesButton.contains(event.target);
+
+			if (!isClickInsideSidebar && !isClickOnButton) {
+				closeExamplesSidebar();
+			}
+		});
+
+		textarea.addEventListener("keydown", (event) => {
+			if ((event.shiftKey || event.ctrlKey) && event.key === "Enter") {
+				event.preventDefault();
+				form.requestSubmit();
+			}
+		});
+
+		examplesButton.addEventListener("click", () => toggleExamplesSidebar());
+
+		examples.forEach((example) => {
+			example.addEventListener("click", () => {
+				textarea.value = example.textContent;
+				toggleExamplesSidebar();
+				textarea.focus();
+			});
+		});
+
+		examples.forEach((example) => {
+			example.innerHTML = highlightSql(example.innerHTML);
+		});
+
+		if (!hasSeenWelcomePopup()) {
+			popupOkButton.addEventListener("click", () => {
+				popup.style.display = "none";
+				setWelcomePopupCookie();
+			});
+		} else {
+			popup.style.display = "none";
+		}
+	</script>
+</body>
+</html>

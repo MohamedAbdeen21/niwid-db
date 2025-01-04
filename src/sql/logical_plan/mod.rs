@@ -5,14 +5,14 @@ pub mod plan;
 use expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use plan::{
     CreateTable, Delete, DropTables, Explain, Filter, IndexScan, Insert, Join, Limit, LogicalPlan,
-    Projection, Scan, Truncate, Update, Values,
+    Projection, Scan, Truncate, Union, Update, Values,
 };
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, ColumnDef, CreateTable as SqlCreateTable,
     Delete as SqlDelete, Expr, FromTable, Ident, Insert as SqlInsert, Join as SqlJoin,
     JoinConstraint, JoinOperator, ObjectName, ObjectType, Offset, OffsetRows, Query, SelectItem,
-    SetExpr, Statement, TableFactor, TableWithJoins, TruncateTableTarget, UnaryOperator,
-    Value as SqlValue, Values as SqlValues,
+    SetExpr, SetOperator, SetQuantifier, Statement, TableFactor, TableWithJoins,
+    TruncateTableTarget, UnaryOperator, Value as SqlValue, Values as SqlValues,
 };
 
 use anyhow::{anyhow, bail, ensure, Result};
@@ -51,15 +51,7 @@ impl LogicalPlanBuilder {
                 returning,
                 ..
             }) => self.build_insert(table_name, source, columns, returning, txn_id),
-            Statement::Query(query) => {
-                let Query {
-                    body,
-                    limit,
-                    offset,
-                    ..
-                } = *query;
-                self.build_select(body, limit, offset, txn_id)
-            }
+            Statement::Query(query) => self.build_query(query, txn_id),
             Statement::Drop {
                 object_type,
                 if_exists,
@@ -119,16 +111,16 @@ impl LogicalPlanBuilder {
 
         let table_name = match &tables.first().unwrap().relation {
             TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-            _ => bail!(anyhow!(Error::Unsupported(
+            _ => bail!(Error::Unsupported(
                 "Anything other than `DELETE FROM table_name [condition];`".into()
-            ))),
+            )),
         };
 
         let schema = self
             .catalog
             .read()
             .get_schema(&table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
+            .ok_or(Error::TableNotFound(table_name.clone()))?;
 
         let root = LogicalPlan::Scan(Scan::new(table_name.clone(), schema));
 
@@ -177,14 +169,14 @@ impl LogicalPlanBuilder {
         };
 
         if let Some(ref rv) = rvalue {
-            if !matches!(rv, Value::UInt(_)) {
+            if !matches!(rv, Value::UInt(_) | Value::Int(_) | Value::Float(_)) {
                 bail!(Error::Unsupported(
                     "Index scan only supported on UInt".into()
                 ));
             }
         }
 
-        if !matches!(lvalue, Value::UInt(_)) {
+        if !matches!(lvalue, Value::UInt(_) | Value::Int(_) | Value::Float(_)) {
             bail!(Error::Unsupported(
                 "Index scan only supported on UInt".into()
             ));
@@ -200,8 +192,8 @@ impl LogicalPlanBuilder {
             bail!(Error::ColumnNotFound(col));
         }
 
-        let lvalue = Some(lvalue.u32());
-        let rvalue = rvalue.map(|v| v.u32());
+        let lvalue = Some(lvalue.as_u32());
+        let rvalue = rvalue.map(|v| v.as_u32());
 
         let (left, lincl, right, rincl) = match op {
             BinaryOperator::Eq => (lvalue, true, lvalue, true),
@@ -246,35 +238,25 @@ impl LogicalPlanBuilder {
     fn build_truncate(
         &self,
         table_names: Vec<TruncateTableTarget>,
-        table: bool,
+        _table: bool,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
-        if !table {
-            return Err(anyhow!("Did you mean 'TRUNCATE TABLE'?"));
-        }
+        let catalog = self.catalog.read();
 
-        // TODO: handle multiple tables
-        if table_names.len() != 1 {
-            bail!(Error::Unsupported(
-                "Only one table per TRUNCATE statement".into()
-            ));
-        }
+        let names = table_names
+            .into_iter()
+            .map(|t| t.name.0.first().unwrap().value.clone())
+            .map(|name| {
+                catalog
+                    .get_table(&name, txn_id)
+                    .ok_or(Error::TableNotFound(name).into())
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .map(|t| t.name.clone())
+            .collect();
 
-        let table_name = table_names
-            .first()
-            .unwrap()
-            .name
-            .0
-            .first()
-            .unwrap()
-            .value
-            .clone();
-
-        if self.catalog.read().get_table(&table_name, txn_id).is_none() {
-            bail!(Error::TableNotFound(table_name));
-        }
-
-        Ok(LogicalPlan::Truncate(Truncate::new(table_name)))
+        Ok(LogicalPlan::Truncate(Truncate::new(names)))
     }
 
     fn build_drop(
@@ -285,7 +267,10 @@ impl LogicalPlanBuilder {
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
         if object_type != ObjectType::Table {
-            return Err(anyhow!("Unsupported object type: {:?}", object_type));
+            bail!(Error::Unsupported(format!(
+                "Object type {} not supported in drop",
+                object_type
+            )));
         }
 
         let names: Vec<_> = names
@@ -357,45 +342,129 @@ impl LogicalPlanBuilder {
         Ok(LogicalPlan::Values(Values::new(rows, Schema::new(fields))))
     }
 
-    fn build_query(
-        &self,
-        query: Option<Box<Query>>,
-        txn_id: Option<TxnId>,
-    ) -> Result<Option<LogicalPlan>> {
-        if query.is_none() {
-            return Ok(None);
-        }
-
+    fn build_query(&self, query: Box<Query>, txn_id: Option<TxnId>) -> Result<LogicalPlan> {
         let Query {
             body,
             limit,
             offset,
             ..
-        } = *query.unwrap();
+        } = *query;
 
         let input = match *body {
             SetExpr::Select(_) => self.build_select(body, limit, offset, txn_id)?,
             SetExpr::Values(SqlValues { rows, .. }) => self.build_values(rows)?,
+            SetExpr::SetOperation {
+                op: SetOperator::Union,
+                left,
+                right,
+                set_quantifier,
+            } => self.build_union(left, right, set_quantifier, txn_id)?,
             e => bail!(Error::Unsupported(format!("Query: {}", e))),
         };
 
-        Ok(Some(input))
+        Ok(input)
+    }
+
+    fn build_union(
+        &self,
+        left: Box<SetExpr>,
+        right: Box<SetExpr>,
+        quantifier: SetQuantifier,
+        txn_id: Option<TxnId>,
+    ) -> Result<LogicalPlan> {
+        if quantifier == SetQuantifier::All {
+            bail!(Error::Unsupported("UNION ALL not supported".into()));
+        }
+
+        let left = match *left {
+            SetExpr::Select(_) => self.build_select(left, None, None, txn_id)?,
+            SetExpr::SetOperation {
+                op: SetOperator::Union,
+                left,
+                right,
+                ..
+            } => self.build_union(left, right, quantifier, txn_id)?,
+            query => bail!(Error::Unsupported(format!("UNION with query: {}", query))),
+        };
+
+        let right = match *right {
+            SetExpr::Select(_) => self.build_select(right, None, None, txn_id)?,
+            SetExpr::SetOperation {
+                op: SetOperator::Union,
+                left,
+                right,
+                ..
+            } => self.build_union(left, right, quantifier, txn_id)?,
+            query => bail!(Error::Unsupported(format!("UNION with query: {}", query))),
+        };
+
+        let left_types: Vec<_> = left.schema().fields.iter().map(|f| f.ty.clone()).collect();
+        let right_types: Vec<_> = right.schema().fields.iter().map(|f| f.ty.clone()).collect();
+
+        if left_types
+            .iter()
+            .zip(right_types.iter())
+            .any(|(a, b)| !a.is_compatible(b))
+        {
+            bail!(Error::TypeMismatch(left_types, right_types));
+        }
+
+        Ok(LogicalPlan::Union(Box::new(Union::new(left, right))))
     }
 
     fn build_insert(
         &self,
         table_name: ObjectName,
         source: Option<Box<Query>>,
-        _columns: Vec<Ident>,
+        columns: Vec<Ident>,
         _returning: Option<Vec<SelectItem>>,
         txn_id: Option<TxnId>,
     ) -> Result<LogicalPlan> {
-        let input = self.build_query(source, txn_id)?.unwrap();
-        let table_name = table_name.0.first().unwrap().value.clone();
-        let schema = self.catalog.read().get_schema(&table_name, txn_id).unwrap();
+        if source.is_none() {
+            bail!(Error::Expected(
+                "INSERT statement to have input".into(),
+                "Nothing".into(),
+            ));
+        }
 
+        let input = self.build_query(source.unwrap(), txn_id)?;
         let input_schema = input.schema();
-        let input_types: Vec<_> = input_schema.fields.iter().map(|f| f.ty.clone()).collect();
+
+        let table_name = table_name.0.first().unwrap().value.clone();
+        let schema = self
+            .catalog
+            .read()
+            .get_schema(&table_name, txn_id)
+            .ok_or(Error::TableNotFound(table_name.clone()))?;
+
+        let columns = if columns.is_empty() {
+            schema.fields.iter().map(|f| f.name.clone()).collect()
+        } else {
+            let names: Vec<_> = columns.into_iter().map(|i| i.value).collect();
+            let non_existant: Vec<_> = names
+                .iter()
+                .filter(|i| !schema.fields.iter().any(|f| f.name == **i))
+                .collect();
+
+            if !non_existant.is_empty() {
+                bail!(Error::ColumnsNotFound(
+                    non_existant.into_iter().cloned().collect()
+                ));
+            }
+
+            names
+        };
+
+        let insert = Insert::new(
+            input,
+            columns,
+            table_name,
+            schema.clone(),
+            Schema::default(),
+        );
+
+        let input_types =
+            insert.reorder(input_schema.fields.iter().map(|f| f.ty.clone()).collect())?;
         let table_types: Vec<_> = schema.fields.iter().map(|f| f.ty.clone()).collect();
 
         if table_types
@@ -406,12 +475,7 @@ impl LogicalPlanBuilder {
             bail!(Error::TypeMismatch(table_types, input_types));
         }
 
-        let root = LogicalPlan::Insert(Box::new(Insert::new(
-            input,
-            table_name,
-            schema,
-            Schema::default(),
-        )));
+        let root = LogicalPlan::Insert(Box::new(insert));
 
         Ok(root)
     }
@@ -430,9 +494,9 @@ impl LogicalPlanBuilder {
 
         let table_name = match table.relation {
             TableFactor::Table { name, .. } => name.0.first().unwrap().value.clone(),
-            _ => bail!(anyhow!(Error::Unsupported(
+            _ => bail!(Error::Unsupported(
                 "Anything other than `UPDATE table_name ...;`".into()
-            ))),
+            )),
         };
 
         let assignments = assignments
@@ -444,7 +508,7 @@ impl LogicalPlanBuilder {
             .catalog
             .read()
             .get_schema(&table_name, txn_id)
-            .ok_or_else(|| anyhow!("Table {} does not exist", table_name))?;
+            .ok_or(Error::TableNotFound(table_name.clone()))?;
 
         for (col, _) in assignments.iter() {
             if !schema.fields.iter().any(|f| &f.name == col) {
@@ -470,7 +534,6 @@ impl LogicalPlanBuilder {
         Ok(root)
     }
 
-    // TODO: allow multiple assignments at once
     fn build_assignemnt(&self, assignment: Assignment) -> Result<(String, LogicalExpr)> {
         let Assignment { target, value } = assignment;
 
@@ -522,7 +585,7 @@ impl LogicalPlanBuilder {
                     .catalog
                     .read()
                     .get_schema(&left_name, txn_id)
-                    .ok_or(anyhow!("Table {} does not exist", left_name))?;
+                    .ok_or(Error::TableNotFound(left_name.clone()))?;
 
                 let root = if let Some(pre) = prewhere {
                     let expr = build_expr(&pre)?;
@@ -550,7 +613,7 @@ impl LogicalPlanBuilder {
                                 .catalog
                                 .read()
                                 .get_schema(&right_name, txn_id)
-                                .ok_or(anyhow!("Table {} does not exist", right_name))?;
+                                .ok_or(Error::TableNotFound(right_name.clone()))?;
 
                             let right_scan = LogicalPlan::Scan(Scan::new(
                                 right_name.clone(),
@@ -626,7 +689,7 @@ impl LogicalPlanBuilder {
     ) -> Result<LogicalPlan> {
         let select = match *body {
             SetExpr::Select(select) => select,
-            _ => unreachable!("Should only be called on SetExpr::Select"),
+            e => unreachable!("Should only be called on a select query, got: {:?}", e),
         };
 
         let mut root = self.build_source(select.from.first(), select.prewhere, txn_id)?;
@@ -716,18 +779,30 @@ impl LogicalPlanBuilder {
                 let limit = match limit {
                     Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false) {
                         Value::UInt(u) => Ok(u.0),
-                        _ => Err(anyhow!("LIMIT must be an unsigned integer")),
+                        e => Err(Error::Expected(
+                            "LIMIT to be an unsigned integer".into(),
+                            format!("{e}"),
+                        )),
                     },
-                    _ => Err(anyhow!("LIMIT must be an unsigned integer")),
+                    e => Err(Error::Expected(
+                        "LIMIT to be an unsigned integer".into(),
+                        format!("{e}"),
+                    )),
                 }?;
 
                 let offset = match offset {
                     Some(offset) => match offset {
                         Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false) {
                             Value::UInt(u) => Ok(u.0),
-                            _ => Err(anyhow!("OFFSET must be an unsigned integer")),
+                            e => Err(Error::Expected(
+                                "OFFSET to be an unsigned integer".into(),
+                                format!("{e}"),
+                            )),
                         },
-                        _ => Err(anyhow!("OFFSET must be an unsigned integer")),
+                        e => Err(Error::Expected(
+                            "OFFSET to be an unsigned integer".into(),
+                            format!("{e}"),
+                        )),
                     },
                     None => Ok(0),
                 }?;
@@ -767,7 +842,7 @@ impl LogicalPlanBuilder {
                         vec![if schema.is_qualified() {
                             Err(anyhow!("Please use qualified column names {}", name))
                         } else {
-                            Err(anyhow!("Column {} does not exist in table", name))
+                            Err(Error::ColumnNotFound(name).into())
                         }]
                     } else {
                         vec![Ok(LogicalExpr::Column(ident.value.clone()))]
@@ -811,24 +886,25 @@ impl LogicalPlanBuilder {
                 SelectItem::UnnamedExpr(expr) => {
                     let expr = build_expr(&expr);
                     match expr {
-                        Ok(expr) => {
-                            let name = match expr {
-                                LogicalExpr::Column(ref name) => name,
-                                e => unreachable!("{:?}", e),
-                            };
-                            if !schema.fields.iter().any(|f| &f.name == name) {
-                                vec![Err(anyhow!(Error::ColumnNotFound(name.clone())))]
-                            } else {
-                                vec![Ok(expr)]
+                        Ok(expr) => match expr {
+                            LogicalExpr::Column(ref name) => {
+                                if !schema.fields.iter().any(|f| &f.name == name) {
+                                    vec![Err(Error::ColumnNotFound(name.clone()).into())]
+                                } else {
+                                    vec![Ok(expr)]
+                                }
                             }
-                        }
+                            LogicalExpr::Literal(_) => vec![Ok(expr)],
+                            e => {
+                                vec![Err(
+                                    Error::Unsupported(format!("Select Item: {:?}", e)).into()
+                                )]
+                            }
+                        },
                         Err(e) => vec![Err(e)],
                     }
                 }
-                e => vec![Err(anyhow!(Error::Unsupported(format!(
-                    "Select Item: {}",
-                    e
-                ))))],
+                e => vec![Err(Error::Unsupported(format!("Select Item: {}", e)).into())],
             })
             .collect::<Result<Vec<_>>>()
     }

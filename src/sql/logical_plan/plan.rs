@@ -1,8 +1,11 @@
-use crate::{
-    execution::result_set::ResultSet, pages::indexes::b_plus_tree::Key, tuple::schema::Schema,
-};
+use std::collections::HashMap;
+
+use crate::pages::indexes::b_plus_tree::Key;
+use crate::tuple::schema::Schema;
+use crate::{errors::Error, execution::result_set::ResultSet};
 
 use super::expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
+use anyhow::Result;
 
 pub enum LogicalPlan {
     Projection(Box<Projection>),
@@ -17,6 +20,7 @@ pub enum LogicalPlan {
     Truncate(Truncate),
     Update(Box<Update>),
     Delete(Box<Delete>),
+    Union(Box<Union>),
     Limit(Box<Limit>),
     IndexScan(IndexScan),
     StartTxn,
@@ -57,6 +61,7 @@ impl LogicalPlan {
             LogicalPlan::CommitTxn => format!("{} CommitTransaction", "-".repeat(indent * 2)),
             LogicalPlan::RollbackTxn => format!("{} RollbackTransaction", "-".repeat(indent * 2)),
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
+            LogicalPlan::Union(u) => u.print(indent),
             LogicalPlan::Limit(l) => l.print(indent),
             #[cfg(test)]
             LogicalPlan::Identity(_) => unreachable!(),
@@ -82,6 +87,7 @@ impl LogicalPlan {
             LogicalPlan::StartTxn => Schema::default(),
             LogicalPlan::CommitTxn => Schema::default(),
             LogicalPlan::RollbackTxn => Schema::default(),
+            LogicalPlan::Union(u) => u.schema(),
             LogicalPlan::Limit(l) => l.schema(),
             #[cfg(test)]
             LogicalPlan::Identity(i) => i.schema(),
@@ -109,11 +115,45 @@ impl Limit {
     }
 
     pub fn print(&self, indent: usize) -> String {
+        if self.offset == 0 {
+            format!(
+                "{} Limit: {}\n{}",
+                "-".repeat(indent * 2),
+                self.limit,
+                self.input.print_indent(indent + 1)
+            )
+        } else {
+            format!(
+                "{} Limit: {} Offset: {}\n{}\n",
+                "-".repeat(indent * 2),
+                self.limit,
+                self.offset,
+                self.input.print_indent(indent + 1),
+            )
+        }
+    }
+}
+
+pub struct Union {
+    pub left: LogicalPlan,
+    pub right: LogicalPlan,
+}
+
+impl Union {
+    pub fn new(left: LogicalPlan, right: LogicalPlan) -> Self {
+        Self { left, right }
+    }
+
+    pub fn schema(&self) -> Schema {
+        self.left.schema()
+    }
+
+    pub fn print(&self, indent: usize) -> String {
         format!(
-            "{} Limit: {}\n{}",
+            "{} Union:\n{}{}",
             "-".repeat(indent * 2),
-            self.limit,
-            self.input.print_indent(indent + 1)
+            self.left.print_indent(indent + 1),
+            self.right.print_indent(indent + 1)
         )
     }
 }
@@ -314,12 +354,12 @@ impl Update {
 }
 
 pub struct Truncate {
-    pub table_name: String,
+    pub table_names: Vec<String>,
 }
 
 impl Truncate {
-    pub fn new(table_name: String) -> Self {
-        Self { table_name }
+    pub fn new(table_names: Vec<String>) -> Self {
+        Self { table_names }
     }
 
     pub fn schema(&self) -> Schema {
@@ -327,7 +367,15 @@ impl Truncate {
     }
 
     pub fn print(&self, indent: usize) -> String {
-        format!("{} Truncate: {}", "-".repeat(indent * 2), self.table_name)
+        format!(
+            "{} Truncate: [{}]",
+            "-".repeat(indent * 2),
+            self.table_names
+                .iter()
+                .map(|v| format!("#{}", v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
@@ -403,6 +451,7 @@ impl Values {
 
 pub struct Insert {
     pub input: LogicalPlan,
+    pub columns: Vec<String>,
     pub table_name: String,
     pub table_schema: Schema,
     pub returning_schema: Schema, // RETURNING statement
@@ -411,12 +460,14 @@ pub struct Insert {
 impl Insert {
     pub fn new(
         input: LogicalPlan,
+        columns: Vec<String>,
         table_name: String,
         table_schema: Schema,
         schema: Schema,
     ) -> Self {
         Self {
             input,
+            columns,
             table_name,
             table_schema,
             returning_schema: schema,
@@ -433,12 +484,39 @@ impl Insert {
 
     fn print(&self, indent: usize) -> String {
         format!(
-            "{} {}: {}\n{}",
+            "{} {}: {}[{}]\n{}",
             "-".repeat(indent * 2),
             self.name(),
+            self.columns
+                .iter()
+                .map(|c| format!("#{}", c))
+                .collect::<Vec<_>>()
+                .join(", "),
             self.table_name,
             self.input.print_indent(indent + 1)
         )
+    }
+
+    pub fn reorder<T>(&self, data: Vec<T>) -> Result<Vec<T>> {
+        if data.is_empty() || data.len() != self.columns.len() {
+            return Err(Error::Expected(
+                format!("{} values", self.columns.len()),
+                data.len().to_string(),
+            )
+            .into());
+        }
+
+        let mut mapping: HashMap<&String, T> = self.columns.iter().zip(data).collect();
+
+        self.table_schema
+            .fields
+            .iter()
+            .map(|f| {
+                mapping
+                    .remove(&f.name)
+                    .ok_or(Error::ColumnNotFound(f.name.clone()).into())
+            })
+            .collect::<Result<Vec<_>>>()
     }
 }
 

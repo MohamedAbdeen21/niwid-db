@@ -1,8 +1,37 @@
-# indeces are built by default on unique columns,
-# only one unique column is allowed
+# UNIQUE constraint is only allowed on INT, UINT, and FLOAT
+statement ok
+CREATE TABLE test1 (
+	a UINT UNIQUE NOT NULL
+);
+
+statement ok
+CREATE TABLE test2 (
+	a INT UNIQUE NOT NULL
+);
+
+statement ok
+CREATE TABLE test3 (
+	a FLOAT UNIQUE NOT NULL
+);
+
+statement error Unique field must be of type uint, int, or float
+CREATE TABLE test4 (
+	a TEXT UNIQUE NOT NULL
+);
+
+statement error Unique field must be of type uint, int, or float
+CREATE TABLE test5 (
+	a BOOL UNIQUE NOT NULL
+);
+
+statement ok
+DROP TABLE test1, test2, test3;
+
+# indeces are built by default on UNIQUE columns,
+# only one UNIQUE column is allowed
 statement ok
 CREATE TABLE test (
-	a UINT UNIQUE NOT NULL,
+	a INT UNIQUE NOT NULL,
 	b FLOAT NOT NULL,
 	c INT,
 	d TEXT
@@ -49,7 +78,7 @@ SELECT a FROM test PREWHERE (a BETWEEN 1 AND 4);
 3
 4
 
-query US
+query U
 SELECT a FROM test PREWHERE (a = 5);
 ----
 5
@@ -59,3 +88,50 @@ SELECT a FROM test PREWHERE (a <= 4) WHERE a = 1 OR a = 2;
 ----
 1
 2
+
+statement ok
+DELETE FROM test WHERE a < 3;
+
+query U
+SELECT a FROM test PREWHERE (a < 3);
+----
+
+query U
+SELECT a FROM test PREWHERE (a >= 3);
+----
+3
+4
+5
+
+statement ok
+DROP TABLE test;
+
+statement ok
+CREATE TABLE test (
+	a FLOAT NOT NULL UNIQUE,
+	b FLOAT NOT NULL
+);
+
+statement ok
+INSERT INTO test VALUES (1.1, 2.2), (3.3, 4.4), (5.5, 6.6), (7.0, 8.0);
+
+query FF
+SELECT * FROM test;
+----
+1.1 2.2
+3.3 4.4
+5.5 6.6
+7.0 8.0
+
+query FF
+SELECT a, b FROM test PREWHERE (a >= 1.1);
+----
+1.1 2.2
+3.3 4.4
+5.5 6.6
+7.0 8.0
+
+query FF
+SELECT a, b FROM test PREWHERE (a BETWEEN 3.0 AND 5.1) WHERE b = 4.4;
+----
+3.3 4.4

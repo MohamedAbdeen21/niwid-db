@@ -1,5 +1,10 @@
 statement ok
-CREATE TABLE test (a UINT, b FLOAT, c INT, d boolean);
+CREATE TABLE test (
+	a UINT,
+	b FLOAT,
+	c INT,
+	d boolean
+);
 
 statement error sql parser error: Expected: an expression:, found: \).
 INSERT INTO test VALUES ();
@@ -14,12 +19,17 @@ statement ok
 INSERT INTO test VALUES (null, null, null, null);
 
 statement ok
-CREATE TABLE test2 (a UINT UNIQUE NOT NULL, b FLOAT NOT NULL, c INT, d boolean);
+CREATE TABLE test2 (
+	a UINT UNIQUE NOT NULL,
+	b FLOAT NOT NULL,
+	c INT,
+	d boolean
+);
 
 statement ok
 INSERT INTO test2 VALUES (1, 2.3, -4, true);
 
-statement error Duplicate key 1 in column a
+statement error Duplicate value 1 in column a
 INSERT INTO test2 VALUES (1, 3.4567, 0, false);
 
 statement error NULL is not allowed in column b.
@@ -27,7 +37,7 @@ INSERT INTO test2 VALUES (2, null, -4, true);
 
 # multiple inserts
 statement ok
-INSERT INTO test2 VALUES (2, 1.2, -2, true), (3, 3.4, -3, false); ;
+INSERT INTO test2 VALUES (2, 1.2, -2, true), (3, 3.4, -3, false);
 
 query UFIB
 SELECT * FROM test;
@@ -40,3 +50,18 @@ SELECT * FROM test2;
 1 2.3 -4 true
 2 1.2 -2 true
 3 3.4 -3 false
+
+statement ok
+INSERT INTO test2(d,c,b,a) VALUES (false, 100, 3.1415, 4);
+
+query BIFU
+SELECT * FROM test2;
+----
+1 2.3 -4 true
+2 1.2 -2 true
+3 3.4 -3 false
+4 3.1415 100 false
+
+statement error Columns \["z"\] not found
+INSERT INTO test2(a,b,c,z) VALUES (false, 100, 3.1415, 4);
+

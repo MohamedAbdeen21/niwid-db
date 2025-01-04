@@ -35,8 +35,8 @@ SELECT * FROM "users" LIMIT 1 OFFSET 1;
 statement error OFFSET without LIMIT
 SELECT * FROM "users" OFFSET 1;
 
-statement error OFFSET must be an unsigned integer
+statement error Expected OFFSET to be an unsigned integer, but got -1
 SELECT * FROM "users" LIMIT 1 OFFSET -1;
 
-statement error LIMIT must be an unsigned integer
+statement error Expected LIMIT to be an unsigned integer, but got -1
 SELECT * FROM "users" LIMIT -1 OFFSET 1;

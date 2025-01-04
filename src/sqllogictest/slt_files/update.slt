@@ -10,7 +10,7 @@ INSERT INTO test VALUES (2, 3.4, 5, false);
 statement error NULL is not allowed in column b
 UPDATE test SET b = null WHERE a = 1;
 
-statement error Duplicate key 1 in column a
+statement error Duplicate value 1 in column a
 UPDATE test SET a = 1 WHERE a = 2;
 
 statement ok
@@ -67,5 +67,5 @@ query UFIB
 SELECT a, b, c, d FROM test;
 ----
 5 6.7 8 false
-3 0 0 true
-4 0 0 true
+3 0.0 0 true
+4 0.0 0 true

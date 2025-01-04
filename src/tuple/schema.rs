@@ -54,12 +54,11 @@ impl Schema {
         self.is_qualified
     }
 
-    #[cfg(test)]
     pub fn to_sql(&self) -> String {
         let mut sql = String::new();
         for (i, field) in self.fields.iter().enumerate() {
             if i != 0 {
-                sql.push(',');
+                sql.push_str(", ");
             }
             sql.push_str(&field.name);
             sql.push(' ');
@@ -120,6 +119,12 @@ impl Schema {
                         ColumnOptionDef {
                             option: ColumnOption::NotNull { .. },
                             ..
+                        } | ColumnOptionDef {
+                            option: ColumnOption::Unique {
+                                is_primary: true,
+                                ..
+                            },
+                            ..
                         }
                     )
                 });
@@ -135,15 +140,15 @@ impl Schema {
                 }
 
                 let type_ = Types::from_sql(&data_type.to_string())?;
-                if unique && type_ != Types::UInt {
+                if unique && !matches!(type_, Types::UInt | Types::Int | Types::Float) {
                     bail!(Error::Unsupported(
-                        "Unique field must be of type uint, sorry".into()
+                        "Unique field must be of type uint, int, or float".into()
                     ));
                 };
 
                 if unique && !not_null {
                     bail!(Error::Unimplemented(
-                        "Nulls are not allowed in Unique columns. Use NOT NULL for now.".into()
+                        "Nulls are not allowed in UNIQUE columns. Add NOT NULL constraint.".into()
                     ))
                 };
 
