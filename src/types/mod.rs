@@ -127,7 +127,11 @@ impl Value {
 
 impl Value {
     pub fn str(&self) -> String {
-        unreachable!("strings are stored as pointers, use str_addr() instead")
+        if let Value::Str(v) = self {
+            v.0.clone()
+        } else {
+            panic!("Internal Error: forced conversion error: {:?} => Str", self)
+        }
     }
 }
 

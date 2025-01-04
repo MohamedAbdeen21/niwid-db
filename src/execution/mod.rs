@@ -1,5 +1,6 @@
 pub mod result_set;
 
+use crate::catalog::CATALOG_NAME;
 use crate::context::Context;
 use crate::errors::Error;
 use crate::lit;
@@ -814,6 +815,15 @@ impl Executable for Scan {
 
             Ok(())
         })?;
+
+        if self.table_name == CATALOG_NAME {
+            // deserialize the schema and print as sql
+            cols[6] = cols[6]
+                .iter()
+                .map(|v| Schema::from_bytes(v.str().as_bytes()).to_sql())
+                .map(|s| lit!(Str, s))
+                .collect();
+        }
 
         let mut fields = vec![
             Field::new("page_id", Types::UInt, Constraints::nullable(false)),

@@ -54,12 +54,11 @@ impl Schema {
         self.is_qualified
     }
 
-    #[cfg(test)]
     pub fn to_sql(&self) -> String {
         let mut sql = String::new();
         for (i, field) in self.fields.iter().enumerate() {
             if i != 0 {
-                sql.push(',');
+                sql.push_str(", ");
             }
             sql.push_str(&field.name);
             sql.push(' ');
