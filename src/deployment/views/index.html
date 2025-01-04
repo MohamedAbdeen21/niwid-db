@@ -16,6 +16,7 @@
 </head>
 
 <body>
+	{% include "welcome.html" %}
 	{% include "examples_sidebar.html" %}
 
 	<div class="container" hx-indicator="#query-container">
@@ -37,6 +38,8 @@
 	</div>
 
 	<script>
+		const popup = document.getElementById("welcome-popup");
+		const popupOkButton = document.getElementById("popup-ok-btn");
 		const examplesSidebar = document.getElementById("examples-sidebar");
 		const examplesButton = document.getElementById("examples-button");
 		const examples = document.querySelectorAll(".example");
@@ -45,7 +48,8 @@
 		const keywords = [
 			"SELECT", "FROM", "WHERE", "CREATE", "TABLE", "INSERT", "INTO", "VALUES", "UNIQUE", "NOT", "NULL",
 			"IF", "EXISTS", "UINT", "INT", "TEXT", "BOOLEAN", "BOOL", "FLOAT", "OR", "AND", "DELETE", "UPDATE",
-			"TRUNCATE", "DROP", "LIMIT", "OFFSET", "AS", "PREWHERE", "JOIN", "INNER", "ON", "SET", "EXPLAIN", "ANALYZE"
+			"TRUNCATE", "DROP", "LIMIT", "OFFSET", "AS", "PREWHERE", "JOIN", "INNER", "ON", "SET", "EXPLAIN", "ANALYZE",
+			"PRIMARY", "KEY", "UNION", "BEGIN", "COMMIT", "ROLLBACK"
 		];
 
 		function closeExamplesSidebar() {
@@ -67,6 +71,16 @@
 
 			return code
 		};
+
+		function hasSeenWelcomePopup() {
+			return document.cookie.split('; ').some((cookie) => cookie.trim().startsWith('seenWelcomePopup='));
+		}
+
+		function setWelcomePopupCookie() {
+			const expiry = new Date();
+			expiry.setTime(expiry.getTime() + (365 * 24 * 60 * 60 * 1000)); // 1-year expiry
+			document.cookie = `seenWelcomePopup=true; expires=${expiry.toUTCString()}; path=/`;
+		}
 
 		document.addEventListener("click", (event) => {
 			const isClickInsideSidebar = examplesSidebar.contains(event.target);
@@ -97,6 +111,15 @@
 		examples.forEach((example) => {
 			example.innerHTML = highlightSql(example.innerHTML);
 		});
+
+		if (!hasSeenWelcomePopup()) {
+			popupOkButton.addEventListener("click", () => {
+				popup.style.display = "none";
+				setWelcomePopupCookie();
+			});
+		} else {
+			popup.style.display = "none";
+		}
 	</script>
 </body>
 </html>

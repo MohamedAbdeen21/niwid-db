@@ -14,7 +14,8 @@ const CSS: &str = concat!(
     include_str!("./styles/query_results.css"),
     include_str!("./styles/additional_info.css"),
     include_str!("./styles/examples_sidebar.css"),
-    include_str!("./styles/query_form.css")
+    include_str!("./styles/query_form.css"),
+    include_str!("./styles/welcome.css"),
 );
 
 #[tokio::main]

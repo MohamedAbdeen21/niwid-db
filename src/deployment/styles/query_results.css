@@ -1,7 +1,3 @@
-#query-container button:hover {
-	background-color: #d32f2f;
-}
-
 #query-results table {
 	border-collapse: collapse;
 	margin: 1em 0;

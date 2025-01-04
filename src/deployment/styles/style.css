@@ -17,6 +17,16 @@ body {
 	color: #e0e0e0;
 }
 
+button {
+	background-color: #f44336;
+	color: white;
+	cursor: pointer;
+}
+
+button:hover {
+	background-color: #d32f2f;
+}
+
 .container {
 	display: grid;
 	grid-template-rows: 65% 35%;
