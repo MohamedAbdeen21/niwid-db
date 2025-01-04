@@ -31,7 +31,7 @@ lazy_static! {
 }
 
 pub struct Catalog {
-    pub tables: VersionedMap<String, (TupleId, Table)>,
+    pub tables_map: VersionedMap<String, (TupleId, Table)>,
     schema: Schema, // A catalog is itself a table
     txn_tables: HashMap<TxnId, HashSet<String>>,
     bpm: ArcBufferPool,
@@ -47,7 +47,7 @@ impl Catalog {
     pub fn table(&mut self) -> &mut Table {
         // No need to track version for catalog, catalog always has the same
         // tuple_id and can never be deleted
-        self.tables
+        self.tables_map
             .get_mut(None, &CATALOG_NAME.to_string())
             .map(|(_, t)| t)
             .unwrap()
@@ -122,7 +122,7 @@ impl Catalog {
         let tables = Self::build_catalog(&mut bpm, &mut txn_manager, table, &schema);
 
         Catalog {
-            tables,
+            tables_map: tables,
             schema,
             txn_tables: HashMap::new(),
             bpm,
@@ -172,14 +172,14 @@ impl Catalog {
 
         let tuple_id = self.table().insert(tuple)?;
 
-        self.tables
+        self.tables_map
             .insert(txn, table_name.to_string(), (tuple_id, table));
 
         Ok(true)
     }
 
     pub fn get_schema(&self, table_name: &str, txn: Option<TxnId>) -> Option<Schema> {
-        self.tables
+        self.tables_map
             .get(txn, &table_name.to_string())
             .map(|(_, table)| table.get_schema())
     }
@@ -195,7 +195,7 @@ impl Catalog {
             return None;
         }
 
-        match self.tables.get_mut(txn, &table_name.to_string()) {
+        match self.tables_map.get_mut(txn, &table_name.to_string()) {
             Some((_, table)) => {
                 if let Some(txn_id) = txn {
                     if let Err(e) = table.start_txn(txn_id) {
@@ -216,20 +216,36 @@ impl Catalog {
     }
 
     pub fn get_table(&self, table_name: &str, txn: Option<TxnId>) -> Option<&Table> {
-        self.tables
+        self.tables_map
             .get(txn, &table_name.to_string())
             .map(|(_, table)| table)
     }
 
     pub fn commit(&mut self, txn: TxnId) -> Result<()> {
+        // tables changed during the txn
         let mut committed_keys = self.txn_tables.remove(&txn).unwrap_or_default();
-        committed_keys.extend(self.tables.commit(txn));
+        // tables made/deleted during the txn
+        committed_keys.extend(self.tables_map.commit(txn));
 
         printdbg!("Txn {} committed tables {:?}", txn, committed_keys);
 
         committed_keys
             .iter()
-            .try_for_each(|key| self.tables.get_mut(None, key).unwrap().1.commit_txn())?;
+            .try_for_each(|key| self.tables_map.get_mut(None, key).unwrap().1.commit_txn())?;
+
+        Ok(())
+    }
+
+    pub fn rollback(&mut self, txn: TxnId) -> Result<()> {
+        let rolledback_keys = self.txn_tables.remove(&txn).unwrap_or_default();
+        self.tables_map.rollback(txn);
+
+        rolledback_keys
+            .iter()
+            .try_for_each(|key| match self.tables_map.get_mut(None, key) {
+                Some((_, table)) => table.rollback_txn(),
+                None => Ok(()),
+            })?;
 
         Ok(())
     }
@@ -241,8 +257,8 @@ impl Catalog {
         };
 
         let dup = table?.truncate()?;
-        let tuple_id = self.tables.get_mut(txn, table_name).unwrap().0;
-        self.tables
+        let tuple_id = self.tables_map.get_mut(txn, table_name).unwrap().0;
+        self.tables_map
             .insert(txn, table_name.to_string(), (tuple_id, dup));
 
         Ok(())
@@ -254,14 +270,14 @@ impl Catalog {
         ignore_if_exists: bool,
         txn: Option<TxnId>,
     ) -> Option<()> {
-        let tuple_id = match self.tables.get(txn, table_name) {
+        let tuple_id = match self.tables_map.get(txn, table_name) {
             Some((tuple_id, _)) => *tuple_id,
             None => return if ignore_if_exists { Some(()) } else { None },
         };
 
         self.table().delete(tuple_id).ok()?;
 
-        self.tables.remove(txn, table_name);
+        self.tables_map.remove(txn, table_name);
 
         Some(())
     }

@@ -120,6 +120,12 @@ impl Schema {
                         ColumnOptionDef {
                             option: ColumnOption::NotNull { .. },
                             ..
+                        } | ColumnOptionDef {
+                            option: ColumnOption::Unique {
+                                is_primary: true,
+                                ..
+                            },
+                            ..
                         }
                     )
                 });

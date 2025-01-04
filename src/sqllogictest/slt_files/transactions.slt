@@ -51,3 +51,60 @@ SELECT * FROM test;
 3 4
 5 6
 7 8
+
+statement ok
+CREATE TABLE test_strings (a TEXT);
+
+statement ok
+INSERT INTO test_strings VALUES ('a'), ('b'), ('c');
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO test_strings VALUES ('d');
+
+query II
+SELECT * FROM test_strings;
+----
+a
+b
+c
+d
+
+statement ok
+COMMIT;
+
+query II
+SELECT * FROM test_strings;
+----
+a
+b
+c
+d
+
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO test_strings VALUES ('e');
+
+query II
+SELECT * FROM test_strings;
+----
+a
+b
+c
+d
+e
+
+statement ok
+ROLLBACK;
+
+query II
+SELECT * FROM test_strings;
+----
+a
+b
+c
+d

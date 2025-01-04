@@ -265,7 +265,6 @@ impl Table {
         }
     }
 
-    #[allow(dead_code)]
     pub fn rollback_txn(&mut self) -> Result<()> {
         self.commit_txn()
     }
