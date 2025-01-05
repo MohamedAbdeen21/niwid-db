@@ -101,3 +101,8 @@ SELECT 1, 'one';
 ----
 1 one
 1 one
+
+statement error Failed to parse (\d+) as UInt: number too large .
+SELECT -1
+UNION
+SELECT 1234567899999

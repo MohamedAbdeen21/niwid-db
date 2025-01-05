@@ -22,6 +22,8 @@ pub enum Error {
     DivisionByZero,
     DuplicateValue(String, String),
     NullNotAllowed(String),
+    /// Value, Type, Reason
+    ParseFailed(String, Types, String),
 }
 
 impl std::fmt::Display for Error {
@@ -58,6 +60,9 @@ impl std::fmt::Display for Error {
             ),
             Error::ColumnsNotFound(cols) => {
                 write!(f, "Columns {cols:?} not found.")
+            }
+            Error::ParseFailed(value, types, reason) => {
+                write!(f, "Failed to parse {value} as {types:?}: {reason}.")
             }
         }
     }

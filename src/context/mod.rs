@@ -124,10 +124,10 @@ pub mod tests {
     fn assert_result_sample(result: &ResultSet) {
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], lit!(Int, "1"));
-        assert_eq!(rows[0][1], lit!(Int, "2"));
-        assert_eq!(rows[1][0], lit!(Int, "3"));
-        assert_eq!(rows[1][1], lit!(Int, "4"));
+        assert_eq!(rows[0][0], lit!(Int, "1").unwrap());
+        assert_eq!(rows[0][1], lit!(Int, "2").unwrap());
+        assert_eq!(rows[1][0], lit!(Int, "3").unwrap());
+        assert_eq!(rows[1][1], lit!(Int, "4").unwrap());
     }
 
     fn assert_plan(result: &ResultSet, plan: &str) {
@@ -189,17 +189,17 @@ pub mod tests {
         assert_result_sample(&result);
         //
         // let result = ctx.execute_sql("SELECT * FROM test WHERE a = 1")?;
-        assert_eq!(result.rows()[0][0], lit!(Int, "1"));
+        assert_eq!(result.rows()[0][0], lit!(Int, "1")?);
 
         ctx.execute_sql("DELETE FROM test WHERE a = 1")?;
         let result = ctx.execute_sql("SELECT * FROM test")?;
-        assert_eq!(result.rows()[0][0], lit!(Int, "3"));
-        assert_eq!(result.rows()[0][1], lit!(Int, "4"));
+        assert_eq!(result.rows()[0][0], lit!(Int, "3")?);
+        assert_eq!(result.rows()[0][1], lit!(Int, "4")?);
 
         ctx.execute_sql("EXPLAIN ANALYZE UPDATE test SET b = 5 WHERE a = 3")?;
         let result = ctx.execute_sql("SELECT * FROM test")?;
-        assert_eq!(result.rows()[0][0], lit!(Int, "3"));
-        assert_eq!(result.rows()[0][1], lit!(Int, "5"));
+        assert_eq!(result.rows()[0][0], lit!(Int, "3")?);
+        assert_eq!(result.rows()[0][1], lit!(Int, "5")?);
 
         Ok(())
     }
@@ -227,7 +227,7 @@ pub mod tests {
         ctx1.execute_sql("CREATE TABLE test (a int, b int);")?;
         let catalog = ctx1.execute_sql("SELECT table_name FROM __CATALOG__")?;
         assert_eq!(catalog.rows().len(), 1);
-        assert_eq!(catalog.rows()[0][0], lit!(Str, "test"));
+        assert_eq!(catalog.rows()[0][0], lit!(Str, "test")?);
         ctx1.execute_sql("INSERT INTO test VALUES (1, 2), (3, 4);")?;
 
         let result = ctx1.execute_sql("SELECT * FROM test;")?;
@@ -281,10 +281,10 @@ pub mod tests {
 
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], lit!(Int, "3"));
-        assert_eq!(rows[0][1], lit!(Int, "5"));
-        assert_eq!(rows[1][0], lit!(Int, "4"));
-        assert_eq!(rows[1][1], lit!(Int, "6"));
+        assert_eq!(rows[0][0], lit!(Int, "3")?);
+        assert_eq!(rows[0][1], lit!(Int, "5")?);
+        assert_eq!(rows[1][0], lit!(Int, "4")?);
+        assert_eq!(rows[1][1], lit!(Int, "6")?);
 
         Ok(())
     }
@@ -302,10 +302,10 @@ pub mod tests {
 
         let rows = result.rows();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0], lit!(Int, "3"));
-        assert_eq!(rows[0][1], lit!(Int, "5"));
-        assert_eq!(rows[1][0], lit!(Int, "4"));
-        assert_eq!(rows[1][1], lit!(Int, "6"));
+        assert_eq!(rows[0][0], lit!(Int, "3")?);
+        assert_eq!(rows[0][1], lit!(Int, "5")?);
+        assert_eq!(rows[1][0], lit!(Int, "4")?);
+        assert_eq!(rows[1][1], lit!(Int, "6")?);
 
         Ok(())
     }
@@ -339,7 +339,7 @@ pub mod tests {
 
         let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a = 1;")?;
         assert_plan(&result, expected_plan);
-        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
+        assert_eq!(result.rows()[0][0], lit!(UInt, "1")?);
 
         let expected_plan = r#"Logical Plan:
 -- Projection: [#a,#b]
@@ -348,7 +348,7 @@ pub mod tests {
         let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a < 3;")?;
         assert_plan(&result, expected_plan);
         assert_eq!(result.len(), 1);
-        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
+        assert_eq!(result.rows()[0][0], lit!(UInt, "1")?);
 
         let expected_plan = r#"Logical Plan:
 -- Projection: [#a,#b]
@@ -357,7 +357,7 @@ pub mod tests {
         let result = ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a > 1;")?;
         assert_plan(&result, expected_plan);
         assert_eq!(result.len(), 1);
-        assert_eq!(result.rows()[0][0], lit!(UInt, "3"));
+        assert_eq!(result.rows()[0][0], lit!(UInt, "3")?);
 
         let expected_plan = r#"Logical Plan:
 -- Projection: [#a,#b]
@@ -368,7 +368,7 @@ pub mod tests {
             ctx.execute_sql("EXPLAIN ANALYZE SELECT * FROM test PREWHERE a >= 1 WHERE a != 3")?;
         assert_plan(&result, expected_plan);
         assert_eq!(result.len(), 1);
-        assert_eq!(result.rows()[0][0], lit!(UInt, "1"));
+        assert_eq!(result.rows()[0][0], lit!(UInt, "1")?);
 
         let expected_plan = r#"Logical Plan:
 -- Projection: [#a,#b]

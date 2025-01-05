@@ -54,17 +54,19 @@ impl Tuple {
         tuple
     }
 
-    pub fn from_sql(ident: Vec<Option<String>>, schema: Schema) -> Self {
+    pub fn from_sql(ident: Vec<Option<String>>, schema: Schema) -> Result<Self> {
         let values = ident
             .iter()
             .zip(schema.fields.iter().map(|f| f.ty.clone()))
-            .map(|(v, ty)| match v {
-                None => ValueFactory::null(),
-                Some(v) => ValueFactory::from_string(&ty, v),
+            .map(|(v, ty)| {
+                Ok(match v {
+                    None => ValueFactory::null(),
+                    Some(v) => ValueFactory::from_string(&ty, v)?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<Value>>>()?;
 
-        Tuple::new(values, &schema)
+        Ok(Tuple::new(values, &schema))
     }
 
     pub fn len(&self) -> usize {
@@ -210,16 +212,11 @@ impl TupleMetaData {
 }
 
 pub trait TupleExt {
-    fn from_string(s: &str) -> Self;
     fn from_bytes(bytes: &[u8]) -> Self;
     fn to_bytes(&self) -> Vec<u8>;
 }
 
 impl TupleExt for TupleId {
-    fn from_string(_s: &str) -> Self {
-        unreachable!()
-    }
-
     fn from_bytes(bytes: &[u8]) -> Self {
         let page_offset = std::mem::size_of::<PageId>();
         let slot_size = std::mem::size_of::<SlotId>();

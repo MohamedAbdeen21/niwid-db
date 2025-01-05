@@ -336,6 +336,7 @@ impl TablePageSlot {
 #[cfg(test)]
 mod tests {
     use crate::{
+        lit,
         tuple::{
             constraints::Constraints,
             schema::{Field, Schema},
@@ -377,7 +378,7 @@ mod tests {
         let table_page_2: TablePage = page.into();
 
         let tuple = Tuple::new(
-            vec![ValueFactory::from_string(&Types::UInt, "300")],
+            vec![lit!(UInt, "300")?],
             &Schema::new(vec![Field::new(
                 "a",
                 Types::UInt,

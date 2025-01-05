@@ -2,6 +2,8 @@ use anyhow::bail;
 use anyhow::Result;
 use std::fmt::Debug;
 use std::fmt::Display;
+use std::num::ParseFloatError;
+use std::num::ParseIntError;
 
 use serde::{Deserialize, Serialize};
 
@@ -356,9 +358,9 @@ pub trait AsBytes: Debug + 'static + Display {
         Self: Sized;
 }
 
-pub trait Primitive {
+pub trait Primitive: Sized {
     fn default() -> Self;
-    fn from_string(s: &str) -> Self;
+    fn from_string(s: &str) -> Result<Self>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -377,8 +379,10 @@ impl Primitive for UInt {
         UInt(0)
     }
 
-    fn from_string(s: &str) -> Self {
-        UInt(s.parse().unwrap())
+    fn from_string(s: &str) -> Result<Self> {
+        Ok(UInt(s.parse().map_err(|e: ParseIntError| {
+            Error::ParseFailed(s.to_string(), Types::UInt, e.to_string())
+        })?))
     }
 }
 
@@ -396,8 +400,10 @@ impl Primitive for Int {
         Int(0)
     }
 
-    fn from_string(s: &str) -> Self {
-        Int(s.parse().unwrap())
+    fn from_string(s: &str) -> Result<Self> {
+        Ok(Int(s.parse().map_err(|e: ParseIntError| {
+            Error::ParseFailed(s.to_string(), Types::Int, e.to_string())
+        })?))
     }
 }
 
@@ -415,8 +421,10 @@ impl Primitive for Float {
         Float(0.0)
     }
 
-    fn from_string(s: &str) -> Self {
-        Float(s.parse().unwrap())
+    fn from_string(s: &str) -> Result<Self> {
+        Ok(Float(s.parse().map_err(|e: ParseFloatError| {
+            Error::ParseFailed(s.to_string(), Types::Float, e.to_string())
+        })?))
     }
 }
 
@@ -434,12 +442,8 @@ impl Primitive for Bool {
         Bool(false)
     }
 
-    fn from_string(s: &str) -> Self {
-        if s == "true" {
-            Bool(true)
-        } else {
-            Bool(false)
-        }
+    fn from_string(s: &str) -> Result<Self> {
+        Ok(Bool(s == "true"))
     }
 }
 impl AsBytes for Bool {
@@ -455,8 +459,8 @@ impl Primitive for Str {
     fn default() -> Self {
         Str(String::new())
     }
-    fn from_string(s: &str) -> Self {
-        Str(s.to_string())
+    fn from_string(s: &str) -> Result<Self> {
+        Ok(Str(s.to_string()))
     }
 }
 
@@ -538,8 +542,17 @@ impl ValueFactory {
         impl_fn!(t, from_bytes, bytes)
     }
 
-    pub fn from_string(t: &Types, s: impl Into<String>) -> Value {
-        impl_fn!(t, from_string, &s.into())
+    pub fn from_string(t: &Types, s: impl Into<String>) -> Result<Value> {
+        let v = match t {
+            Types::Str => Value::Str(Str::from_string(&s.into())?),
+            Types::Float => Value::Float(Float::from_string(&s.into())?),
+            Types::UInt => Value::UInt(UInt::from_string(&s.into())?),
+            Types::Int => Value::Int(Int::from_string(&s.into())?),
+            Types::Bool => Value::Bool(Bool::from_string(&s.into())?),
+            Types::Null | Types::StrAddr => unreachable!(),
+        };
+
+        Ok(v)
     }
 
     pub fn null() -> Value {

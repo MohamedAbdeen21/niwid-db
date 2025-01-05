@@ -489,7 +489,7 @@ impl LogicalPlanBuilder {
     ) -> Result<LogicalPlan> {
         let filter = match selection {
             Some(expr) => build_expr(&expr)?,
-            None => LogicalExpr::Literal(lit!(Bool, "true".to_string())),
+            None => LogicalExpr::Literal(lit!(Bool, "true".to_string())?),
         };
 
         let table_name = match table.relation {
@@ -777,7 +777,7 @@ impl LogicalPlanBuilder {
         match limit {
             Some(limit) => {
                 let limit = match limit {
-                    Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false) {
+                    Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false)? {
                         Value::UInt(u) => Ok(u.0),
                         e => Err(Error::Expected(
                             "LIMIT to be an unsigned integer".into(),
@@ -792,7 +792,7 @@ impl LogicalPlanBuilder {
 
                 let offset = match offset {
                     Some(offset) => match offset {
-                        Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false) {
+                        Expr::Value(SqlValue::Number(s, _)) => match build_number(&s, false)? {
                             Value::UInt(u) => Ok(u.0),
                             e => Err(Error::Expected(
                                 "OFFSET to be an unsigned integer".into(),
@@ -823,90 +823,81 @@ impl LogicalPlanBuilder {
         projections: Vec<SelectItem>,
         schema: Schema,
     ) -> Result<Vec<LogicalExpr>> {
-        projections
-            .into_iter()
-            .flat_map(|e| match e {
+        let mut projs = vec![];
+
+        projections.into_iter().try_for_each(|e| {
+            let exprs = match e {
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::Number(s, _))) => {
-                    vec![Ok(LogicalExpr::Literal(build_number(&s, false)))]
+                    vec![LogicalExpr::Literal(build_number(&s, false)?)]
                 }
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::SingleQuotedString(s))) => {
-                    vec![Ok(LogicalExpr::Literal(lit!(Str, s)))]
+                    vec![LogicalExpr::Literal(lit!(Str, s)?)]
                 }
                 SelectItem::UnnamedExpr(Expr::Value(SqlValue::Boolean(b))) => {
-                    vec![Ok(LogicalExpr::Literal(lit!(Bool, b.to_string())))]
+                    vec![LogicalExpr::Literal(lit!(Bool, b.to_string())?)]
                 }
                 SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                     let name = ident.value.clone();
 
+                    // Error handling if the column name is not found
                     if !schema.fields.iter().any(|f| f.name == name) {
-                        vec![if schema.is_qualified() {
-                            Err(anyhow!("Please use qualified column names {}", name))
+                        if schema.is_qualified() {
+                            bail!("Please use qualified column names {}", name);
                         } else {
-                            Err(Error::ColumnNotFound(name).into())
-                        }]
+                            bail!(Error::ColumnNotFound(name));
+                        }
                     } else {
-                        vec![Ok(LogicalExpr::Column(ident.value.clone()))]
+                        vec![LogicalExpr::Column(ident.value.clone())]
                     }
                 }
                 SelectItem::Wildcard(_) => schema
                     .fields
                     .iter()
                     .map(|f| f.name.clone())
-                    .map(|c| Ok(LogicalExpr::Column(c)))
+                    .map(LogicalExpr::Column)
                     .collect(),
                 SelectItem::UnnamedExpr(Expr::Tuple(fields)) => {
-                    fields.iter().map(build_expr).collect()
+                    fields.iter().map(build_expr).collect::<Result<Vec<_>>>()?
                 }
                 SelectItem::UnnamedExpr(Expr::BinaryOp { left, right, op }) => {
-                    let left = match build_expr(&left) {
-                        Ok(expr) => expr,
-                        Err(e) => return vec![Err(e)],
-                    };
-                    let right = match build_expr(&right) {
-                        Ok(expr) => expr,
-                        Err(e) => return vec![Err(e)],
-                    };
-                    vec![Ok(LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(
+                    let left = build_expr(&left)?;
+                    let right = build_expr(&right)?;
+                    vec![LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(
                         left,
                         op.clone(),
                         right,
-                    ))))]
+                    )))]
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    let expr = match build_expr(&expr) {
-                        Ok(expr) => expr,
-                        Err(e) => return vec![Err(e)],
-                    };
-
-                    vec![Ok(LogicalExpr::AliasedExpr(
+                    let expr = build_expr(&expr)?;
+                    vec![LogicalExpr::AliasedExpr(
                         Box::new(expr),
                         alias.value.clone(),
-                    ))]
+                    )]
                 }
                 SelectItem::UnnamedExpr(expr) => {
-                    let expr = build_expr(&expr);
+                    let expr = build_expr(&expr)?;
                     match expr {
-                        Ok(expr) => match expr {
-                            LogicalExpr::Column(ref name) => {
-                                if !schema.fields.iter().any(|f| &f.name == name) {
-                                    vec![Err(Error::ColumnNotFound(name.clone()).into())]
-                                } else {
-                                    vec![Ok(expr)]
-                                }
+                        LogicalExpr::Column(ref name) => {
+                            if !schema.fields.iter().any(|f| &f.name == name) {
+                                bail!(Error::ColumnNotFound(name.clone()))
+                            } else {
+                                vec![expr]
                             }
-                            LogicalExpr::Literal(_) => vec![Ok(expr)],
-                            e => {
-                                vec![Err(
-                                    Error::Unsupported(format!("Select Item: {:?}", e)).into()
-                                )]
-                            }
-                        },
-                        Err(e) => vec![Err(e)],
+                        }
+                        LogicalExpr::Literal(_) => vec![expr],
+                        e => bail!(Error::Unsupported(format!("Select Item: {:?}", e))),
                     }
                 }
-                e => vec![Err(Error::Unsupported(format!("Select Item: {}", e)).into())],
-            })
-            .collect::<Result<Vec<_>>>()
+                // For unsupported SelectItems
+                e => bail!(Error::Unsupported(format!("Select Item: {}", e))),
+            };
+
+            projs.extend(exprs);
+            Ok(())
+        })?;
+
+        Ok(projs)
     }
 
     fn parse_boolean_expr(
@@ -942,7 +933,7 @@ impl TryFrom<Expr> for LogicalExpr {
                 expr,
             } => {
                 if let Expr::Value(SqlValue::Number(n, _)) = *expr.clone() {
-                    Ok(LogicalExpr::Literal(build_number(&n, true)))
+                    Ok(LogicalExpr::Literal(build_number(&n, true)?))
                 } else {
                     bail!(Error::Unsupported("Unsupported value type".into()))
                 }
@@ -950,7 +941,7 @@ impl TryFrom<Expr> for LogicalExpr {
             Expr::Value(value) => {
                 match value {
                     SqlValue::Number(s, _) => {
-                        return Ok(LogicalExpr::Literal(build_number(&s, false)))
+                        return Ok(LogicalExpr::Literal(build_number(&s, false)?))
                     }
                     SqlValue::Null => return Ok(LogicalExpr::Literal(Value::Null)),
                     _ => (),
@@ -965,7 +956,7 @@ impl TryFrom<Expr> for LogicalExpr {
                     ))),
                 };
 
-                Ok(LogicalExpr::Literal(ValueFactory::from_string(&ty, &v)))
+                Ok(LogicalExpr::Literal(ValueFactory::from_string(&ty, &v)?))
             }
             Expr::BinaryOp { left, right, op } => {
                 let l: LogicalExpr = (*left).try_into()?;
@@ -982,7 +973,7 @@ impl TryFrom<Expr> for LogicalExpr {
 
 impl From<bool> for LogicalExpr {
     fn from(b: bool) -> LogicalExpr {
-        LogicalExpr::Literal(lit!(Bool, b.to_string()))
+        LogicalExpr::Literal(lit!(Bool, b.to_string()).unwrap())
     }
 }
 
@@ -995,13 +986,13 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
             expr,
         } => {
             if let Expr::Value(SqlValue::Number(n, _)) = *expr.clone() {
-                Ok(LogicalExpr::Literal(build_number(&n, true)))
+                Ok(LogicalExpr::Literal(build_number(&n, true)?))
             } else {
                 bail!(Error::Unsupported("Expected a number".into()))
             }
         }
-        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(build_number(n, false))),
-        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(lit!(Str, s))),
+        Expr::Value(SqlValue::Number(n, _)) => Ok(LogicalExpr::Literal(build_number(n, false)?)),
+        Expr::Value(SqlValue::SingleQuotedString(s)) => Ok(LogicalExpr::Literal(lit!(Str, s)?)),
         Expr::Identifier(Ident { value, .. }) => Ok(LogicalExpr::Column(value.clone())),
         Expr::BinaryOp { left, op, right } => Ok(LogicalExpr::BinaryExpr(Box::new(
             BinaryExpr::new(build_expr(left)?, op.clone(), build_expr(right)?),
@@ -1048,12 +1039,12 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
                 right,
             ))))
         }
-        Expr::Value(SqlValue::Boolean(b)) => Ok(LogicalExpr::Literal(lit!(Bool, b.to_string()))),
+        Expr::Value(SqlValue::Boolean(b)) => Ok(LogicalExpr::Literal(lit!(Bool, b.to_string())?)),
         e => bail!(Error::Unsupported(format!("Expr: {}", e))),
     }
 }
 
-fn build_number(num: &str, neg: bool) -> Value {
+fn build_number(num: &str, neg: bool) -> Result<Value> {
     let mut st = num.to_owned();
 
     if neg {

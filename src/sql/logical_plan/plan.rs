@@ -694,11 +694,11 @@ impl Projection {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        sql::logical_plan::expr::LogicalExpr,
-        tuple::{constraints::Constraints, schema::Field},
-        types::{Types, ValueFactory},
-    };
+    use crate::lit;
+    use crate::sql::logical_plan::expr::LogicalExpr;
+    use crate::tuple::constraints::Constraints;
+    use crate::tuple::schema::Field;
+    use crate::types::{Types, ValueFactory};
 
     use super::*;
     use anyhow::Result;
@@ -723,7 +723,7 @@ mod tests {
             expr: BooleanBinaryExpr::new(
                 LogicalExpr::Column("a".to_string()),
                 BinaryOperator::Gt,
-                LogicalExpr::Literal(ValueFactory::from_string(&Types::UInt, "10")),
+                LogicalExpr::Literal(lit!(UInt, "10")?),
             ),
             input: scan,
         }));

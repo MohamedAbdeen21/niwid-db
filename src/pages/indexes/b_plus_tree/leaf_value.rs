@@ -40,8 +40,4 @@ impl TupleExt for LeafValue {
         bytes.push(deleted);
         bytes
     }
-
-    fn from_string(_s: &str) -> Self {
-        unreachable!()
-    }
 }

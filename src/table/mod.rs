@@ -538,10 +538,7 @@ mod tests {
 
         let bpm = table.bpm.clone();
 
-        let tuple_data: Vec<Value> = vec![
-            ValueFactory::from_string(&Types::UInt, "2"),
-            ValueFactory::from_string(&Types::UInt, "50000"),
-        ];
+        let tuple_data: Vec<Value> = vec![lit!(UInt, "2")?, lit!(UInt, "50000")?];
         let tuple = Tuple::new(tuple_data, &schema);
         table.insert(tuple)?;
 
@@ -572,29 +569,20 @@ mod tests {
         let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 4);
 
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::UInt, i.to_string())],
-                &schema,
-            );
+            let tuple = Tuple::new(vec![lit!(UInt, i.to_string())?], &schema);
             table.insert(tuple)?;
         }
 
         assert_eq!(table.first_page, table.last_page);
 
-        table.insert(Tuple::new(
-            vec![ValueFactory::from_string(&Types::UInt, "99999")],
-            &schema,
-        ))?;
+        table.insert(Tuple::new(vec![lit!(UInt, "99999")?], &schema))?;
         let second_id = table.get_last_page_id();
 
         assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(
-                vec![ValueFactory::from_string(&Types::UInt, i.to_string())],
-                &schema,
-            );
+            let tuple = Tuple::new(vec![lit!(UInt, i.to_string())?], &schema);
             table.insert(tuple)?;
         }
 
@@ -629,21 +617,13 @@ mod tests {
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
-            vec![
-                ValueFactory::from_string(&Types::UInt, "100"),
-                ValueFactory::from_string(&Types::Str, s1),
-                ValueFactory::from_string(&Types::UInt, "50"),
-            ],
+            vec![lit!(UInt, "100")?, lit!(Str, s1)?, lit!(UInt, "50")?],
             &schema,
         );
         table.insert(tuple)?;
 
         let tuple = Tuple::new(
-            vec![
-                ValueFactory::from_string(&Types::UInt, "20"),
-                ValueFactory::from_string(&Types::Str, s2),
-                ValueFactory::from_string(&Types::UInt, "10"),
-            ],
+            vec![lit!(UInt, "20")?, lit!(Str, s2)?, lit!(UInt, "10")?],
             &schema,
         );
         table.insert(tuple)?;
@@ -683,11 +663,7 @@ mod tests {
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
-            vec![
-                ValueFactory::from_string(&Types::Str, s1),
-                ValueFactory::from_string(&Types::UInt, "100"),
-                ValueFactory::from_string(&Types::Str, s2),
-            ],
+            vec![lit!(Str, s1)?, lit!(UInt, "100")?, lit!(Str, s2)?],
             &schema,
         );
         table.insert(tuple)?;
@@ -723,20 +699,12 @@ mod tests {
         let mut table = test_table(4, &schema)?;
 
         let tuple = Tuple::new(
-            vec![
-                ValueFactory::from_string(&Types::UInt, "10"),
-                ValueFactory::from_string(&Types::Float, "10.0"),
-                ValueFactory::from_string(&Types::Int, "10"),
-            ],
+            vec![lit!(UInt, "10")?, lit!(Float, "10.0")?, lit!(Int, "10")?],
             &schema,
         );
         let t1_id = table.insert(tuple)?;
 
-        let tuple_data = vec![
-            ValueFactory::from_string(&Types::UInt, "20"),
-            ValueFactory::from_string(&Types::Float, "20.0"),
-            ValueFactory::from_string(&Types::Int, "20"),
-        ];
+        let tuple_data = vec![lit!(UInt, "20")?, lit!(Float, "20.0")?, lit!(Int, "20")?];
         let tuple = Tuple::new(tuple_data.clone(), &schema);
         let t2_id = table.insert(tuple)?;
 
@@ -819,16 +787,16 @@ mod tests {
 
         let mut table = test_table(5, &schema)?;
 
-        let t1 = Tuple::new(vec![lit!(UInt, "10"), lit!(UInt, "20")], &schema);
-        let t2 = Tuple::new(vec![lit!(UInt, "10"), lit!(UInt, "30")], &schema);
+        let t1 = Tuple::new(vec![lit!(UInt, "10")?, lit!(UInt, "20")?], &schema);
+        let t2 = Tuple::new(vec![lit!(UInt, "10")?, lit!(UInt, "30")?], &schema);
 
         table.insert(t1)?;
         assert!(table.insert(t2).is_err());
 
         let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
-            assert_eq!(values[0], lit!(UInt, "10"));
-            assert_eq!(values[1], lit!(UInt, "20"));
+            assert_eq!(values[0], lit!(UInt, "10")?);
+            assert_eq!(values[1], lit!(UInt, "20")?);
 
             Ok(())
         };

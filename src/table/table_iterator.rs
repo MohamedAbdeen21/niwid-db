@@ -92,6 +92,7 @@ impl Iterator for TableIterator {
 mod tests {
     use anyhow::Result;
 
+    use crate::lit;
     use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
     use crate::table::tests::test_table;
     use crate::tuple::constraints::Constraints;
@@ -109,33 +110,15 @@ mod tests {
         ]);
         let mut table = test_table(3, &schema)?;
 
-        let t1 = Tuple::new(
-            vec![
-                ValueFactory::from_string(&Types::UInt, "2"),
-                ValueFactory::from_string(&Types::UInt, "3"),
-            ],
-            &schema,
-        );
+        let t1 = Tuple::new(vec![lit!(UInt, "2")?, lit!(UInt, "3")?], &schema);
         table.insert(t1)?;
 
-        let t2 = Tuple::new(
-            vec![
-                ValueFactory::from_string(&Types::UInt, "4"),
-                ValueFactory::from_string(&Types::UInt, "5"),
-            ],
-            &schema,
-        );
+        let t2 = Tuple::new(vec![lit!(UInt, "4")?, lit!(UInt, "5")?], &schema);
         let t2_id = table.insert(t2)?;
 
         table.delete(t2_id)?;
 
-        let t3 = Tuple::new(
-            vec![
-                ValueFactory::from_string(&Types::UInt, "6"),
-                ValueFactory::from_string(&Types::UInt, "7"),
-            ],
-            &schema,
-        );
+        let t3 = Tuple::new(vec![lit!(UInt, "6")?, lit!(UInt, "7")?], &schema);
         table.insert(t3)?;
 
         let mut counter = 0;
@@ -165,10 +148,7 @@ mod tests {
 
         for i in 0..tuples_per_page {
             let tuple = Tuple::new(
-                vec![
-                    ValueFactory::from_string(&Types::Int, i.to_string()),
-                    ValueFactory::from_string(&Types::Int, i.to_string()),
-                ],
+                vec![lit!(Int, i.to_string())?, lit!(Int, i.to_string())?],
                 &schema,
             );
             table.insert(tuple)?;

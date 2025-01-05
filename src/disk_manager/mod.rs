@@ -229,6 +229,7 @@ impl Drop for DiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lit;
     use crate::pages::Page;
     use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
@@ -276,10 +277,7 @@ mod tests {
             Constraints::nullable(false),
         )]);
 
-        let tuple = Tuple::new(
-            vec![ValueFactory::from_string(&Types::Str, "Hello!")],
-            &dummy_schema,
-        );
+        let tuple = Tuple::new(vec![lit!(Str, "Hello!")?], &dummy_schema);
         let (write_page_id, write_slot_id) = table_page.insert_raw(&tuple)?;
 
         assert_eq!(page_id, write_page_id);

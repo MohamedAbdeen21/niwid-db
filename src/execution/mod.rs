@@ -192,8 +192,8 @@ impl Executable for IndexScan {
             .into_iter()
             .try_for_each(|((page_id, slot_id), tuple)| -> Result<()> {
                 let mut values = vec![
-                    lit!(UInt, page_id.to_string()),
-                    lit!(UInt, slot_id.to_string()),
+                    lit!(UInt, page_id.to_string())?,
+                    lit!(UInt, slot_id.to_string())?,
                 ];
 
                 values.extend(tuple.get_values(&schema)?);
@@ -554,14 +554,14 @@ impl BinaryExpr {
             BinaryOperator::Minus => Ok(left.sub(right)?),
             BinaryOperator::Multiply => Ok(left.mul(right)?),
             BinaryOperator::Divide => Ok(left.div(right)?),
-            BinaryOperator::Eq => Ok(lit!(Bool, (left == right).to_string())),
-            BinaryOperator::And => Ok(lit!(Bool, left.and(right)?.to_string())),
-            BinaryOperator::Or => Ok(lit!(Bool, left.or(right)?.to_string())),
-            BinaryOperator::Lt => Ok(lit!(Bool, (left < right).to_string())),
-            BinaryOperator::Gt => Ok(lit!(Bool, (left > right).to_string())),
-            BinaryOperator::LtEq => Ok(lit!(Bool, (left <= right).to_string())),
-            BinaryOperator::GtEq => Ok(lit!(Bool, (left >= right).to_string())),
-            BinaryOperator::NotEq => Ok(lit!(Bool, (left != right).to_string())),
+            BinaryOperator::Eq => Ok(lit!(Bool, (left == right).to_string())?),
+            BinaryOperator::And => Ok(lit!(Bool, left.and(right)?.to_string())?),
+            BinaryOperator::Or => Ok(lit!(Bool, left.or(right)?.to_string())?),
+            BinaryOperator::Lt => Ok(lit!(Bool, (left < right).to_string())?),
+            BinaryOperator::Gt => Ok(lit!(Bool, (left > right).to_string())?),
+            BinaryOperator::LtEq => Ok(lit!(Bool, (left <= right).to_string())?),
+            BinaryOperator::GtEq => Ok(lit!(Bool, (left >= right).to_string())?),
+            BinaryOperator::NotEq => Ok(lit!(Bool, (left != right).to_string())?),
             e => bail!(Error::Unsupported(format!("Operator evaluation {}", e))),
         }
     }
@@ -795,8 +795,8 @@ impl Executable for Scan {
         // need to define a tuple type first though
         table.scan(txn_id, |((page_id, slot_id), (_, tuple))| {
             let mut values = vec![
-                lit!(UInt, page_id.to_string()),
-                lit!(UInt, slot_id.to_string()),
+                lit!(UInt, page_id.to_string())?,
+                lit!(UInt, slot_id.to_string())?,
             ];
 
             values.extend(tuple.get_values(&schema)?);
@@ -821,7 +821,7 @@ impl Executable for Scan {
             cols[6] = cols[6]
                 .iter()
                 .map(|v| Schema::from_bytes(v.str().as_bytes()).to_sql())
-                .map(|s| lit!(Str, s))
+                .map(|s| lit!(Str, s).unwrap())
                 .collect();
         }
 
@@ -869,8 +869,8 @@ mod tests {
     fn test_values() -> Result<()> {
         let mut ctx = test_context();
         let values = vec![
-            vec![lit!(UInt, "1"), lit!(Str, "hello")],
-            vec![lit!(UInt, "2"), lit!(Str, "world")],
+            vec![lit!(UInt, "1")?, lit!(Str, "hello")?],
+            vec![lit!(UInt, "2")?, lit!(Str, "world")?],
         ];
 
         let input = values_to_exprs(&values);
@@ -895,10 +895,10 @@ mod tests {
         let mut ctx = test_context();
 
         let values = vec![
-            vec![lit!(UInt, "1"), lit!(Str, "hello")],
-            vec![lit!(UInt, "2"), lit!(Str, "world")],
-            vec![lit!(UInt, "3"), lit!(Str, "hello")],
-            vec![lit!(UInt, "4"), lit!(Str, "world")],
+            vec![lit!(UInt, "1")?, lit!(Str, "hello")?],
+            vec![lit!(UInt, "2")?, lit!(Str, "world")?],
+            vec![lit!(UInt, "3")?, lit!(Str, "hello")?],
+            vec![lit!(UInt, "4")?, lit!(Str, "world")?],
         ];
 
         let schema = Schema::new(vec![
@@ -911,7 +911,7 @@ mod tests {
         let filter = BooleanBinaryExpr::new(
             LogicalExpr::Column("col_1".to_string()),
             BinaryOperator::Gt,
-            LogicalExpr::Literal(lit!(UInt, "2")),
+            LogicalExpr::Literal(lit!(UInt, "2")?),
         );
 
         let plan = Filter::new(root, filter);
@@ -928,10 +928,10 @@ mod tests {
         let mut ctx = test_context();
 
         let values = vec![
-            vec![lit!(UInt, "1"), lit!(Str, "hello"), lit!(Str, "a")],
-            vec![lit!(UInt, "2"), lit!(Str, "world"), lit!(Str, "b")],
-            vec![lit!(UInt, "3"), lit!(Str, "hello"), lit!(Str, "c")],
-            vec![lit!(UInt, "4"), lit!(Str, "world"), lit!(Str, "d")],
+            vec![lit!(UInt, "1")?, lit!(Str, "hello")?, lit!(Str, "a")?],
+            vec![lit!(UInt, "2")?, lit!(Str, "world")?, lit!(Str, "b")?],
+            vec![lit!(UInt, "3")?, lit!(Str, "hello")?, lit!(Str, "c")?],
+            vec![lit!(UInt, "4")?, lit!(Str, "world")?, lit!(Str, "d")?],
         ];
 
         let schema = Schema::new(vec![
