@@ -25,9 +25,14 @@
 		</div>
 
 		<div id="query-results" class="box">
-			<p class="center">
+			<p id="results-area" class="center">
 				Query results will appear here
 			</p>
+
+			<div class="switch-container">
+			  <label for="wrap-toggle" class="switch-label">Wrap Result</label>
+			  <input type="checkbox" id="wrap-toggle" class="switch-input" checked>
+			</div>
 		</div>
 
 		<div id="additional-info" class="box">
@@ -40,17 +45,33 @@
 	<script>
 		const popup = document.getElementById("welcome-popup");
 		const popupOkButton = document.getElementById("popup-ok-btn");
+
 		const examplesSidebar = document.getElementById("examples-sidebar");
 		const examplesButton = document.getElementById("examples-button");
 		const examples = document.querySelectorAll(".example");
+
 		const form = document.querySelector("form");
-		const textarea = document.getElementById("sql-query");
+		const editor = document.getElementById("sql-query");
+		const hiddenInput = document.getElementById("hidden-query");
+		const wrapToggle = document.getElementById("wrap-toggle");
+
 		const keywords = [
 			"SELECT", "FROM", "WHERE", "CREATE", "TABLE", "INSERT", "INTO", "VALUES", "UNIQUE", "NOT", "NULL",
 			"IF", "EXISTS", "UINT", "INT", "TEXT", "BOOLEAN", "BOOL", "FLOAT", "OR", "AND", "DELETE", "UPDATE",
 			"TRUNCATE", "DROP", "LIMIT", "OFFSET", "AS", "PREWHERE", "JOIN", "INNER", "ON", "SET", "EXPLAIN", "ANALYZE",
 			"PRIMARY", "KEY", "UNION", "BEGIN", "COMMIT", "ROLLBACK"
 		];
+
+		let wrapResult = wrapToggle.checked;
+
+		function applyWrap(wrap) {
+			const queryResults = document.getElementById("query-results");
+			if (wrap) {
+				queryResults.classList.add("wrap");
+			} else {
+				queryResults.classList.remove("wrap");
+			}
+		}
 
 		function closeExamplesSidebar() {
 			examplesSidebar.classList.remove("open");
@@ -91,7 +112,7 @@
 			}
 		});
 
-		textarea.addEventListener("keydown", (event) => {
+		editor.addEventListener("keydown", (event) => {
 			if ((event.shiftKey || event.ctrlKey) && event.key === "Enter") {
 				event.preventDefault();
 				form.requestSubmit();
@@ -102,9 +123,9 @@
 
 		examples.forEach((example) => {
 			example.addEventListener("click", () => {
-				textarea.value = example.textContent;
+				editor.value = example.textContent;
 				toggleExamplesSidebar();
-				textarea.focus();
+				editor.focus();
 			});
 		});
 
@@ -120,6 +141,13 @@
 		} else {
 			popup.style.display = "none";
 		}
+
+		wrapToggle.addEventListener("change", function() {
+			wrapResult = this.checked;
+			applyWrap(wrapResult);
+		});
+
+		applyWrap(wrapResult);
 	</script>
 </body>
 </html>
