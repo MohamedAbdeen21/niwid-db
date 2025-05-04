@@ -59,7 +59,7 @@ Example:
 CREATE TABLE users (
     id INT PRIMARY KEY,
     name TEXT NOT NULL,
-    email TEXT,
+    email TEXT
 );
 
 INSERT INTO users VALUES (1, 'Alice', 'alice@example.com');
