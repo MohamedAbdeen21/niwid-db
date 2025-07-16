@@ -28,9 +28,9 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
     let mut reader = BufReader::new(reader);
     let mut buffer = String::new();
 
-    println!("Client {} connected!", client_id);
+    println!("Client {client_id} connected!");
     let _ = writer
-        .write_all(format!("Client {} connected!\n", client_id).as_bytes())
+        .write_all(format!("Client {client_id} connected!\n").as_bytes())
         .await;
 
     loop {
@@ -44,14 +44,14 @@ async fn handle_client(socket: TcpStream, client_id: usize) {
 
         if bytes_read == 0 {
             let _ = writer
-                .write_all(format!("Client {} disconnected.\n", client_id).as_bytes())
+                .write_all(format!("Client {client_id} disconnected.\n").as_bytes())
                 .await;
             break;
         }
 
         if buffer.eq_ignore_ascii_case("quit") {
             let _ = writer
-                .write_all(format!("Goodbye, Client {}!\n", client_id).as_bytes())
+                .write_all(format!("Goodbye, Client {client_id}!\n").as_bytes())
                 .await;
             break;
         }
@@ -102,8 +102,8 @@ async fn execute_query(
                     }
                 }
                 Err(e) => {
-                    let _ = writer.write_all(format!("Error: {}\n", e).as_bytes()).await;
-                    println!("Error: {}", e);
+                    let _ = writer.write_all(format!("Error: {e}\n").as_bytes()).await;
+                    println!("Error: {e}");
                 }
             };
         } else {

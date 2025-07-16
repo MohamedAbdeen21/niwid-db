@@ -79,7 +79,7 @@ impl LogicalPlanBuilder {
             Statement::Delete(SqlDelete {
                 from, selection, ..
             }) => self.build_delete(from, selection, txn_id),
-            e => bail!(Error::Unimplemented(format!("Statement: {:?}", e))),
+            e => bail!(Error::Unimplemented(format!("Statement: {e:?}"))),
         }
     }
 
@@ -213,8 +213,7 @@ impl LogicalPlanBuilder {
             BinaryOperator::And => (lvalue, true, rvalue, true),
 
             e => bail!(Error::Unsupported(format!(
-                "Operator {} in PREWHERE clause",
-                e
+                "Operator {e} in PREWHERE clause"
             ))),
         };
 
@@ -268,8 +267,7 @@ impl LogicalPlanBuilder {
     ) -> Result<LogicalPlan> {
         if object_type != ObjectType::Table {
             bail!(Error::Unsupported(format!(
-                "Object type {} not supported in drop",
-                object_type
+                "Object type {object_type} not supported in drop"
             )));
         }
 
@@ -316,8 +314,7 @@ impl LogicalPlanBuilder {
                     .map(|expr| match expr {
                         Expr::Value(_) | Expr::UnaryOp { .. } => build_expr(&expr),
                         e => bail!(Error::Unsupported(format!(
-                            "Unsupported expression in VALUES: {:?}",
-                            e
+                            "Unsupported expression in VALUES: {e:?}"
                         ))),
                     })
                     .collect::<Result<Vec<_>>>()
@@ -359,7 +356,7 @@ impl LogicalPlanBuilder {
                 right,
                 set_quantifier,
             } => self.build_union(left, right, set_quantifier, txn_id)?,
-            e => bail!(Error::Unsupported(format!("Query: {}", e))),
+            e => bail!(Error::Unsupported(format!("Query: {e}"))),
         };
 
         Ok(input)
@@ -384,7 +381,7 @@ impl LogicalPlanBuilder {
                 right,
                 ..
             } => self.build_union(left, right, quantifier, txn_id)?,
-            query => bail!(Error::Unsupported(format!("UNION with query: {}", query))),
+            query => bail!(Error::Unsupported(format!("UNION with query: {query}"))),
         };
 
         let right = match *right {
@@ -395,7 +392,7 @@ impl LogicalPlanBuilder {
                 right,
                 ..
             } => self.build_union(left, right, quantifier, txn_id)?,
-            query => bail!(Error::Unsupported(format!("UNION with query: {}", query))),
+            query => bail!(Error::Unsupported(format!("UNION with query: {query}"))),
         };
 
         let left_types: Vec<_> = left.schema().fields.iter().map(|f| f.ty.clone()).collect();
@@ -514,13 +511,11 @@ impl LogicalPlanBuilder {
             if !schema.fields.iter().any(|f| &f.name == col) {
                 if schema.is_qualified() {
                     bail!(Error::ColumnNotFound(format!(
-                        "Please use qualified column names {}.{}",
-                        table_name, col
+                        "Please use qualified column names {table_name}.{col}"
                     )))
                 } else {
                     bail!(Error::ColumnNotFound(format!(
-                        "Column {} does not exist in table {}",
-                        col, table_name
+                        "Column {col} does not exist in table {table_name}"
                     )))
                 };
             }
@@ -733,7 +728,7 @@ impl LogicalPlanBuilder {
                     true.into(),
                 ))
             }
-            e => bail!(Error::Unimplemented(format!("Expr: {:?}", e))),
+            e => bail!(Error::Unimplemented(format!("Expr: {e:?}"))),
         });
 
         if let Some(filter) = filters {
@@ -886,11 +881,11 @@ impl LogicalPlanBuilder {
                             }
                         }
                         LogicalExpr::Literal(_) => vec![expr],
-                        e => bail!(Error::Unsupported(format!("Select Item: {:?}", e))),
+                        e => bail!(Error::Unsupported(format!("Select Item: {e:?}"))),
                     }
                 }
                 // For unsupported SelectItems
-                e => bail!(Error::Unsupported(format!("Select Item: {}", e))),
+                e => bail!(Error::Unsupported(format!("Select Item: {e}"))),
             };
 
             projs.extend(exprs);
@@ -908,8 +903,7 @@ impl LogicalPlanBuilder {
     ) -> Result<BooleanBinaryExpr> {
         if !is_boolean_op!(op) {
             bail!(Error::Unsupported(format!(
-                "Expected a boolean binary operator, got: {:?}",
-                op
+                "Expected a boolean binary operator, got: {op:?}"
             )));
         }
 
@@ -951,8 +945,7 @@ impl TryFrom<Expr> for LogicalExpr {
                     SqlValue::SingleQuotedString(s) => (Types::Str, s),
                     SqlValue::Boolean(b) => (Types::Bool, b.to_string()),
                     e => bail!(Error::Unsupported(format!(
-                        "Unsupported value in Expr: {}",
-                        e
+                        "Unsupported value in Expr: {e}"
                     ))),
                 };
 
@@ -964,8 +957,7 @@ impl TryFrom<Expr> for LogicalExpr {
                 Ok(LogicalExpr::BinaryExpr(Box::new(BinaryExpr::new(l, op, r))))
             }
             e => bail!(Error::Unimplemented(format!(
-                "Casting Expr {:?} to LogicalExpr",
-                e
+                "Casting Expr {e:?} to LogicalExpr"
             ))),
         }
     }
@@ -1040,7 +1032,7 @@ fn build_expr(expr: &Expr) -> Result<LogicalExpr> {
             ))))
         }
         Expr::Value(SqlValue::Boolean(b)) => Ok(LogicalExpr::Literal(lit!(Bool, b.to_string())?)),
-        e => bail!(Error::Unsupported(format!("Expr: {}", e))),
+        e => bail!(Error::Unsupported(format!("Expr: {e}"))),
     }
 }
 

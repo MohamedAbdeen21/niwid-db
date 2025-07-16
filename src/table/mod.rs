@@ -320,7 +320,7 @@ impl Table {
                 {
                     None => Ok(Some(key)),
                     Some(_) => bail!(Error::DuplicateValue(
-                        format!("{}", key),
+                        format!("{key}"),
                         field.name.clone()
                     )),
                 };
@@ -461,7 +461,7 @@ impl Table {
                     .name
                     .clone();
 
-                bail!(Error::DuplicateValue(format!("{}", new_key), field_name))
+                bail!(Error::DuplicateValue(format!("{new_key}"), field_name))
             }
         }
 

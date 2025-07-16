@@ -403,8 +403,7 @@ mod tests {
             assert_eq!(
                 btree.search(None, *key),
                 None,
-                "Expected key {} to be deleted",
-                key
+                "Expected key {key} to be deleted"
             );
         }
     }
@@ -424,8 +423,7 @@ mod tests {
             assert_eq!(
                 btree.search(None, key),
                 None,
-                "Expected key {} to be deleted",
-                key
+                "Expected key {key} to be deleted"
             );
         }
 
@@ -433,7 +431,7 @@ mod tests {
         for key in (2..=50).step_by(2) {
             let value = LeafValue::new(key, 0).tuple_id();
             let found_value = btree.search(None, key).expect("Key not found after delete");
-            assert_eq!(found_value, value, "Value mismatch for key {}", key);
+            assert_eq!(found_value, value, "Value mismatch for key {key}");
         }
 
         // Re-insert deleted keys
@@ -447,7 +445,7 @@ mod tests {
             let found_value = btree
                 .search(None, key)
                 .expect("Key not found after reinsert");
-            assert_eq!(found_value, value, "Value mismatch for key {}", key);
+            assert_eq!(found_value, value, "Value mismatch for key {key}");
         }
     }
 
@@ -532,8 +530,8 @@ mod tests {
 
         for i in (0..key_count).step_by(408) {
             let found = btree.search(None, i);
-            assert!(found.is_some(), "Key {} not found", i);
-            assert_eq!(found.unwrap().0, i, "Key {} not found", i);
+            assert!(found.is_some(), "Key {i} not found");
+            assert_eq!(found.unwrap().0, i, "Key {i} not found");
         }
 
         Ok(())

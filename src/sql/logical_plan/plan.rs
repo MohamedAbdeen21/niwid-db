@@ -235,12 +235,12 @@ impl IndexScan {
             "{}{},{}{}",
             if self.include_from { "[" } else { "(" },
             if let Some(k) = &self.from {
-                format!("{}", k)
+                format!("{k}")
             } else {
                 "".to_string()
             },
             if let Some(k) = &self.to {
-                format!("{}", k)
+                format!("{k}")
             } else {
                 "".to_string()
             },
@@ -372,7 +372,7 @@ impl Truncate {
             "-".repeat(indent * 2),
             self.table_names
                 .iter()
-                .map(|v| format!("#{}", v))
+                .map(|v| format!("#{v}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -407,7 +407,7 @@ impl DropTables {
             self.name(),
             self.table_names
                 .iter()
-                .map(|v| format!("#{}", v))
+                .map(|v| format!("#{v}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -489,7 +489,7 @@ impl Insert {
             self.name(),
             self.columns
                 .iter()
-                .map(|c| format!("#{}", c))
+                .map(|c| format!("#{c}"))
                 .collect::<Vec<_>>()
                 .join(", "),
             self.table_name,

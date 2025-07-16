@@ -44,8 +44,7 @@ impl std::fmt::Display for Error {
             Error::TypeMismatch(expected, actual) => {
                 write!(
                     f,
-                    "Type mismatch: Expected {:?}, but got {:?}.",
-                    expected, actual,
+                    "Type mismatch: Expected {expected:?}, but got {actual:?}.",
                 )
             }
             Error::DivisionByZero => write!(f, "Division by zero."),

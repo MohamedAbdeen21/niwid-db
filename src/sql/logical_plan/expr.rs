@@ -19,14 +19,14 @@ pub enum LogicalExpr {
 impl LogicalExpr {
     pub fn print(&self) -> String {
         match self {
-            LogicalExpr::Literal(v) => format!("{}", v),
-            LogicalExpr::Column(v) => format!("#{}", v),
+            LogicalExpr::Literal(v) => format!("{v}"),
+            LogicalExpr::Column(v) => format!("#{v}"),
             LogicalExpr::BinaryExpr(binary_expr) => {
                 let inner_expr = binary_expr.print();
                 if inner_expr.starts_with('(') && inner_expr.ends_with(')') {
                     inner_expr
                 } else {
-                    format!("({})", inner_expr)
+                    format!("({inner_expr})")
                 }
             }
             LogicalExpr::AliasedExpr(expr, alias) => format!("{} AS {}", expr.print(), alias),

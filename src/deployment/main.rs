@@ -74,7 +74,7 @@ async fn serve_frontend() -> Result<Response<Body>, Error> {
 }
 
 async fn execute_query(query: &str) -> Result<Response<Body>, Error> {
-    println!("Query: {}", query);
+    println!("Query: {query}");
 
     let mut ctx = Context::default();
 

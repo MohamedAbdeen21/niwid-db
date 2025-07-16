@@ -188,7 +188,7 @@ impl ResultSet {
                 let header_len = format!("{} ({})", col.name, col.ty.to_sql()).len();
                 let max_data_len = self.cols[i]
                     .iter()
-                    .map(|v| format!("{}", v).len())
+                    .map(|v| format!("{v}").len())
                     .max()
                     .unwrap_or(0);
                 header_len.max(max_data_len)

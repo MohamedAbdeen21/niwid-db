@@ -117,7 +117,7 @@ impl Schema {
                     matches!(
                         opt,
                         ColumnOptionDef {
-                            option: ColumnOption::NotNull { .. },
+                            option: ColumnOption::NotNull,
                             ..
                         } | ColumnOptionDef {
                             option: ColumnOption::Unique {

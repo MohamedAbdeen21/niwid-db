@@ -73,7 +73,7 @@ impl Types {
             "FLOAT" => Types::Float,
             "BOOLEAN" | "BOOL" => Types::Bool,
             "VARCHAR" | "TEXT" => Types::Str,
-            _ => bail!(Error::Unsupported(format!("Unsupported type: {}", s))),
+            _ => bail!(Error::Unsupported(format!("Unsupported type: {s}"))),
         })
     }
 }
@@ -120,8 +120,7 @@ impl Value {
             *v
         } else {
             panic!(
-                "Internal Error: forced conversion error: {:?} => StrAddr",
-                self
+                "Internal Error: forced conversion error: {self:?} => StrAddr"
             )
         }
     }
@@ -132,7 +131,7 @@ impl Value {
         if let Value::Str(v) = self {
             v.0.clone()
         } else {
-            panic!("Internal Error: forced conversion error: {:?} => Str", self)
+            panic!("Internal Error: forced conversion error: {self:?} => Str")
         }
     }
 }
@@ -156,7 +155,7 @@ pub enum Value {
 impl Value {
     pub fn to_string_unquoted(&self) -> String {
         match self {
-            Value::Float(_) => format!("{}", self), // print the exact value, without truncation
+            Value::Float(_) => format!("{self}"), // print the exact value, without truncation
             Value::Int(v) => v.to_string(),
             Value::Bool(v) => v.to_string(),
             Value::UInt(v) => v.to_string(),
@@ -175,7 +174,7 @@ impl Value {
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(Value::Int(Int(l + *r as i32))),
             (Value::Int(Int(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(*l as f32 + r))),
             (Value::Float(Float(l)), Value::Int(Int(r))) => Ok(Value::Float(Float(l + *r as f32))),
-            (l, r) => bail!(Error::Unimplemented(format!("{} + {}", l, r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{l} + {r}"))),
         }
     }
 
@@ -188,7 +187,7 @@ impl Value {
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(Value::Int(Int(l - *r as i32))),
             (Value::Int(Int(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(*l as f32 - r))),
             (Value::Float(Float(l)), Value::Int(Int(r))) => Ok(Value::Float(Float(l - *r as f32))),
-            (l, r) => bail!(Error::Unimplemented(format!("{} - {}", l, r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{l} - {r}"))),
         }
     }
 
@@ -206,7 +205,7 @@ impl Value {
             (Value::Float(Float(l)), Value::UInt(UInt(r))) => {
                 Ok(Value::Float(Float(l * *r as f32)))
             }
-            (l, r) => bail!(Error::Unimplemented(format!("{} * {}", l, r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{l} * {r}"))),
         }
     }
 
@@ -222,21 +221,21 @@ impl Value {
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(Value::Int(Int(l / *r as i32))),
             (Value::Int(Int(l)), Value::Float(Float(r))) => Ok(Value::Float(Float(*l as f32 / r))),
             (Value::Float(Float(l)), Value::Int(Int(r))) => Ok(Value::Float(Float(l / *r as f32))),
-            (l, r) => bail!(Error::Unimplemented(format!("{} / {}", l, r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{l} / {r}"))),
         }
     }
 
     pub fn and(&self, other: &Self) -> Result<Self> {
         match (self, other) {
             (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Ok(Value::Bool(Bool(*l && *r))),
-            (l, r) => bail!(Error::Unimplemented(format!("{} && {}", l, r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{l} && {r}"))),
         }
     }
 
     pub fn or(&self, other: &Self) -> Result<Self> {
         match (self, other) {
             (Value::Bool(Bool(l)), Value::Bool(Bool(r))) => Ok(Value::Bool(Bool(*l || *r))),
-            (l, r) => bail!(Error::Unimplemented(format!("{} || {}", l, r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{l} || {r}"))),
         }
     }
 
@@ -251,7 +250,7 @@ impl Value {
             (Value::Str(l), Value::Str(r)) => Ok(l == r),
             (Value::Int(Int(l)), Value::UInt(UInt(r))) => Ok(*l as u32 == *r),
             (Value::UInt(UInt(l)), Value::Int(Int(r))) => Ok(*l == *r as u32),
-            (l, r) => bail!(Error::Unimplemented(format!("{} = {}", l, r))),
+            (l, r) => bail!(Error::Unimplemented(format!("{l} = {r}"))),
         }
     }
 }
@@ -340,7 +339,7 @@ impl Display for Value {
             Value::Float(v) => write!(f, "{:?}", v.0),
             Value::Bool(v) => write!(f, "{:?}", v.0),
             Value::Str(v) => write!(f, "{:?}", v.0),
-            Value::StrAddr(v) => write!(f, "{:?}", v),
+            Value::StrAddr(v) => write!(f, "{v:?}"),
         }
     }
 }

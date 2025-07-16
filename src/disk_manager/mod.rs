@@ -18,7 +18,7 @@ pub fn test_path() -> String {
     use uuid::Uuid;
 
     let id = Uuid::new_v4(); // Generate a unique UUID
-    format!("data/test/test_{}/", id)
+    format!("data/test/test_{id}/")
 }
 
 #[derive(Debug)]
@@ -188,7 +188,7 @@ impl DiskManager {
 
         let txn_committed = Path::join(
             Path::new(&self.txn_dir()),
-            Path::new(&format!("{}.committed", txn_id)),
+            Path::new(&format!("{txn_id}.committed")),
         );
 
         // should be atomic.

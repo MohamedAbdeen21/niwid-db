@@ -362,7 +362,7 @@ impl Executable for Truncate {
                 .truncate_table(table_name, txn_id)?;
         }
 
-        Ok(ResultSet::with_info(format!("Truncated {} tables", count)))
+        Ok(ResultSet::with_info(format!("Truncated {count} tables")))
     }
 }
 
@@ -381,7 +381,7 @@ impl Executable for DropTables {
             }
         }
 
-        Ok(ResultSet::with_info(format!("Dropped {} tables", count)))
+        Ok(ResultSet::with_info(format!("Dropped {count} tables")))
     }
 }
 
@@ -437,7 +437,7 @@ impl Executable for Insert {
                 .insert(tuple)?;
         }
 
-        Ok(ResultSet::with_info(format!("Inserted {} rows", count)))
+        Ok(ResultSet::with_info(format!("Inserted {count} rows")))
     }
 }
 
@@ -461,8 +461,7 @@ impl Executable for Explain {
             };
 
             let info = format!(
-                "Execution time: {} {}\n\nLogical Plan:\n{}",
-                value, unit, plan
+                "Execution time: {value} {unit}\n\nLogical Plan:\n{plan}"
             );
             result.set_info(info);
             Ok(result)
@@ -562,7 +561,7 @@ impl BinaryExpr {
             BinaryOperator::LtEq => Ok(lit!(Bool, (left <= right).to_string())?),
             BinaryOperator::GtEq => Ok(lit!(Bool, (left >= right).to_string())?),
             BinaryOperator::NotEq => Ok(lit!(Bool, (left != right).to_string())?),
-            e => bail!(Error::Unsupported(format!("Operator evaluation {}", e))),
+            e => bail!(Error::Unsupported(format!("Operator evaluation {e}"))),
         }
     }
 
@@ -691,8 +690,7 @@ impl BooleanBinaryExpr {
             BinaryOperator::And => Ok(left.is_truthy() && right.is_truthy()),
             BinaryOperator::Or => Ok(left.is_truthy() || right.is_truthy()),
             e => bail!(Error::Unimplemented(format!(
-                "Binary Operator evaluation {}",
-                e
+                "Binary Operator evaluation {e}"
             ))),
         }
     }
