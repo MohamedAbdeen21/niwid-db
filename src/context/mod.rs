@@ -93,7 +93,7 @@ impl Context {
         let sql: String = sql.into();
         let statements = parse(sql.clone())?;
 
-        statements
+        let results = statements
             .into_iter()
             .map(|statement| {
                 let plan_builder = LogicalPlanBuilder::new(self.catalog.clone());
@@ -103,10 +103,22 @@ impl Context {
 
                 plan.execute(self)
             })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .last()
-            .ok_or(Error::Expected("At least one statement".into(), sql).into())
+            .collect::<Result<Vec<ResultSet>>>();
+
+        match results {
+            Ok(result_set) => Ok(result_set
+                .into_iter()
+                .last()
+                .ok_or(Error::Expected("At least one statement".into(), sql))?),
+
+            Err(e) => {
+                if self.active_txn.is_some() {
+                    self.rollback_txn()?;
+                }
+
+                Err(e)
+            }
+        }
     }
 }
 
