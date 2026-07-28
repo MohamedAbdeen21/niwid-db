@@ -119,9 +119,7 @@ impl Value {
         } else if let Value::StrAddr(v) = self {
             *v
         } else {
-            panic!(
-                "Internal Error: forced conversion error: {self:?} => StrAddr"
-            )
+            panic!("Internal Error: forced conversion error: {self:?} => StrAddr")
         }
     }
 }

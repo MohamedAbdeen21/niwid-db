@@ -196,17 +196,9 @@ impl Executable for IndexScan {
                     lit!(UInt, slot_id.to_string())?,
                 ];
 
-                values.extend(tuple.get_values(&schema)?);
+                values.extend(table.get_portable_values(&tuple)?);
 
-                let values = values.into_iter().map(|v| {
-                    if matches!(v, Value::StrAddr(_)) {
-                        Value::Str(table.fetch_string(v.str_addr()))
-                    } else {
-                        v
-                    }
-                });
-
-                values.enumerate().for_each(|(i, v)| {
+                values.into_iter().enumerate().for_each(|(i, v)| {
                     cols[i].push(v);
                 });
 
@@ -460,9 +452,7 @@ impl Executable for Explain {
                 (elapsed.as_nanos() as f64, "ns")
             };
 
-            let info = format!(
-                "Execution time: {value} {unit}\n\nLogical Plan:\n{plan}"
-            );
+            let info = format!("Execution time: {value} {unit}\n\nLogical Plan:\n{plan}");
             result.set_info(info);
             Ok(result)
         } else {
@@ -797,17 +787,9 @@ impl Executable for Scan {
                 lit!(UInt, slot_id.to_string())?,
             ];
 
-            values.extend(tuple.get_values(&schema)?);
+            values.extend(table.get_portable_values(tuple)?);
 
-            let values = values.into_iter().map(|v| {
-                if matches!(v, Value::StrAddr(_)) {
-                    Value::Str(table.fetch_string(v.str_addr()))
-                } else {
-                    v
-                }
-            });
-
-            values.enumerate().for_each(|(i, v)| {
+            values.into_iter().enumerate().for_each(|(i, v)| {
                 cols[i].push(v);
             });
 

@@ -10,6 +10,7 @@ mod table;
 mod tuple;
 mod txn_manager;
 mod types;
+mod wal;
 
 #[cfg(test)]
 mod sqllogictest;

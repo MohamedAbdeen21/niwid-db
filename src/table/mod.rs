@@ -291,6 +291,20 @@ impl Table {
         Str::from_raw_bytes(tuple.get_data())
     }
 
+    /// unpack a tuple into its values, dereferencing string addresses
+    /// into the actual strings, so the result carries no references
+    /// to this node's blob pages
+    pub fn get_portable_values(&self, tuple: &Tuple) -> Result<Vec<Value>> {
+        Ok(tuple
+            .get_values(&self.schema)?
+            .into_iter()
+            .map(|v| match v {
+                Value::StrAddr(addr) => Value::Str(self.fetch_string(addr)),
+                v => v,
+            })
+            .collect())
+    }
+
     fn check_nullability(&self, tuple: &Tuple) -> Result<()> {
         for (i, field) in self.schema.fields.iter().enumerate() {
             if !field.constraints.nullable
@@ -631,16 +645,8 @@ mod tests {
         let mut counter = 0;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
-            let tuple_bytes = tuple.get_value_of("str", &schema)?;
-            let string = table.fetch_string(tuple_bytes.str_addr());
-            assert_eq!(
-                string,
-                if counter == 0 {
-                    Str(s1.to_string())
-                } else {
-                    Str(s2.to_string())
-                }
-            );
+            let values = table.get_portable_values(tuple)?;
+            assert_eq!(values[1].str(), if counter == 0 { s1 } else { s2 });
             counter += 1;
             Ok(())
         };
@@ -669,16 +675,11 @@ mod tests {
         table.insert(tuple)?;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
-            let values = tuple.get_values(&schema)?;
-            let read_s1 = table.fetch_string(values[0].str_addr());
+            let values = table.get_portable_values(tuple)?;
 
-            let a = UInt::from_bytes(&values[1].to_bytes()).0;
-
-            let read_s2 = table.fetch_string(values[2].str_addr());
-
-            assert_eq!(read_s1.0, s1);
-            assert_eq!(a, 100);
-            assert_eq!(read_s2.0, s2);
+            assert_eq!(values[0].str(), s1);
+            assert_eq!(UInt::from_bytes(&values[1].to_bytes()).0, 100);
+            assert_eq!(values[2].str(), s2);
 
             Ok(())
         };
