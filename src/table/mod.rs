@@ -333,10 +333,7 @@ impl Table {
                     .search(self.active_txn, key.as_u32())
                 {
                     None => Ok(Some(key)),
-                    Some(_) => bail!(Error::DuplicateValue(
-                        format!("{key}"),
-                        field.name.clone()
-                    )),
+                    Some(_) => bail!(Error::DuplicateValue(format!("{key}"), field.name.clone())),
                 };
             }
         }

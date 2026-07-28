@@ -98,7 +98,7 @@ impl BufferPoolManager {
         } else if self.replacer.can_evict() {
             Ok(self.evict_frame())
         } else {
-            return Err(anyhow!("no free frames to evict"));
+            Err(anyhow!("no free frames to evict"))
         }
     }
 

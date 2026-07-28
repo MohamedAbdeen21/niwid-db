@@ -30,7 +30,7 @@ impl Latch {
         unsafe { self.lock.raw().unlock_exclusive() };
     }
 
-    pub fn rguard(&self) -> RwLockReadGuard<()> {
+    pub fn rguard(&self) -> RwLockReadGuard<'_, ()> {
         self.lock.read()
     }
 

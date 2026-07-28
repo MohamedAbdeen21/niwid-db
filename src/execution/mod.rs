@@ -7,8 +7,8 @@ use crate::lit;
 use crate::sql::logical_plan::expr::BinaryExpr;
 use crate::sql::logical_plan::expr::{BooleanBinaryExpr, LogicalExpr};
 use crate::sql::logical_plan::plan::{
-    CreateTable, Delete, DropTables, Filter, Identity, IndexScan, Insert, Join, Limit, LogicalPlan,
-    Scan, Truncate, Union, Update, Values,
+    CreateTable, Delete, DropTables, Filter, IndexScan, Insert, Join, Limit, LogicalPlan, Scan,
+    Truncate, Union, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::constraints::Constraints;
@@ -61,8 +61,6 @@ impl LogicalPlan {
                 ctx.rollback_txn()?;
                 Ok(ResultSet::with_info("Transaction rolled back".into()))
             }
-            #[cfg(test)]
-            LogicalPlan::Identity(i) => i.execute(ctx),
         }
     }
 }
@@ -816,12 +814,6 @@ impl Executable for Scan {
     }
 }
 
-impl Executable for Identity {
-    fn execute(&self, _ctx: &mut Context) -> Result<ResultSet> {
-        Ok(self.input.clone())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::context::tests::test_context;
@@ -829,9 +821,11 @@ mod tests {
     use super::*;
     use anyhow::Result;
 
-    fn identity_plan(values: &[Vec<Value>], fields: &[Field]) -> LogicalPlan {
-        let set = ResultSet::from_rows(fields.to_owned(), values.to_owned());
-        LogicalPlan::Identity(Identity::new(set))
+    fn values_plan(values: &[Vec<Value>], fields: &[Field]) -> LogicalPlan {
+        LogicalPlan::Values(Values::new(
+            values_to_exprs(values),
+            Schema::new(fields.to_vec()),
+        ))
     }
 
     fn values_to_exprs(values: &[Vec<Value>]) -> Vec<Vec<LogicalExpr>> {
@@ -886,7 +880,7 @@ mod tests {
             Field::new("col_2", Types::Str, Constraints::nullable(false)),
         ]);
 
-        let root = identity_plan(&values, &schema.fields);
+        let root = values_plan(&values, &schema.fields);
 
         let filter = BooleanBinaryExpr::new(
             LogicalExpr::Column("col_1".to_string()),
@@ -920,7 +914,7 @@ mod tests {
             Field::new("col_3", Types::Str, Constraints::nullable(false)),
         ]);
 
-        let root = identity_plan(&values, &schema.fields);
+        let root = values_plan(&values, &schema.fields);
 
         let projections = vec![
             LogicalExpr::Column("col_1".to_string()),

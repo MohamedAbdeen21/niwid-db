@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
+use crate::errors::Error;
 use crate::pages::indexes::b_plus_tree::Key;
 use crate::tuple::schema::Schema;
-use crate::{errors::Error, execution::result_set::ResultSet};
 
 use super::expr::{BinaryExpr, BooleanBinaryExpr, LogicalExpr};
 use anyhow::Result;
 
+#[derive(Default)]
 pub enum LogicalPlan {
     Projection(Box<Projection>),
     Scan(Scan),
@@ -26,15 +27,8 @@ pub enum LogicalPlan {
     StartTxn,
     CommitTxn,
     RollbackTxn,
+    #[default]
     Empty,
-    #[cfg(test)]
-    Identity(Identity),
-}
-
-impl Default for LogicalPlan {
-    fn default() -> Self {
-        Self::Empty
-    }
 }
 
 impl LogicalPlan {
@@ -63,8 +57,6 @@ impl LogicalPlan {
             LogicalPlan::Empty => format!("{} Empty", "-".repeat(indent * 2)),
             LogicalPlan::Union(u) => u.print(indent),
             LogicalPlan::Limit(l) => l.print(indent),
-            #[cfg(test)]
-            LogicalPlan::Identity(_) => unreachable!(),
         }
     }
 
@@ -89,8 +81,6 @@ impl LogicalPlan {
             LogicalPlan::RollbackTxn => Schema::default(),
             LogicalPlan::Union(u) => u.schema(),
             LogicalPlan::Limit(l) => l.schema(),
-            #[cfg(test)]
-            LogicalPlan::Identity(i) => i.schema(),
         }
     }
 }
@@ -260,21 +250,6 @@ impl IndexScan {
                 .collect::<Vec<_>>()
                 .join(",")
         )
-    }
-}
-
-pub struct Identity {
-    pub input: ResultSet,
-}
-
-#[cfg(test)]
-impl Identity {
-    pub fn new(input: ResultSet) -> Self {
-        Self { input }
-    }
-
-    fn schema(&self) -> Schema {
-        self.input.schema.clone()
     }
 }
 

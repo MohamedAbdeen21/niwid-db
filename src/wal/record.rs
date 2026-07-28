@@ -1,41 +1,39 @@
+#![allow(dead_code)]
+
 use crate::pages::traits::Serialize;
 use crate::txn_manager::TxnId;
 use crate::types::Value;
+use crate::wal::Lsn;
 
-type LSN = u64;
-type Table = String;
+type TableName = String;
 
-#[allow(dead_code)]
 pub enum RowOperation {
-    Insert(Table, Vec<Value>),
-    Delete(Table, Vec<Value>),
+    Insert(TableName, Vec<Value>),
+    Delete(TableName, Vec<Value>),
     Update {
-        table: Table,
+        table: TableName,
         old_values: Vec<Value>,
         new_values: Vec<Value>,
     },
 }
 
 #[repr(C)]
-#[allow(dead_code)]
 struct LogRecord {
-    lsn: LSN,
-    prev_lsn: LSN,
+    lsn: Lsn,
+    prev_lsn: Lsn,
     txn_id: TxnId,
     checksum: u32,
     length: u32,
     record_type: Record,
 }
 
-#[allow(dead_code)]
 pub enum Record {
-    COMMIT,
-    ABORT,
-    OP(RowOperation),
+    Commit,
+    Abort,
+    Operation(RowOperation),
 }
 
 impl LogRecord {
-    #[allow(dead_code)]
     pub fn new(_txn_id: TxnId, _record: Record) -> Self {
         todo!()
     }
