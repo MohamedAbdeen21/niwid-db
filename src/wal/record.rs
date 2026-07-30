@@ -1,12 +1,14 @@
 #![allow(dead_code)]
 
-use crate::pages::traits::Serialize;
 use crate::txn_manager::TxnId;
 use crate::types::Value;
 use crate::wal::Lsn;
 
+use serde::{Deserialize, Serialize};
+
 type TableName = String;
 
+#[derive(Serialize, Deserialize)]
 pub enum RowOperation {
     Insert(TableName, Vec<Value>),
     Delete(TableName, Vec<Value>),
@@ -17,34 +19,29 @@ pub enum RowOperation {
     },
 }
 
-#[repr(C)]
-struct LogRecord {
-    lsn: Lsn,
-    prev_lsn: Lsn,
-    txn_id: TxnId,
-    checksum: u32,
-    length: u32,
-    record_type: Record,
-}
-
+#[derive(Serialize, Deserialize)]
 pub enum Record {
     Commit,
     Abort,
     Operation(RowOperation),
 }
 
-impl LogRecord {
-    pub fn new(_txn_id: TxnId, _record: Record) -> Self {
-        todo!()
-    }
+#[derive(Serialize, Deserialize)]
+pub struct LogRecord {
+    pub lsn: Lsn,
+    pub prev_lsn: Lsn,
+    pub txn_id: TxnId,
+    pub record_type: Record,
 }
 
-impl Serialize for LogRecord {
-    fn to_bytes(&self) -> &[u8] {
-        todo!()
-    }
-
-    fn from_bytes(_bytes: &[u8]) -> Self {
-        todo!()
+impl LogRecord {
+    pub fn new(txn_id: TxnId, record: Record) -> Self {
+        LogRecord {
+            // All filed later
+            lsn: 0,
+            prev_lsn: 0,
+            txn_id,
+            record_type: record,
+        }
     }
 }
