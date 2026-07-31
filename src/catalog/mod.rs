@@ -7,7 +7,7 @@ use crate::printdbg;
 use crate::table::Table;
 use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
-use crate::tuple::{Entry, Tuple, TupleId};
+use crate::tuple::{Entry, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use crate::types::{AsBytes, Types, Value, ValueFactory};
 use anyhow::{bail, Result};
@@ -32,7 +32,6 @@ lazy_static! {
 
 pub struct Catalog {
     pub tables_map: VersionedMap<String, (TupleId, Table)>,
-    schema: Schema, // A catalog is itself a table
     txn_tables: HashMap<TxnId, HashSet<String>>,
     bpm: ArcBufferPool,
     txn_manager: ArcTransactionManager,
@@ -123,7 +122,6 @@ impl Catalog {
 
         Catalog {
             tables_map: tables,
-            schema,
             txn_tables: HashMap::new(),
             bpm,
             txn_manager,
@@ -159,8 +157,6 @@ impl Catalog {
             ValueFactory::from_string(&Types::UInt, table.get_index_page_id().to_string())?,
             ValueFactory::from_string(&Types::Str, &serialized_schema)?,
         ];
-        let tuple = Tuple::new(tuple_data, &self.schema);
-
         if let Some(txn) = txn {
             table.start_txn(txn)?;
             self.table().start_txn(txn)?;
@@ -170,7 +166,7 @@ impl Catalog {
                 .insert(CATALOG_NAME.to_string());
         }
 
-        let tuple_id = self.table().insert(tuple)?;
+        let tuple_id = self.table().insert(tuple_data)?;
 
         self.tables_map
             .insert(txn, table_name.to_string(), (tuple_id, table));

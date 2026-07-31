@@ -12,6 +12,7 @@ type TableName = String;
 pub enum RowOperation {
     Insert(TableName, Vec<Value>),
     Delete(TableName, Vec<Value>),
+    // Tables currently do update by calling delete then insert
     Update {
         table: TableName,
         old_values: Vec<Value>,

@@ -9,6 +9,8 @@ use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{Str, StrAddr, Types, Value, ValueFactory};
+use crate::wal::manager::LogManager;
+use crate::wal::record::{LogRecord, Record, RowOperation};
 use anyhow::{bail, ensure, Result};
 
 pub mod table_iterator;
@@ -252,12 +254,9 @@ impl Table {
     }
 
     pub fn commit_txn(&mut self) -> Result<()> {
-        if self.active_txn.is_some() {
-            printdbg!(
-                "Table {} Committing txn {}",
-                self.name,
-                self.active_txn.unwrap()
-            );
+        if let Some(txn) = self.active_txn {
+            printdbg!("Table {} Committing txn {}", self.name, txn);
+
             self.active_txn = None;
             Ok(())
         } else {
@@ -266,7 +265,14 @@ impl Table {
     }
 
     pub fn rollback_txn(&mut self) -> Result<()> {
-        self.commit_txn()
+        if let Some(txn) = self.active_txn {
+            printdbg!("Table {} rolling back txn {}", self.name, txn);
+
+            self.active_txn = None;
+            Ok(())
+        } else {
+            bail!(Error::NoActiveTransaction);
+        }
     }
 
     /// fetch the string from the tuple, takes TupleId bytes
@@ -340,7 +346,9 @@ impl Table {
         Ok(None)
     }
 
-    pub fn insert(&mut self, tuple: Tuple) -> Result<TupleId> {
+    pub fn insert(&mut self, values: Vec<Value>) -> Result<TupleId> {
+        let tuple = Tuple::new(values.clone(), &self.schema);
+
         if tuple.len() > PAGE_END - (SLOT_SIZE + META_SIZE) {
             bail!(Error::TupleTooBig(
                 PAGE_END - (SLOT_SIZE + META_SIZE),
@@ -353,42 +361,55 @@ impl Table {
 
         let tuple = self.insert_strings(tuple)?;
 
-        if let Some(id) = self.active_txn {
-            self.txn_manager.lock().touch_page(id, self.last_page)?;
-        }
-
-        let mut last_page: TablePage = self
-            .bpm
-            .lock()
-            .fetch_frame(self.last_page, self.active_txn)?
-            .writer()
-            .into();
-
-        let inserted_tuple_id = last_page.insert_tuple(&tuple);
-
-        self.bpm.lock().unpin(&self.last_page, self.active_txn);
-
-        if let Ok(id) = inserted_tuple_id {
-            if let Some(key) = key {
-                self.index
-                    .as_mut()
-                    .unwrap()
-                    .insert(self.active_txn, key.as_u32(), id)?;
-            };
-            if self.active_txn.is_none() {
-                self.bpm.lock().flush(Some(self.last_page))?;
+        loop {
+            if let Some(id) = self.active_txn {
+                self.txn_manager.lock().touch_page(id, self.last_page)?;
             }
-            return Ok(id);
+
+            let mut last_page: TablePage = self
+                .bpm
+                .lock()
+                .fetch_frame(self.last_page, self.active_txn)?
+                .writer()
+                .into();
+
+            let inserted_tuple_id = last_page.insert_tuple(&tuple);
+
+            self.bpm.lock().unpin(&self.last_page, self.active_txn);
+
+            if let Ok(id) = inserted_tuple_id {
+                if let Some(key) = key {
+                    self.index
+                        .as_mut()
+                        .unwrap()
+                        .insert(self.active_txn, key.as_u32(), id)?;
+                };
+
+                // logged once, on success, with the caller's original values:
+                // strings are still inline, so the record is portable.
+                // Txn-less writes only exist through the raw Table API (tests);
+                // every SQL-path write runs inside an (implicit) txn and is logged.
+                if let Some(txn) = self.active_txn {
+                    let log_record = LogRecord::new(
+                        txn,
+                        Record::Operation(RowOperation::Insert(self.name.clone(), values)),
+                    );
+                    LogManager::get().lock().append(log_record);
+                }
+
+                if self.active_txn.is_none() {
+                    self.bpm.lock().flush(Some(self.last_page))?;
+                }
+                return Ok(id);
+            }
+
+            // page is full, add another page and link to table
+            let page_id = self.bpm.lock().new_page()?.reader().get_page_id();
+
+            last_page.set_next_page_id(page_id);
+
+            self.last_page = page_id;
         }
-
-        // page is full, add another page and link to table
-        let page_id = self.bpm.lock().new_page()?.reader().get_page_id();
-
-        last_page.set_next_page_id(page_id);
-
-        self.last_page = page_id;
-
-        self.insert(tuple)
     }
 
     pub fn scan(
@@ -407,6 +428,17 @@ impl Table {
         }
 
         let tuple = self.get_tuple(id).unwrap();
+
+        if let Some(txn) = self.active_txn {
+            let log_record = LogRecord::new(
+                txn,
+                Record::Operation(RowOperation::Delete(
+                    self.name.clone(),
+                    self.get_portable_values(&tuple)?,
+                )),
+            );
+            LogManager::get().lock().append(log_record);
+        }
 
         let mut page: TablePage = self
             .bpm
@@ -440,11 +472,13 @@ impl Table {
             .map(|i| i as u8)
     }
 
-    pub fn update(&mut self, tuple_id: Option<TupleId>, new_tuple: Tuple) -> Result<TupleId> {
+    pub fn update(&mut self, tuple_id: Option<TupleId>, new_values: Vec<Value>) -> Result<TupleId> {
         ensure!(
             self.active_txn.is_some(),
             Error::Internal("Table: No active transaction".into())
         );
+
+        let new_tuple = Tuple::new(new_values.clone(), &self.schema);
 
         let id = tuple_id.unwrap(); //TODO: Handle None
 
@@ -477,7 +511,7 @@ impl Table {
         }
 
         self.delete(id)?;
-        let tuple_id = self.insert(new_tuple)?;
+        let tuple_id = self.insert(new_values)?;
 
         Ok(tuple_id)
     }
@@ -550,8 +584,7 @@ mod tests {
         let bpm = table.bpm.clone();
 
         let tuple_data: Vec<Value> = vec![lit!(UInt, "2")?, lit!(UInt, "50000")?];
-        let tuple = Tuple::new(tuple_data, &schema);
-        table.insert(tuple)?;
+        table.insert(tuple_data)?;
 
         let page_id = table.first_page;
 
@@ -580,21 +613,19 @@ mod tests {
         let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 4);
 
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(vec![lit!(UInt, i.to_string())?], &schema);
-            table.insert(tuple)?;
+            table.insert(vec![lit!(UInt, i.to_string())?])?;
         }
 
         assert_eq!(table.first_page, table.last_page);
 
-        table.insert(Tuple::new(vec![lit!(UInt, "99999")?], &schema))?;
+        table.insert(vec![lit!(UInt, "99999")?])?;
         let second_id = table.get_last_page_id();
 
         assert_ne!(table.first_page, table.last_page);
 
         // add a third page, make sure that page 2 is unpinned
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(vec![lit!(UInt, i.to_string())?], &schema);
-            table.insert(tuple)?;
+            table.insert(vec![lit!(UInt, i.to_string())?])?;
         }
 
         let third_id = table.get_last_page_id();
@@ -627,17 +658,9 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(
-            vec![lit!(UInt, "100")?, lit!(Str, s1)?, lit!(UInt, "50")?],
-            &schema,
-        );
-        table.insert(tuple)?;
+        table.insert(vec![lit!(UInt, "100")?, lit!(Str, s1)?, lit!(UInt, "50")?])?;
 
-        let tuple = Tuple::new(
-            vec![lit!(UInt, "20")?, lit!(Str, s2)?, lit!(UInt, "10")?],
-            &schema,
-        );
-        table.insert(tuple)?;
+        table.insert(vec![lit!(UInt, "20")?, lit!(Str, s2)?, lit!(UInt, "10")?])?;
 
         let mut counter = 0;
 
@@ -665,11 +688,7 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(
-            vec![lit!(Str, s1)?, lit!(UInt, "100")?, lit!(Str, s2)?],
-            &schema,
-        );
-        table.insert(tuple)?;
+        table.insert(vec![lit!(Str, s1)?, lit!(UInt, "100")?, lit!(Str, s2)?])?;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = table.get_portable_values(tuple)?;
@@ -696,15 +715,14 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(
-            vec![lit!(UInt, "10")?, lit!(Float, "10.0")?, lit!(Int, "10")?],
-            &schema,
-        );
-        let t1_id = table.insert(tuple)?;
+        let t1_id = table.insert(vec![
+            lit!(UInt, "10")?,
+            lit!(Float, "10.0")?,
+            lit!(Int, "10")?,
+        ])?;
 
         let tuple_data = vec![lit!(UInt, "20")?, lit!(Float, "20.0")?, lit!(Int, "20")?];
-        let tuple = Tuple::new(tuple_data.clone(), &schema);
-        let t2_id = table.insert(tuple)?;
+        let t2_id = table.insert(tuple_data.clone())?;
 
         table.delete(t1_id)?;
 
@@ -738,8 +756,7 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(vec![Value::Null, Value::Null, Value::Null], &schema);
-        table.insert(tuple)?;
+        table.insert(vec![Value::Null, Value::Null, Value::Null])?;
 
         let validator = |(_, (meta, tuple)): &(TupleId, Entry)| {
             assert!(meta.is_null(0));
@@ -769,9 +786,7 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
-        let tuple = Tuple::new(vec![Value::Null], &schema);
-
-        assert!(table.insert(tuple).is_err());
+        assert!(table.insert(vec![Value::Null]).is_err());
 
         Ok(())
     }
@@ -785,11 +800,11 @@ mod tests {
 
         let mut table = test_table(5, &schema)?;
 
-        let t1 = Tuple::new(vec![lit!(UInt, "10")?, lit!(UInt, "20")?], &schema);
-        let t2 = Tuple::new(vec![lit!(UInt, "10")?, lit!(UInt, "30")?], &schema);
+        table.insert(vec![lit!(UInt, "10")?, lit!(UInt, "20")?])?;
 
-        table.insert(t1)?;
-        assert!(table.insert(t2).is_err());
+        assert!(table
+            .insert(vec![lit!(UInt, "10")?, lit!(UInt, "30")?])
+            .is_err());
 
         let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;

@@ -1,12 +1,16 @@
 #![allow(dead_code, unused_variables)]
 
 use anyhow::{Context, Result};
+use lazy_static::lazy_static;
+use parking_lot::FairMutex;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::iter::{empty, Iterator};
 use std::path::Path;
+use std::sync::Arc;
 
+use crate::disk_manager::DISK_STORAGE;
 use crate::txn_manager::TxnId;
 use crate::wal::record::{LogRecord, Record};
 use crate::wal::Lsn;
@@ -17,7 +21,13 @@ const LOG_NAME: &str = "_WAL";
 /// change to the record wire format that isn't an appended enum variant.
 const MAGIC: [u8; 8] = *b"NIWIDDB\x01";
 
-struct LogManager {
+pub type ArcLogManager = Arc<FairMutex<LogManager>>;
+
+lazy_static! {
+    static ref LM: ArcLogManager = Arc::new(FairMutex::new(LogManager::new(DISK_STORAGE)));
+}
+
+pub struct LogManager {
     handle: File,
     prev_lsn: HashMap<TxnId, Lsn>,
     next_lsn: Lsn,
@@ -25,6 +35,10 @@ struct LogManager {
 }
 
 impl LogManager {
+    pub fn get() -> ArcLogManager {
+        LM.clone()
+    }
+
     fn new(data_dir: &str) -> Self {
         let path = Path::new(data_dir);
 
@@ -68,11 +82,11 @@ impl LogManager {
         }
     }
 
-    fn truncate(&mut self, checkpoint: Lsn) -> Result<()> {
+    pub fn truncate(&mut self, checkpoint: Lsn) -> Result<()> {
         todo!()
     }
 
-    fn append(&mut self, mut record: LogRecord) -> Lsn {
+    pub fn append(&mut self, mut record: LogRecord) -> Lsn {
         record.lsn = self.next_lsn;
         record.prev_lsn = self.prev_lsn.get(&record.txn_id).copied().unwrap_or(0);
 
@@ -114,7 +128,7 @@ impl LogManager {
         record.lsn
     }
 
-    fn commit(&mut self, lsn: Lsn) -> Result<Lsn> {
+    pub fn commit(&mut self, lsn: Lsn) -> Result<Lsn> {
         if lsn <= self.last_synced_lsn {
             return Ok(self.last_synced_lsn);
         }

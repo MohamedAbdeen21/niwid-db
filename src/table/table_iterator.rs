@@ -97,7 +97,7 @@ mod tests {
     use crate::table::tests::test_table;
     use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
-    use crate::tuple::{Entry, Tuple, TupleId};
+    use crate::tuple::{Entry, TupleId};
     use crate::types::{Types, Value, ValueFactory};
 
     use super::TableIterator;
@@ -110,16 +110,13 @@ mod tests {
         ]);
         let mut table = test_table(3, &schema)?;
 
-        let t1 = Tuple::new(vec![lit!(UInt, "2")?, lit!(UInt, "3")?], &schema);
-        table.insert(t1)?;
+        table.insert(vec![lit!(UInt, "2")?, lit!(UInt, "3")?])?;
 
-        let t2 = Tuple::new(vec![lit!(UInt, "4")?, lit!(UInt, "5")?], &schema);
-        let t2_id = table.insert(t2)?;
+        let t2_id = table.insert(vec![lit!(UInt, "4")?, lit!(UInt, "5")?])?;
 
         table.delete(t2_id)?;
 
-        let t3 = Tuple::new(vec![lit!(UInt, "6")?, lit!(UInt, "7")?], &schema);
-        table.insert(t3)?;
+        table.insert(vec![lit!(UInt, "6")?, lit!(UInt, "7")?])?;
 
         let mut counter = 0;
         let scanner = |(_, (meta, _)): (TupleId, Entry)| -> Result<()> {
@@ -147,11 +144,7 @@ mod tests {
         let mut table = test_table(3, &schema)?;
 
         for i in 0..tuples_per_page {
-            let tuple = Tuple::new(
-                vec![lit!(Int, i.to_string())?, lit!(Int, i.to_string())?],
-                &schema,
-            );
-            table.insert(tuple)?;
+            table.insert(vec![lit!(Int, i.to_string())?, lit!(Int, i.to_string())?])?;
         }
 
         let first_page: TablePage = table
@@ -165,8 +158,7 @@ mod tests {
 
         assert!(first_page.is_dirty());
 
-        let tuple = Tuple::new(vec![Value::Null, Value::Null], &schema);
-        table.insert(tuple)?;
+        table.insert(vec![Value::Null, Value::Null])?;
 
         assert_ne!(table.first_page, table.last_page);
 

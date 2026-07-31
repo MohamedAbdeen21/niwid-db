@@ -6,6 +6,7 @@ use crate::sql::logical_plan::LogicalPlanBuilder;
 use crate::sql::parser::parse;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
 use anyhow::{ensure, Result};
+use sqlparser::ast::Statement;
 
 pub struct Context {
     catalog: ArcCatalog,
@@ -96,12 +97,23 @@ impl Context {
         let results = statements
             .into_iter()
             .map(|statement| {
+                let implicit = self.active_txn.is_none() && Self::mutates(&statement);
+                if implicit {
+                    self.start_txn()?;
+                }
+
                 let plan_builder = LogicalPlanBuilder::new(self.catalog.clone());
 
                 let plan = plan_builder.build_initial_plan(statement, self.active_txn)?;
                 let plan = optimize_logical_plan(plan);
 
-                plan.execute(self)
+                let result = plan.execute(self)?;
+
+                if implicit {
+                    self.commit_txn()?;
+                }
+
+                Ok(result)
             })
             .collect::<Result<Vec<ResultSet>>>();
 
@@ -118,6 +130,19 @@ impl Context {
 
                 Err(e)
             }
+        }
+    }
+
+    fn mutates(statement: &Statement) -> bool {
+        match statement {
+            Statement::Insert(_)
+            | Statement::Update { .. }
+            | Statement::Delete(_)
+            | Statement::CreateTable(_)
+            | Statement::Drop { .. }
+            | Statement::Truncate { .. } => true,
+            Statement::Explain { statement, .. } => Self::mutates(statement),
+            _ => false,
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::sql::logical_plan::plan::{
 use crate::sql::logical_plan::plan::{Explain, Projection};
 use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
-use crate::tuple::{Tuple, TupleId};
+use crate::tuple::TupleId;
 use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
@@ -102,30 +102,16 @@ impl Executable for Delete {
             .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
             .collect::<Vec<_>>();
 
-        let (txn_id, is_temp) = match txn_id {
-            Some(id) => (id, false),
-            None => (ctx.start_txn()?, true),
-        };
+        let txn_id = txn_id.ok_or(Error::Internal(
+            "DELETE requires an active transaction".into(),
+        ))?;
 
         table.start_txn(txn_id)?;
 
         for row in selected_rows.iter() {
             let tuple_id = (row[0].u32(), row[1].u32() as u16);
 
-            if let Err(err) = table.delete(tuple_id) {
-                table.rollback_txn()?;
-                drop(catalog);
-                if is_temp {
-                    ctx.rollback_txn()?;
-                }
-                return Err(err);
-            }
-        }
-
-        table.commit_txn()?;
-        drop(catalog);
-        if is_temp {
-            ctx.commit_txn()?;
+            table.delete(tuple_id)?;
         }
 
         Ok(ResultSet::with_info(format!(
@@ -297,10 +283,10 @@ impl Executable for Update {
             .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
             .collect::<Vec<_>>();
 
-        let (txn_id, is_temp) = match txn_id {
-            Some(id) => (id, false),
-            None => (ctx.start_txn()?, true),
-        };
+        // txn owned by Context; see Delete::execute
+        let txn_id = txn_id.ok_or(Error::Internal(
+            "UPDATE requires an active transaction".into(),
+        ))?;
 
         table.start_txn(txn_id)?;
 
@@ -315,22 +301,7 @@ impl Executable for Update {
                 }
             }
 
-            let new_tuple = Tuple::new(new_tuple, &schema);
-
-            if let Err(err) = table.update(Some(tuple_id), new_tuple) {
-                table.rollback_txn()?;
-                drop(catalog);
-                if is_temp {
-                    ctx.rollback_txn()?;
-                }
-                return Err(err);
-            }
-        }
-
-        table.commit_txn()?;
-        drop(catalog);
-        if is_temp {
-            ctx.commit_txn()?;
+            table.update(Some(tuple_id), new_tuple)?;
         }
 
         Ok(ResultSet::with_info(format!(
@@ -417,14 +388,13 @@ impl Executable for Insert {
 
         for row in input.rows() {
             let row = self.reorder(row)?;
-            let tuple = Tuple::new(row, &self.table_schema);
 
             let _tuple_id = ctx
                 .get_catalog()
                 .write()
                 .get_table_mut(&self.table_name, txn_id)
                 .ok_or_else(|| Error::TableNotFound(self.table_name.clone()))??
-                .insert(tuple)?;
+                .insert(row)?;
         }
 
         Ok(ResultSet::with_info(format!("Inserted {count} rows")))
