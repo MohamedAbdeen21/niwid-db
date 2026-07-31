@@ -82,7 +82,9 @@ impl Executable for Limit {
 
 impl Executable for Delete {
     fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
-        let txn_id = ctx.get_active_txn();
+        let txn_id = ctx.get_active_txn().ok_or(Error::Internal(
+            "DELETE requires an active transaction".into(),
+        ))?;
 
         let input = self.input.execute(ctx)?;
 
@@ -90,7 +92,7 @@ impl Executable for Delete {
         let mut catalog = c.write();
 
         let table = catalog
-            .get_table_mut(&self.table_name, txn_id)
+            .get_table_mut(&self.table_name, Some(txn_id))
             .ok_or(Error::TableNotFound(self.table_name.clone()))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
@@ -101,10 +103,6 @@ impl Executable for Delete {
             .enumerate()
             .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
             .collect::<Vec<_>>();
-
-        let txn_id = txn_id.ok_or(Error::Internal(
-            "DELETE requires an active transaction".into(),
-        ))?;
 
         table.start_txn(txn_id)?;
 
@@ -247,7 +245,9 @@ impl Executable for Join {
 
 impl Executable for Update {
     fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
-        let txn_id = ctx.get_active_txn();
+        let txn_id = ctx.get_active_txn().ok_or(Error::Internal(
+            "UPDATE requires an active transaction".into(),
+        ))?;
 
         let input = self.input.execute(ctx)?;
 
@@ -255,7 +255,7 @@ impl Executable for Update {
         let mut catalog = c.write();
 
         let table = catalog
-            .get_table_mut(&self.table_name, txn_id)
+            .get_table_mut(&self.table_name, Some(txn_id))
             .ok_or(Error::TableNotFound(self.table_name.clone()))??;
 
         let (_, mask) = self.selection.evaluate(&input)?;
@@ -283,11 +283,6 @@ impl Executable for Update {
             .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
             .collect::<Vec<_>>();
 
-        // txn owned by Context; see Delete::execute
-        let txn_id = txn_id.ok_or(Error::Internal(
-            "UPDATE requires an active transaction".into(),
-        ))?;
-
         table.start_txn(txn_id)?;
 
         for row in selected_rows.iter() {
@@ -313,7 +308,9 @@ impl Executable for Update {
 
 impl Executable for Truncate {
     fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
-        let txn_id = ctx.get_active_txn();
+        let txn_id = ctx.get_active_txn().ok_or(Error::Internal(
+            "TRUNCATE requires an active transaction".into(),
+        ))?;
 
         let count = self.table_names.len();
 
@@ -329,7 +326,9 @@ impl Executable for Truncate {
 
 impl Executable for DropTables {
     fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
-        let txn_id = ctx.get_active_txn();
+        let txn_id = ctx.get_active_txn().ok_or(Error::Internal(
+            "DROP TABLE requires an active transaction".into(),
+        ))?;
         let count = self.table_names.len();
         for table_name in self.table_names.iter() {
             if ctx
@@ -435,7 +434,9 @@ impl Executable for Explain {
 
 impl Executable for CreateTable {
     fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
-        let txn_id = ctx.get_active_txn();
+        let txn_id = ctx.get_active_txn().ok_or(Error::Internal(
+            "CREATE TABLE requires an active transaction".into(),
+        ))?;
         let catalog = ctx.get_catalog();
         let created = catalog.write().add_table(
             &self.table_name,

@@ -94,7 +94,7 @@ mod tests {
 
     use crate::lit;
     use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
-    use crate::table::tests::test_table;
+    use crate::table::tests::{begin, commit, test_table};
     use crate::tuple::constraints::Constraints;
     use crate::tuple::schema::{Field, Schema};
     use crate::tuple::{Entry, TupleId};
@@ -108,7 +108,9 @@ mod tests {
             Field::new("id", Types::UInt, Constraints::nullable(false)),
             Field::new("age", Types::UInt, Constraints::nullable(false)),
         ]);
-        let mut table = test_table(3, &schema)?;
+        let mut table = test_table(4, &schema)?;
+
+        let txn = begin(&mut table)?;
 
         table.insert(vec![lit!(UInt, "2")?, lit!(UInt, "3")?])?;
 
@@ -117,6 +119,8 @@ mod tests {
         table.delete(t2_id)?;
 
         table.insert(vec![lit!(UInt, "6")?, lit!(UInt, "7")?])?;
+
+        commit(&mut table, txn)?;
 
         let mut counter = 0;
         let scanner = |(_, (meta, _)): (TupleId, Entry)| -> Result<()> {
@@ -141,11 +145,21 @@ mod tests {
 
         let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 8);
 
-        let mut table = test_table(3, &schema)?;
+        let mut table = test_table(4, &schema)?;
+
+        let txn = begin(&mut table)?;
 
         for i in 0..tuples_per_page {
             table.insert(vec![lit!(Int, i.to_string())?, lit!(Int, i.to_string())?])?;
         }
+
+        assert_eq!(table.first_page, table.last_page);
+
+        table.insert(vec![Value::Null, Value::Null])?;
+
+        assert_ne!(table.first_page, table.last_page);
+
+        commit(&mut table, txn)?;
 
         let first_page: TablePage = table
             .bpm
@@ -154,13 +168,8 @@ mod tests {
             .reader()
             .into();
 
-        assert_eq!(table.first_page, table.last_page);
-
-        assert!(first_page.is_dirty());
-
-        table.insert(vec![Value::Null, Value::Null])?;
-
-        assert_ne!(table.first_page, table.last_page);
+        // committed frames were just written to disk, so they load clean
+        assert!(!first_page.is_dirty());
 
         table.bpm.lock().unpin(&table.first_page, None);
 

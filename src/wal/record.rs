@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use crate::txn_manager::TxnId;
 use crate::types::Value;
 use crate::wal::Lsn;
+use crate::{tuple::schema::Schema, txn_manager::TxnId};
 
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +25,8 @@ pub enum Record {
     Commit,
     Abort,
     Operation(RowOperation),
+    CreateTable(TableName, Schema),
+    DropTable(TableName),
 }
 
 #[derive(Serialize, Deserialize)]

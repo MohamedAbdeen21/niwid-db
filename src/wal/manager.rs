@@ -95,7 +95,7 @@ impl LogManager {
             Record::Commit | Record::Abort => {
                 self.prev_lsn.remove(&record.txn_id);
             }
-            Record::Operation(_) => {
+            Record::Operation(_) | Record::CreateTable(_, _) | Record::DropTable(_) => {
                 self.prev_lsn.insert(record.txn_id, record.lsn);
             }
         }

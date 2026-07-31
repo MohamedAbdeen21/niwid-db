@@ -1,4 +1,5 @@
 use crate::buffer_pool::ArcBufferPool;
+use crate::catalog::CATALOG_NAME;
 use crate::errors::Error;
 use crate::indexes::b_plus_tree::btree::BPlusTree;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
@@ -41,8 +42,11 @@ impl Table {
         txn_manager: ArcTransactionManager,
         name: String,
         schema: &Schema,
-        txn: Option<TxnId>,
+        txn: TxnId,
     ) -> Result<Self> {
+        let log_record = LogRecord::new(txn, Record::CreateTable(name.clone(), schema.clone()));
+        LogManager::get().lock().append(log_record);
+
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
@@ -52,12 +56,17 @@ impl Table {
             first_page: page_id,
             last_page: page_id,
             blob_page,
-            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), txn)),
+            index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), Some(txn))),
             bpm,
             txn_manager,
             active_txn: None,
             schema: schema.clone(),
         })
+    }
+
+    pub fn drop(&self, txn: TxnId) {
+        let log_record = LogRecord::new(txn, Record::DropTable(self.name.clone()));
+        LogManager::get().lock().append(log_record);
     }
 
     pub fn fetch(
@@ -161,9 +170,6 @@ impl Table {
 
         if let Ok(id) = blob_page.insert_raw(&tuple) {
             self.bpm.lock().unpin(&self.blob_page, self.active_txn);
-            if self.active_txn.is_none() {
-                self.bpm.lock().flush(Some(self.blob_page))?;
-            }
             return Ok(id);
         }
 
@@ -347,6 +353,8 @@ impl Table {
     }
 
     pub fn insert(&mut self, values: Vec<Value>) -> Result<TupleId> {
+        let txn = self.active_txn.ok_or(Error::NoActiveTransaction)?;
+
         let tuple = Tuple::new(values.clone(), &self.schema);
 
         if tuple.len() > PAGE_END - (SLOT_SIZE + META_SIZE) {
@@ -362,9 +370,7 @@ impl Table {
         let tuple = self.insert_strings(tuple)?;
 
         loop {
-            if let Some(id) = self.active_txn {
-                self.txn_manager.lock().touch_page(id, self.last_page)?;
-            }
+            self.txn_manager.lock().touch_page(txn, self.last_page)?;
 
             let mut last_page: TablePage = self
                 .bpm
@@ -385,11 +391,9 @@ impl Table {
                         .insert(self.active_txn, key.as_u32(), id)?;
                 };
 
-                // logged once, on success, with the caller's original values:
-                // strings are still inline, so the record is portable.
-                // Txn-less writes only exist through the raw Table API (tests);
-                // every SQL-path write runs inside an (implicit) txn and is logged.
-                if let Some(txn) = self.active_txn {
+                // catalog rows are rebuilt from CreateTable/DropTable records;
+                // logging them too would double-apply on replay
+                if self.name != CATALOG_NAME {
                     let log_record = LogRecord::new(
                         txn,
                         Record::Operation(RowOperation::Insert(self.name.clone(), values)),
@@ -397,9 +401,6 @@ impl Table {
                     LogManager::get().lock().append(log_record);
                 }
 
-                if self.active_txn.is_none() {
-                    self.bpm.lock().flush(Some(self.last_page))?;
-                }
                 return Ok(id);
             }
 
@@ -421,15 +422,14 @@ impl Table {
     }
 
     pub fn delete(&mut self, id: TupleId) -> Result<()> {
+        let txn = self.active_txn.ok_or(Error::NoActiveTransaction)?;
         let (page_id, slot_id) = id;
 
-        if let Some(id) = self.active_txn {
-            self.txn_manager.lock().touch_page(id, self.last_page)?;
-        }
+        self.txn_manager.lock().touch_page(txn, page_id)?;
 
         let tuple = self.get_tuple(id).unwrap();
 
-        if let Some(txn) = self.active_txn {
+        if self.name != CATALOG_NAME {
             let log_record = LogRecord::new(
                 txn,
                 Record::Operation(RowOperation::Delete(
@@ -452,10 +452,6 @@ impl Table {
         if let Some(id) = self.get_unique_column_id() {
             let key = tuple.get_value_at(id, &self.schema)?.as_u32();
             self.index.as_mut().unwrap().delete(self.active_txn, key)?;
-        }
-
-        if self.active_txn.is_none() {
-            self.bpm.lock().flush(Some(page_id))?;
         }
 
         self.bpm.lock().unpin(&page_id, self.active_txn);
@@ -546,6 +542,17 @@ mod tests {
     use crate::{lit, types::*};
     use anyhow::{anyhow, Result};
 
+    pub fn begin(table: &mut Table) -> Result<TxnId> {
+        let txn = table.txn_manager.lock().start()?;
+        table.start_txn(txn)?;
+        Ok(txn)
+    }
+
+    pub fn commit(table: &mut Table, txn: TxnId) -> Result<()> {
+        table.txn_manager.lock().commit(txn)?;
+        table.commit_txn()
+    }
+
     pub fn test_table(size: usize, schema: &Schema) -> Result<Table> {
         let bpm = test_arc_bpm(size);
 
@@ -583,8 +590,10 @@ mod tests {
 
         let bpm = table.bpm.clone();
 
+        let txn = begin(&mut table)?;
         let tuple_data: Vec<Value> = vec![lit!(UInt, "2")?, lit!(UInt, "50000")?];
         table.insert(tuple_data)?;
+        commit(&mut table, txn)?;
 
         let page_id = table.first_page;
 
@@ -601,7 +610,7 @@ mod tests {
             Types::UInt,
             Constraints::nullable(false),
         )]);
-        let mut table = test_table(5, &schema)?;
+        let mut table = test_table(8, &schema)?;
 
         let first_id = table.get_first_page_id();
         let blob_id = table.get_blob_page_id();
@@ -611,6 +620,8 @@ mod tests {
         // free page = 4090
         // 4090 / 24 ≈ 157
         let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 4);
+
+        let txn = begin(&mut table)?;
 
         for i in 0..tuples_per_page {
             table.insert(vec![lit!(UInt, i.to_string())?])?;
@@ -629,6 +640,8 @@ mod tests {
         }
 
         let third_id = table.get_last_page_id();
+
+        commit(&mut table, txn)?;
 
         assert_eq!(0, table.bpm.lock().get_pin_count(&first_id).unwrap());
         assert_eq!(0, table.bpm.lock().get_pin_count(&blob_id).unwrap());
@@ -658,9 +671,10 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
+        let txn = begin(&mut table)?;
         table.insert(vec![lit!(UInt, "100")?, lit!(Str, s1)?, lit!(UInt, "50")?])?;
-
         table.insert(vec![lit!(UInt, "20")?, lit!(Str, s2)?, lit!(UInt, "10")?])?;
+        commit(&mut table, txn)?;
 
         let mut counter = 0;
 
@@ -688,7 +702,9 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
+        let txn = begin(&mut table)?;
         table.insert(vec![lit!(Str, s1)?, lit!(UInt, "100")?, lit!(Str, s2)?])?;
+        commit(&mut table, txn)?;
 
         let assert_strings = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = table.get_portable_values(tuple)?;
@@ -715,6 +731,8 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
+        let txn = begin(&mut table)?;
+
         let t1_id = table.insert(vec![
             lit!(UInt, "10")?,
             lit!(Float, "10.0")?,
@@ -725,6 +743,8 @@ mod tests {
         let t2_id = table.insert(tuple_data.clone())?;
 
         table.delete(t1_id)?;
+
+        commit(&mut table, txn)?;
 
         let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
@@ -737,7 +757,9 @@ mod tests {
 
         table.scan(None, scanner_1)?;
 
+        let txn = begin(&mut table)?;
         table.delete(t2_id)?;
+        commit(&mut table, txn)?;
 
         let scanner_2 = |_: &(TupleId, Entry)| Err(anyhow!("Should not run")); // should never run
 
@@ -756,7 +778,9 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
+        let txn = begin(&mut table)?;
         table.insert(vec![Value::Null, Value::Null, Value::Null])?;
+        commit(&mut table, txn)?;
 
         let validator = |(_, (meta, tuple)): &(TupleId, Entry)| {
             assert!(meta.is_null(0));
@@ -786,6 +810,7 @@ mod tests {
 
         let mut table = test_table(4, &schema)?;
 
+        begin(&mut table)?;
         assert!(table.insert(vec![Value::Null]).is_err());
 
         Ok(())
@@ -800,11 +825,15 @@ mod tests {
 
         let mut table = test_table(5, &schema)?;
 
+        let txn = begin(&mut table)?;
+
         table.insert(vec![lit!(UInt, "10")?, lit!(UInt, "20")?])?;
 
         assert!(table
             .insert(vec![lit!(UInt, "10")?, lit!(UInt, "30")?])
             .is_err());
+
+        commit(&mut table, txn)?;
 
         let scanner_1 = |(_, (_, tuple)): &(TupleId, Entry)| {
             let values = tuple.get_values(&schema)?;
