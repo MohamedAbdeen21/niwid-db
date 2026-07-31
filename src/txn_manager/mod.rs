@@ -8,7 +8,7 @@ use parking_lot::FairMutex;
 
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
 use crate::pages::PageId;
-use crate::wal::manager::LogManager;
+use crate::wal::manager::{LogManager, RECOVERING};
 use crate::wal::record::{LogRecord, Record};
 
 pub type TxnId = u64;
@@ -84,10 +84,12 @@ impl TransactionManager {
     pub fn commit(&mut self, txn_id: TxnId) -> Result<()> {
         // durable before visible: the txn only counts as committed once its
         // COMMIT record is synced; only then may the swap publish its writes
-        let lsn = LogManager::get()
-            .lock()
-            .append(LogRecord::new(txn_id, Record::Commit));
-        LogManager::get().lock().commit(lsn)?;
+        if !RECOVERING.load(Ordering::SeqCst) {
+            let lsn = LogManager::get()
+                .lock()
+                .append(LogRecord::new(txn_id, Record::Commit));
+            LogManager::get().lock().commit(lsn)?;
+        }
 
         for page_id in self.locked_pages.get(&txn_id).unwrap().iter() {
             self.bpm
@@ -117,9 +119,12 @@ impl TransactionManager {
     pub fn rollback(&mut self, txn_id: TxnId) -> Result<()> {
         // no fsync needed: an un-synced abort is indistinguishable from a
         // crash mid-txn, and recovery treats both as rolled back
-        LogManager::get()
-            .lock()
-            .append(LogRecord::new(txn_id, Record::Abort));
+
+        if !RECOVERING.load(Ordering::SeqCst) {
+            LogManager::get()
+                .lock()
+                .append(LogRecord::new(txn_id, Record::Abort));
+        }
 
         self.bpm.lock().rollback_txn(txn_id)?;
 

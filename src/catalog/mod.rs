@@ -250,7 +250,7 @@ impl Catalog {
             None => bail!(Error::TableNotFound(table_name.clone())),
         };
 
-        let dup = table?.truncate()?;
+        let dup = table?.truncate(txn)?;
         let tuple_id = self.tables_map.get_mut(Some(txn), table_name).unwrap().0;
         self.tables_map
             .insert(Some(txn), table_name.to_string(), (tuple_id, dup));

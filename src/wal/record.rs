@@ -27,6 +27,7 @@ pub enum Record {
     Operation(RowOperation),
     CreateTable(TableName, Schema),
     DropTable(TableName),
+    Truncate(TableName),
 }
 
 #[derive(Serialize, Deserialize)]

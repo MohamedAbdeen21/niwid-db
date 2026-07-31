@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use crate::buffer_pool::ArcBufferPool;
 use crate::catalog::CATALOG_NAME;
 use crate::errors::Error;
@@ -10,7 +12,7 @@ use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{Str, StrAddr, Types, Value, ValueFactory};
-use crate::wal::manager::LogManager;
+use crate::wal::manager::{LogManager, RECOVERING};
 use crate::wal::record::{LogRecord, Record, RowOperation};
 use anyhow::{bail, ensure, Result};
 
@@ -44,8 +46,10 @@ impl Table {
         schema: &Schema,
         txn: TxnId,
     ) -> Result<Self> {
-        let log_record = LogRecord::new(txn, Record::CreateTable(name.clone(), schema.clone()));
-        LogManager::get().lock().append(log_record);
+        if !RECOVERING.load(Ordering::SeqCst) {
+            let log_record = LogRecord::new(txn, Record::CreateTable(name.clone(), schema.clone()));
+            LogManager::get().lock().append(log_record);
+        }
 
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
 
@@ -65,8 +69,10 @@ impl Table {
     }
 
     pub fn drop(&self, txn: TxnId) {
-        let log_record = LogRecord::new(txn, Record::DropTable(self.name.clone()));
-        LogManager::get().lock().append(log_record);
+        if !RECOVERING.load(Ordering::SeqCst) {
+            let log_record = LogRecord::new(txn, Record::DropTable(self.name.clone()));
+            LogManager::get().lock().append(log_record);
+        }
     }
 
     pub fn fetch(
@@ -393,12 +399,14 @@ impl Table {
 
                 // catalog rows are rebuilt from CreateTable/DropTable records;
                 // logging them too would double-apply on replay
-                if self.name != CATALOG_NAME {
-                    let log_record = LogRecord::new(
-                        txn,
-                        Record::Operation(RowOperation::Insert(self.name.clone(), values)),
-                    );
-                    LogManager::get().lock().append(log_record);
+                if !RECOVERING.load(Ordering::SeqCst) {
+                    if self.name != CATALOG_NAME {
+                        let log_record = LogRecord::new(
+                            txn,
+                            Record::Operation(RowOperation::Insert(self.name.clone(), values)),
+                        );
+                        LogManager::get().lock().append(log_record);
+                    }
                 }
 
                 return Ok(id);
@@ -430,14 +438,16 @@ impl Table {
         let tuple = self.get_tuple(id).unwrap();
 
         if self.name != CATALOG_NAME {
-            let log_record = LogRecord::new(
-                txn,
-                Record::Operation(RowOperation::Delete(
-                    self.name.clone(),
-                    self.get_portable_values(&tuple)?,
-                )),
-            );
-            LogManager::get().lock().append(log_record);
+            if !RECOVERING.load(Ordering::SeqCst) {
+                let log_record = LogRecord::new(
+                    txn,
+                    Record::Operation(RowOperation::Delete(
+                        self.name.clone(),
+                        self.get_portable_values(&tuple)?,
+                    )),
+                );
+                LogManager::get().lock().append(log_record);
+            }
         }
 
         let mut page: TablePage = self
@@ -513,7 +523,12 @@ impl Table {
     }
 
     /// Needs to return a duplicate because of how catalog handles ownership
-    pub fn truncate(&self) -> Result<Table> {
+    pub fn truncate(&self, txn: TxnId) -> Result<Table> {
+        if !RECOVERING.load(Ordering::SeqCst) {
+            let log_record = LogRecord::new(txn, Record::Truncate(self.name.clone()));
+            LogManager::get().lock().append(log_record);
+        }
+
         let first_page = self.bpm.lock().new_page()?.reader().get_page_id();
         let last_page = first_page;
         let index = BPlusTree::new(self.bpm.clone(), self.txn_manager.clone(), self.active_txn);

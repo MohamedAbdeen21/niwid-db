@@ -8,6 +8,7 @@ use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::iter::{empty, Iterator};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::disk_manager::DISK_STORAGE;
@@ -26,6 +27,10 @@ pub type ArcLogManager = Arc<FairMutex<LogManager>>;
 lazy_static! {
     static ref LM: ArcLogManager = Arc::new(FairMutex::new(LogManager::new(DISK_STORAGE)));
 }
+
+/// A global atomic boolean that signals to the system that a recovery is in process
+/// so no methods should attempt to access the LogManager since that may cause a deadlock.
+pub static RECOVERING: AtomicBool = AtomicBool::new(false);
 
 pub struct LogManager {
     handle: File,
@@ -95,7 +100,10 @@ impl LogManager {
             Record::Commit | Record::Abort => {
                 self.prev_lsn.remove(&record.txn_id);
             }
-            Record::Operation(_) | Record::CreateTable(_, _) | Record::DropTable(_) => {
+            Record::Operation(_)
+            | Record::CreateTable(_, _)
+            | Record::DropTable(_)
+            | Record::Truncate(_) => {
                 self.prev_lsn.insert(record.txn_id, record.lsn);
             }
         }
