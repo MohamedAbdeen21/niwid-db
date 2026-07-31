@@ -399,15 +399,14 @@ impl Table {
 
                 // catalog rows are rebuilt from CreateTable/DropTable records;
                 // logging them too would double-apply on replay
-                if !RECOVERING.load(Ordering::SeqCst) {
-                    if self.name != CATALOG_NAME {
+                if !RECOVERING.load(Ordering::SeqCst)
+                    && self.name != CATALOG_NAME {
                         let log_record = LogRecord::new(
                             txn,
                             Record::Operation(RowOperation::Insert(self.name.clone(), values)),
                         );
                         LogManager::get().lock().append(log_record);
                     }
-                }
 
                 return Ok(id);
             }
@@ -437,8 +436,8 @@ impl Table {
 
         let tuple = self.get_tuple(id).unwrap();
 
-        if self.name != CATALOG_NAME {
-            if !RECOVERING.load(Ordering::SeqCst) {
+        if self.name != CATALOG_NAME
+            && !RECOVERING.load(Ordering::SeqCst) {
                 let log_record = LogRecord::new(
                     txn,
                     Record::Operation(RowOperation::Delete(
@@ -448,7 +447,6 @@ impl Table {
                 );
                 LogManager::get().lock().append(log_record);
             }
-        }
 
         let mut page: TablePage = self
             .bpm

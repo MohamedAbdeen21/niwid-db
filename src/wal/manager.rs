@@ -6,7 +6,7 @@ use parking_lot::FairMutex;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::iter::{empty, Iterator};
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -16,7 +16,11 @@ use crate::txn_manager::TxnId;
 use crate::wal::record::{LogRecord, Record};
 use crate::wal::Lsn;
 
-const LOG_NAME: &str = "_WAL";
+#[cfg(test)]
+use std::path::PathBuf;
+
+const LEN_FIELD_SIZE: u64 = 8;
+const CHECKSUM_FIELD_SIZE: u64 = 4;
 
 /// 7 name bytes + 1 format-version byte. Bump the last byte on any
 /// change to the record wire format that isn't an appended enum variant.
@@ -37,6 +41,11 @@ pub struct LogManager {
     prev_lsn: HashMap<TxnId, Lsn>,
     next_lsn: Lsn,
     last_synced_lsn: Lsn,
+    /// iterator cursor
+    cursor: Lsn,
+
+    #[cfg(test)]
+    path: PathBuf,
 }
 
 impl LogManager {
@@ -45,15 +54,17 @@ impl LogManager {
     }
 
     fn new(data_dir: &str) -> Self {
-        let path = Path::new(data_dir);
+        let dir = Path::new(data_dir);
 
-        create_dir_all(path).unwrap_or_else(|_| panic!("Failed to write to {}", path.display()));
+        create_dir_all(dir).unwrap_or_else(|_| panic!("Failed to write to {}", dir.display()));
+
+        let path = dir.join("wal.log");
 
         let mut handle = OpenOptions::new()
             .read(true)
             .append(true)
             .create(true)
-            .open(path.join("wal.log"))
+            .open(&path)
             .expect("Failed to open WAL file");
 
         let len = handle.metadata().expect("Failed to stat WAL file").len();
@@ -84,6 +95,9 @@ impl LogManager {
             // bytes already in the file survived the last process; they
             // need no fsync, so the watermark starts fully caught up
             last_synced_lsn: next_lsn,
+            cursor: MAGIC.len() as Lsn,
+            #[cfg(test)]
+            path,
         }
     }
 
@@ -125,7 +139,7 @@ impl LogManager {
             .expect("Failed to append to WAL");
 
         // len field (u64) + checksum field (u32) + payload
-        self.next_lsn += 8 + 4 + len;
+        self.next_lsn += LEN_FIELD_SIZE + CHECKSUM_FIELD_SIZE + len;
 
         debug_assert_eq!(
             self.next_lsn,
@@ -151,9 +165,61 @@ impl LogManager {
         Ok(self.last_synced_lsn)
     }
 
-    // Repeat all operations starting from a given LSN
-    // used in recovery and adding nodes
-    fn iter_from(&mut self, lsn: Lsn) -> impl Iterator<Item = Record> {
-        empty()
+    pub fn seek_from(&mut self, lsn: Lsn) {
+        self.cursor = lsn;
+    }
+
+    /// None means end of log: clean EOF or a torn tail from a crash
+    /// mid-append; either way, nothing at or past the cursor is trusted
+    pub fn next_record(&mut self) -> Option<LogRecord> {
+        let record_len = &mut [0; LEN_FIELD_SIZE as usize];
+        self.handle.read_exact_at(record_len, self.cursor).ok()?;
+        let record_len = u64::from_be_bytes(*record_len);
+
+        self.cursor += LEN_FIELD_SIZE;
+
+        let checksum = &mut [0; CHECKSUM_FIELD_SIZE as usize];
+        self.handle.read_exact_at(checksum, self.cursor).ok()?;
+        let checksum = u32::from_be_bytes(*checksum);
+
+        self.cursor += CHECKSUM_FIELD_SIZE;
+
+        let mut record = vec![0u8; record_len as usize];
+        self.handle.read_exact_at(&mut record, self.cursor).ok()?;
+
+        self.cursor += record_len;
+
+        let record_checksum = crc32fast::hash(&record);
+        if record_checksum != checksum {
+            // Skip broken record
+            return None;
+        }
+
+        // checksum was checked, we don't expect this to fail
+        let record = bincode::deserialize(&record).expect("Record deserialization somehow failed");
+
+        Some(record)
+    }
+}
+
+#[cfg(test)]
+impl Drop for LogManager {
+    fn drop(&mut self) {
+        // delete only the log file, the dir is shared with the disk
+        // manager's pages; remove_dir only succeeds once the dir is empty
+        use std::fs::{remove_dir, remove_file};
+
+        remove_file(&self.path).unwrap_or_default();
+        remove_dir(self.path.parent().unwrap()).unwrap_or_default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::disk_manager::test_path;
+
+    pub fn test_log_manager() -> LogManager {
+        LogManager::new(&test_path())
     }
 }
