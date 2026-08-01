@@ -5,6 +5,7 @@ use crate::catalog::CATALOG_PAGE;
 use crate::disk_manager::DiskManager;
 #[cfg(debug_assertions)]
 use crate::get_caller_name;
+use crate::pages::traits::Serialize;
 use crate::pages::{Page, PageId, INVALID_PAGE};
 use crate::printdbg;
 use crate::txn_manager::TxnId;
@@ -33,6 +34,11 @@ pub struct BufferPoolManager {
     txn_table: HashMap<TxnId, HashSet<FrameId>>,
 
     replacer: Box<dyn replacer::Replacer>,
+
+    /// Dirty pages leave memory only at a checkpoint: writing one early would
+    /// put the data files past the checkpoint lsn and replay would apply those
+    /// records twice. Only raw pool tests, which have no log above them, opt out.
+    no_steal: bool,
 
     next_page_id: Page,
 }
@@ -73,6 +79,7 @@ impl BufferPoolManager {
             frames,
             page_table: HashMap::new(),
             replacer: Box::new(replacer::LRU::new(size)),
+            no_steal: true,
             disk_manager,
             next_page_id,
             txn_table: HashMap::new(),
@@ -89,12 +96,20 @@ impl BufferPoolManager {
 
     fn find_free_frame(&mut self) -> Result<FrameId> {
         if let Some(frame) = self.free_frames.pop_front() {
-            Ok(frame)
-        } else if self.replacer.can_evict() {
-            Ok(self.evict_frame())
-        } else {
-            Err(anyhow!("no free frames to evict"))
+            return Ok(frame);
         }
+
+        match self.replacer.peek() {
+            Some(id) if self.no_steal && self.frames[id].reader().is_dirty() => {
+                Err(anyhow!("no clean frames to evict, a checkpoint is due"))
+            }
+            Some(_) => Ok(self.evict_frame()),
+            None => Err(anyhow!("no free frames to evict")),
+        }
+    }
+
+    pub fn set_no_steal(&mut self, on: bool) {
+        self.no_steal = on;
     }
 
     pub fn fetch_frame(&mut self, page_id: PageId, txn_id: Option<TxnId>) -> Result<&mut Frame> {
@@ -238,11 +253,17 @@ impl BufferPoolManager {
 
     /// returns the original frame, already pinned
     pub fn shadow_page(&mut self, txn_id: TxnId, page_id: PageId) -> Result<&mut Frame> {
-        let shadowed_page = self.disk_manager.shadow_page(txn_id, page_id)?;
+        // copied from the frame, not the file: under no-force the page on disk
+        // is only as new as the last checkpoint
+        self.fetch_frame(page_id, None)?;
+        let original_frame_id = self.page_table[&page_id];
+        let bytes = self.frames[original_frame_id].reader().to_bytes().to_vec();
 
         let shadow_frame_id = self.find_free_frame()?;
         let shadow_frame = &mut self.frames[shadow_frame_id];
 
+        let mut shadowed_page = Page::from_bytes(&bytes);
+        shadowed_page.set_page_id(page_id);
         shadow_frame.set_page(shadowed_page);
 
         self.txn_table
@@ -250,24 +271,13 @@ impl BufferPoolManager {
             .unwrap()
             .insert(shadow_frame_id);
 
-        // pin original frame to avoid eviction
-        // frames not created through bpm methods (fetch_frame, new_page) are not
-        // evictable by default (require access to be recorded)
-        let original_frame = self.fetch_frame(page_id, None)?;
-
-        Ok(original_frame)
+        Ok(&mut self.frames[original_frame_id])
     }
 
     /// Commit pages marked as touched during the transactions.
     /// locks should be upgraded by the calling txn_manager
     pub fn commit_txn(&mut self, txn_id: TxnId) -> Result<()> {
-        // commit shadowed pages to txn cache, this is for durability and atomicity
-        for shadow_frame_id in self.txn_table.get(&txn_id).unwrap() {
-            let page = self.frames[*shadow_frame_id].writer();
-            self.disk_manager.write_to_file(page, Some(txn_id))?;
-            page.mark_clean();
-        }
-
+        // no-force: the WAL carries durability, pages are written at checkpoints
         self.disk_manager.commit_txn(txn_id)?;
 
         for shadow_frame_id in self.txn_table.get(&txn_id).cloned().unwrap() {

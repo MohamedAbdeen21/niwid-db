@@ -1,7 +1,6 @@
 use crate::errors::Error;
 use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
-use crate::printdbg;
 use crate::txn_manager::TxnId;
 use anyhow::{anyhow, bail, Context, Result};
 use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
@@ -145,29 +144,6 @@ impl DiskManager {
         std::fs::create_dir_all(&txn_cache)?;
 
         Ok(())
-    }
-
-    pub fn shadow_page<T: DiskWritable>(&self, txn_id: TxnId, page_id: PageId) -> Result<T> {
-        printdbg!("DM: shadowing page {page_id} for {txn_id}");
-        let trans_cache = Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string()));
-
-        let to_path = Path::join(Path::new(&trans_cache), Path::new(&page_id.to_string()));
-        let from_path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
-
-        std::fs::copy(&from_path, &to_path)?;
-
-        let mut file = OpenOptions::new()
-            .read(true)
-            .open(to_path)
-            .context("file opened for reading")?;
-
-        let mut buffer = vec![0u8; T::size()];
-        file.read_exact(&mut buffer)
-            .expect("Failed to read buffer from disk");
-        let mut page = T::from_bytes(&buffer);
-        page.set_page_id(page_id);
-
-        Ok(page)
     }
 
     fn txn_dir(&self) -> PathBuf {
@@ -314,44 +290,6 @@ mod tests {
         disk.commit_txn(2)?;
 
         assert!(std::fs::read_dir(disk.txn_dir())?.next().is_none());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_shadow_page() -> Result<()> {
-        let path = test_path();
-        let page_id = 777;
-        let txn_id = 2;
-
-        let disk = DiskManager::new(&path);
-
-        let mut page = Page::new();
-        page.set_page_id(page_id);
-
-        let data = "Hello, World!".as_bytes();
-        let start = 2;
-        let end = data.len() + start;
-        page.write_bytes(start, end, data);
-
-        disk.write_to_file::<Page>(&page, None)?;
-
-        disk.start_txn(txn_id)?;
-
-        let mut shadowed_page = disk.shadow_page::<Page>(txn_id, page_id)?;
-        shadowed_page.write_bytes(end, end + 2, &[100, 50]);
-        disk.write_to_file(&shadowed_page, Some(txn_id))?;
-
-        let read = shadowed_page.read_bytes(start, end);
-
-        assert_eq!(read, data);
-
-        disk.commit_txn(txn_id)?;
-
-        let committed_page = disk.read_from_file::<Page>(page_id)?;
-
-        assert_eq!(committed_page.read_bytes(start, end), data);
-        assert_eq!(committed_page.read_bytes(end, end + 2), [100, 50]);
 
         Ok(())
     }

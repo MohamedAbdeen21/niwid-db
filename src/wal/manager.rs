@@ -26,6 +26,9 @@ const CHECKSUM_FIELD_SIZE: u64 = 4;
 /// change to the record wire format that isn't an appended enum variant.
 const MAGIC: [u8; 8] = *b"NIWIDDB\x01";
 
+/// First byte past the file header: where the first record lives
+pub(crate) const LOG_START: Lsn = MAGIC.len() as Lsn;
+
 pub type ArcLogManager = Arc<LogManagerHandle>;
 
 /// Wraps the manager so the recovery flag is readable without taking the
@@ -190,13 +193,17 @@ impl LogManager {
         Ok(self.last_synced_lsn)
     }
 
-    pub fn seek_from(&mut self, lsn: Lsn) {
+    pub fn next_lsn(&self) -> Lsn {
+        self.next_lsn
+    }
+
+    fn seek_from(&mut self, lsn: Lsn) {
         self.cursor = lsn;
     }
 
     /// None means end of log: clean EOF or a torn tail from a crash
     /// mid-append; either way, nothing at or past the cursor is trusted
-    pub(crate) fn next_record(&mut self) -> Option<LogRecord> {
+    fn next_record(&mut self) -> Option<LogRecord> {
         let record_len = &mut [0; LEN_FIELD_SIZE as usize];
         self.handle.read_exact_at(record_len, self.cursor).ok()?;
         let record_len = u64::from_be_bytes(*record_len);
@@ -224,6 +231,12 @@ impl LogManager {
         let record = deserialize(&record).expect("Record deserialization somehow failed");
 
         Some(record)
+    }
+
+    /// Stops at the first torn or corrupt record
+    pub(crate) fn iter_from(&mut self, from: Lsn) -> impl Iterator<Item = LogRecord> + '_ {
+        self.seek_from(from);
+        std::iter::from_fn(|| self.next_record())
     }
 }
 

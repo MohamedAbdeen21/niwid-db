@@ -1,10 +1,22 @@
+mod recovery;
+
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager, BUFFER_POOL_SIZE};
 use crate::catalog::{ArcCatalog, Catalog};
 use crate::context::Context;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager};
 use crate::wal::manager::{ArcLogManager, LogManagerHandle};
-use parking_lot::{FairMutex, RwLock};
+use anyhow::{Context as _, Result};
+use parking_lot::FairMutex;
+use parking_lot::RwLock;
+use std::fs::{rename, File};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use crate::wal::manager::LOG_START;
+use crate::wal::Lsn;
+
+const CHECKPOINT_FILE: &str = "checkpoint";
 
 pub use crate::disk_manager::DISK_STORAGE;
 
@@ -12,13 +24,13 @@ pub use crate::disk_manager::DISK_STORAGE;
 /// dir. Nothing in the engine is process-global, so a process can host
 /// several instances (parallel tests, in-process clusters).
 pub struct Engine {
-    // read by recovery and checkpoints, both landing next
+    // read by checkpoints, landing next
     #[allow(dead_code)]
     pub(crate) bpm: ArcBufferPool,
     pub(crate) txn_manager: ArcTransactionManager,
     pub(crate) catalog: ArcCatalog,
-    #[allow(dead_code)]
     pub(crate) log_manager: ArcLogManager,
+    data_dir: PathBuf,
 }
 
 impl Engine {
@@ -39,15 +51,50 @@ impl Engine {
             log_manager.clone(),
         )));
 
-        Engine {
+        let engine = Engine {
             bpm,
             txn_manager,
             catalog,
             log_manager,
-        }
+            data_dir: Path::new(data_dir).to_path_buf(),
+        };
+
+        engine.recover().expect("Recovery failed");
+
+        engine
     }
 
     pub fn context(&self) -> Context {
         Context::new(self.catalog.clone(), self.txn_manager.clone())
+    }
+
+    /// Everything the log holds up to this lsn is already in the data files
+    pub(crate) fn checkpoint_lsn(&self) -> Lsn {
+        let mut bytes = [0u8; 8];
+
+        let read = File::open(self.data_dir.join(CHECKPOINT_FILE))
+            .and_then(|mut file| file.read_exact(&mut bytes));
+
+        match read {
+            Ok(()) => u64::from_be_bytes(bytes),
+            Err(_) => LOG_START,
+        }
+    }
+
+    /// Writes every dirty page out, then records how far the log is covered.
+    pub fn checkpoint(&self) -> Result<()> {
+        let lsn = self.log_manager.lock().next_lsn();
+
+        self.bpm.lock().flush(None)?;
+
+        let temp = self.data_dir.join(format!("{CHECKPOINT_FILE}.tmp"));
+        let mut file = File::create(&temp).context("Failed to create checkpoint file")?;
+        file.write_all(&lsn.to_be_bytes())?;
+        file.sync_all()?;
+
+        rename(temp, self.data_dir.join(CHECKPOINT_FILE))
+            .context("Failed to install checkpoint file")?;
+
+        Ok(())
     }
 }

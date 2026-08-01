@@ -326,6 +326,8 @@ mod tests {
 
     fn setup_bplus_tree() -> BPlusTree {
         let bpm = test_arc_bpm(5);
+        // no log above these, and the height-3 test needs more pages than frames
+        bpm.lock().set_no_steal(false);
         let txn_manager = test_arc_transaction_manager(bpm.clone());
         BPlusTree::new(bpm, txn_manager, None)
     }

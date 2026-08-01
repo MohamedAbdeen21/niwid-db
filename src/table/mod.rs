@@ -471,6 +471,29 @@ impl Table {
         Ok(())
     }
 
+    /// Locates a row by content: unique index if there is one, else a scan
+    pub fn find_by_values(&self, values: &[Value]) -> Result<Option<TupleId>> {
+        if let Some(col) = self.get_unique_column_id() {
+            let key = values[col as usize].as_u32();
+            return Ok(self
+                .index
+                .as_ref()
+                .and_then(|i| i.search(self.active_txn, key)));
+        }
+
+        let mut found = None;
+
+        self.scan(self.active_txn, |(id, (_, tuple))| {
+            if found.is_none() && self.get_portable_values(tuple)?.as_slice() == values {
+                found = Some(*id);
+            }
+
+            Ok(())
+        })?;
+
+        Ok(found)
+    }
+
     #[inline]
     fn get_unique_column_id(&self) -> Option<u8> {
         self.schema
@@ -607,7 +630,7 @@ mod tests {
             Field::new("age", Types::UInt, Constraints::nullable(false)),
         ]);
 
-        let mut table = test_table(2, &schema)?;
+        let mut table = test_table(3, &schema)?;
 
         let bpm = table.bpm.clone();
 
@@ -690,7 +713,7 @@ mod tests {
             Field::new("b", Types::UInt, Constraints::nullable(false)),
         ]);
 
-        let mut table = test_table(4, &schema)?;
+        let mut table = test_table(5, &schema)?;
 
         let txn = begin(&mut table)?;
         table.insert(vec![lit!(UInt, "100")?, lit!(Str, s1)?, lit!(UInt, "50")?])?;
@@ -721,7 +744,7 @@ mod tests {
             Field::new("s2", Types::Str, Constraints::nullable(false)),
         ]);
 
-        let mut table = test_table(4, &schema)?;
+        let mut table = test_table(5, &schema)?;
 
         let txn = begin(&mut table)?;
         table.insert(vec![lit!(Str, s1)?, lit!(UInt, "100")?, lit!(Str, s2)?])?;
@@ -750,7 +773,7 @@ mod tests {
             Field::new("c", Types::Int, Constraints::nullable(false)),
         ]);
 
-        let mut table = test_table(4, &schema)?;
+        let mut table = test_table(3, &schema)?;
 
         let txn = begin(&mut table)?;
 
@@ -797,7 +820,7 @@ mod tests {
             Field::new("c", Types::Int, Constraints::nullable(true)),
         ]);
 
-        let mut table = test_table(4, &schema)?;
+        let mut table = test_table(5, &schema)?;
 
         let txn = begin(&mut table)?;
         table.insert(vec![Value::Null, Value::Null, Value::Null])?;
@@ -829,7 +852,7 @@ mod tests {
             Constraints::nullable(false),
         )]);
 
-        let mut table = test_table(4, &schema)?;
+        let mut table = test_table(1, &schema)?;
 
         begin(&mut table)?;
         assert!(table.insert(vec![Value::Null]).is_err());
@@ -844,7 +867,7 @@ mod tests {
             Field::new("b", Types::UInt, Constraints::nullable(false)),
         ]);
 
-        let mut table = test_table(5, &schema)?;
+        let mut table = test_table(4, &schema)?;
 
         let txn = begin(&mut table)?;
 

@@ -8,10 +8,8 @@ use super::FrameId;
 pub(super) trait Replacer: Send + Sync + Debug {
     fn record_access(&mut self, frame_id: FrameId);
     fn set_evictable(&mut self, frame_id: FrameId, evictable: bool);
-    fn can_evict(&self) -> bool;
     fn remove(&mut self, frame_id: FrameId);
     fn evict(&mut self) -> FrameId;
-    #[cfg(test)]
     fn peek(&self) -> Option<FrameId>;
 }
 
@@ -59,10 +57,6 @@ impl Replacer for LRU {
     /// Check if a frame can be evicted
     /// Must check before calling [`self.evict`]
     /// as evict just unwraps the value
-    fn can_evict(&self) -> bool {
-        !self.heap.is_empty()
-    }
-
     /// Frame is tracked by the BPM, remove from replacer
     fn remove(&mut self, frame_id: FrameId) {
         self.heap.remove(&frame_id);
@@ -76,7 +70,6 @@ impl Replacer for LRU {
         self.heap.pop().unwrap().0
     }
 
-    #[cfg(test)]
     fn peek(&self) -> Option<FrameId> {
         self.heap.peek().map(|(frame_id, _)| *frame_id)
     }
@@ -97,11 +90,10 @@ mod tests {
         assert_eq!(replacer.peek(), Some(1));
         replacer.record_access(1);
         // no evictable
-        assert!(!replacer.can_evict());
         assert!(replacer.peek().is_none());
         replacer.record_access(2);
         replacer.set_evictable(3, true);
-        assert!(replacer.can_evict());
+        assert!(replacer.peek().is_some());
         replacer.set_evictable(2, true);
         replacer.set_evictable(1, true);
         assert_eq!(replacer.evict(), 3);

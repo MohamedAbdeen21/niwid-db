@@ -108,7 +108,7 @@ mod tests {
             Field::new("id", Types::UInt, Constraints::nullable(false)),
             Field::new("age", Types::UInt, Constraints::nullable(false)),
         ]);
-        let mut table = test_table(4, &schema)?;
+        let mut table = test_table(3, &schema)?;
 
         let txn = begin(&mut table)?;
 
@@ -145,7 +145,7 @@ mod tests {
 
         let tuples_per_page = PAGE_END / (META_SIZE + SLOT_SIZE + 8);
 
-        let mut table = test_table(4, &schema)?;
+        let mut table = test_table(5, &schema)?;
 
         let txn = begin(&mut table)?;
 
@@ -168,8 +168,8 @@ mod tests {
             .reader()
             .into();
 
-        // committed frames were just written to disk, so they load clean
-        assert!(!first_page.is_dirty());
+        // no-force: committing does not write the page, a checkpoint does
+        assert!(first_page.is_dirty());
 
         table.bpm.lock().unpin(&table.first_page, None);
 
