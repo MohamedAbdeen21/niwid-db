@@ -11,9 +11,11 @@ use crate::sql::logical_plan::plan::{
     Truncate, Union, Update, Values,
 };
 use crate::sql::logical_plan::plan::{Explain, Projection};
+use crate::table::Table;
 use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::TupleId;
+use crate::txn_manager::TxnId;
 use crate::types::Types;
 use crate::types::Value;
 use crate::types::ValueFactory;
@@ -80,42 +82,67 @@ impl Executable for Limit {
     }
 }
 
+/// TupleId lives in the first two columns of a Scan result
+fn tuple_id_of(row: &[Value]) -> TupleId {
+    (row[0].u32(), row[1].u32() as u16)
+}
+
+/// Shared skeleton for row-mutating statements: run the input plan, keep the
+/// rows the selection matches, then apply `f` to each one.
+fn for_each_selected_row<F>(
+    ctx: &mut Context,
+    table_name: &str,
+    txn_id: TxnId,
+    input_plan: &LogicalPlan,
+    selection: &LogicalExpr,
+    mut f: F,
+) -> Result<usize>
+where
+    F: FnMut(&mut Table, &[Value], &ResultSet) -> Result<()>,
+{
+    let input = input_plan.execute(ctx)?;
+
+    let (_, mask) = selection.evaluate(&input)?;
+
+    let selected_rows = input
+        .rows()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
+        .collect::<Vec<_>>();
+
+    let c = ctx.get_catalog();
+    let mut catalog = c.write();
+
+    let table = catalog
+        .get_table_mut(table_name, Some(txn_id))
+        .ok_or(Error::TableNotFound(table_name.to_string()))??;
+
+    table.start_txn(txn_id)?;
+
+    for row in selected_rows.iter() {
+        f(table, row, &input)?;
+    }
+
+    Ok(selected_rows.len())
+}
+
 impl Executable for Delete {
     fn execute(&self, ctx: &mut Context) -> Result<ResultSet> {
         let txn_id = ctx.get_active_txn().ok_or(Error::Internal(
             "DELETE requires an active transaction".into(),
         ))?;
 
-        let input = self.input.execute(ctx)?;
+        let count = for_each_selected_row(
+            ctx,
+            &self.table_name,
+            txn_id,
+            &self.input,
+            &self.selection,
+            |table, row, _| table.delete(tuple_id_of(row)),
+        )?;
 
-        let c = ctx.get_catalog();
-        let mut catalog = c.write();
-
-        let table = catalog
-            .get_table_mut(&self.table_name, Some(txn_id))
-            .ok_or(Error::TableNotFound(self.table_name.clone()))??;
-
-        let (_, mask) = self.selection.evaluate(&input)?;
-
-        let selected_rows = input
-            .rows()
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
-            .collect::<Vec<_>>();
-
-        table.start_txn(txn_id)?;
-
-        for row in selected_rows.iter() {
-            let tuple_id = (row[0].u32(), row[1].u32() as u16);
-
-            table.delete(tuple_id)?;
-        }
-
-        Ok(ResultSet::with_info(format!(
-            "Deleted {} rows",
-            selected_rows.len()
-        )))
+        Ok(ResultSet::with_info(format!("Deleted {count} rows")))
     }
 }
 
@@ -249,21 +276,14 @@ impl Executable for Update {
             "UPDATE requires an active transaction".into(),
         ))?;
 
-        let input = self.input.execute(ctx)?;
-
-        let c = ctx.get_catalog();
-        let mut catalog = c.write();
-
-        let table = catalog
-            .get_table_mut(&self.table_name, Some(txn_id))
-            .ok_or(Error::TableNotFound(self.table_name.clone()))??;
-
-        let (_, mask) = self.selection.evaluate(&input)?;
-
         let (selected_cols, exprs): (Vec<String>, Vec<_>) =
             self.assignments.iter().cloned().unzip();
 
-        let schema = table.get_schema();
+        let schema = ctx
+            .get_catalog()
+            .read()
+            .get_schema(&self.table_name, Some(txn_id))
+            .ok_or(Error::TableNotFound(self.table_name.clone()))?;
 
         let updated_cols_ids = selected_cols
             .into_iter()
@@ -276,33 +296,28 @@ impl Executable for Update {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let selected_rows = input
-            .rows()
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, row)| mask[i].is_truthy().then_some(row))
-            .collect::<Vec<_>>();
+        let count = for_each_selected_row(
+            ctx,
+            &self.table_name,
+            txn_id,
+            &self.input,
+            &self.selection,
+            |table, row, input| {
+                let mut new_tuple = row[2..].to_vec();
 
-        table.start_txn(txn_id)?;
-
-        for row in selected_rows.iter() {
-            let tuple_id = (row[0].u32(), row[1].u32() as u16);
-
-            let mut new_tuple = row[2..].to_vec();
-
-            for (updated_col_id, expr) in updated_cols_ids.iter().zip(exprs.iter()) {
-                for value in expr.evaluate(&input)?.1 {
-                    new_tuple[*updated_col_id] = value;
+                for (updated_col_id, expr) in updated_cols_ids.iter().zip(exprs.iter()) {
+                    for value in expr.evaluate(input)?.1 {
+                        new_tuple[*updated_col_id] = value;
+                    }
                 }
-            }
 
-            table.update(Some(tuple_id), new_tuple)?;
-        }
+                table.update(Some(tuple_id_of(row)), new_tuple)?;
 
-        Ok(ResultSet::with_info(format!(
-            "Updated {} rows",
-            selected_rows.len()
-        )))
+                Ok(())
+            },
+        )?;
+
+        Ok(ResultSet::with_info(format!("Updated {count} rows")))
     }
 }
 
