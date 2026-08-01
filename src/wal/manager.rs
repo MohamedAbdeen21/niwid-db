@@ -1,6 +1,8 @@
 #![allow(dead_code, unused_variables)]
 
 use anyhow::{Context, Result};
+use bincode::{deserialize, serialize};
+use crc32fast::hash;
 use lazy_static::lazy_static;
 use parking_lot::FairMutex;
 use std::collections::HashMap;
@@ -56,7 +58,7 @@ impl LogManager {
     fn new(data_dir: &str) -> Self {
         let dir = Path::new(data_dir);
 
-        create_dir_all(dir).unwrap_or_else(|_| panic!("Failed to write to {}", dir.display()));
+        create_dir_all(dir).unwrap_or_else(|e| panic!("Failed to write to {}: {e}", dir.display()));
 
         let path = dir.join("wal.log");
 
@@ -105,26 +107,33 @@ impl LogManager {
         todo!()
     }
 
-    pub fn append(&mut self, mut record: LogRecord) -> Lsn {
-        record.lsn = self.next_lsn;
-        record.prev_lsn = self.prev_lsn.get(&record.txn_id).copied().unwrap_or(0);
+    pub fn append(&mut self, txn_id: TxnId, record_type: Record) -> Lsn {
+        let lsn = self.next_lsn;
+        let prev_lsn = self.prev_lsn.get(&txn_id).copied().unwrap_or(0);
 
-        match record.record_type {
+        match record_type {
             // txn is over; drop its chain head so the map only tracks live txns
             Record::Commit | Record::Abort => {
-                self.prev_lsn.remove(&record.txn_id);
+                self.prev_lsn.remove(&txn_id);
             }
             Record::Operation(_)
             | Record::CreateTable(_, _)
             | Record::DropTable(_)
             | Record::Truncate(_) => {
-                self.prev_lsn.insert(record.txn_id, record.lsn);
+                self.prev_lsn.insert(txn_id, lsn);
             }
         }
 
-        let serialized = bincode::serialize(&record).unwrap();
+        let record = LogRecord {
+            lsn,
+            prev_lsn,
+            txn_id,
+            record_type,
+        };
+
+        let serialized = serialize(&record).unwrap();
         let len = serialized.len() as u64;
-        let checksum = crc32fast::hash(&serialized);
+        let checksum = hash(&serialized);
 
         let buf: Vec<u8> = len
             .to_be_bytes()
@@ -147,7 +156,7 @@ impl LogManager {
             "next_lsn drifted from the real file length"
         );
 
-        record.lsn
+        lsn
     }
 
     pub fn commit(&mut self, lsn: Lsn) -> Result<Lsn> {
@@ -189,14 +198,14 @@ impl LogManager {
 
         self.cursor += record_len;
 
-        let record_checksum = crc32fast::hash(&record);
+        let record_checksum = hash(&record);
         if record_checksum != checksum {
             // Skip broken record
             return None;
         }
 
         // checksum was checked, we don't expect this to fail
-        let record = bincode::deserialize(&record).expect("Record deserialization somehow failed");
+        let record = deserialize(&record).expect("Record deserialization somehow failed");
 
         Some(record)
     }
@@ -218,8 +227,58 @@ impl Drop for LogManager {
 mod tests {
     use super::*;
     use crate::disk_manager::test_path;
+    use crate::lit;
+    use crate::types::Types;
+    use crate::types::ValueFactory;
+    use crate::wal::record::RowOperation;
 
     pub fn test_log_manager() -> LogManager {
         LogManager::new(&test_path())
+    }
+
+    #[test]
+    fn test_append_advances_next_lsn() -> Result<()> {
+        let mut lm = test_log_manager();
+        let next_lsn = lm.next_lsn;
+        lm.append(
+            0,
+            Record::Operation(RowOperation::Insert("test".into(), vec![lit!(Int, "30")?])),
+        );
+
+        assert_ne!(next_lsn, lm.next_lsn);
+
+        Ok(())
+    }
+
+    #[test]
+    fn one_record_roundtrip() -> Result<()> {
+        let mut lm = test_log_manager();
+        let record_type =
+            Record::Operation(RowOperation::Insert("test".into(), vec![lit!(Int, "30")?]));
+        let lsn = lm.append(0, record_type.clone());
+        lm.commit(lm.next_lsn)?;
+
+        let path = lm.path.clone();
+        let dir = path.parent().unwrap().to_str().unwrap();
+        let mut new_lm = LogManager::new(dir);
+
+        let expected = LogRecord {
+            lsn,
+            prev_lsn: 0,
+            txn_id: 0,
+            record_type,
+        };
+
+        assert_eq!(
+            serialize(
+                &new_lm
+                    .next_record()
+                    .expect("expected LM to produce a record")
+            )
+            .unwrap(),
+            serialize(&expected).unwrap(),
+        );
+
+        Ok(())
     }
 }

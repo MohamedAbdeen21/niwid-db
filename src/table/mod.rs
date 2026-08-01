@@ -13,7 +13,7 @@ use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{Str, StrAddr, Types, Value, ValueFactory};
 use crate::wal::manager::{LogManager, RECOVERING};
-use crate::wal::record::{LogRecord, Record, RowOperation};
+use crate::wal::record::{Record, RowOperation};
 use anyhow::{bail, ensure, Result};
 
 pub mod table_iterator;
@@ -47,8 +47,9 @@ impl Table {
         txn: TxnId,
     ) -> Result<Self> {
         if !RECOVERING.load(Ordering::SeqCst) {
-            let log_record = LogRecord::new(txn, Record::CreateTable(name.clone(), schema.clone()));
-            LogManager::get().lock().append(log_record);
+            LogManager::get()
+                .lock()
+                .append(txn, Record::CreateTable(name.clone(), schema.clone()));
         }
 
         let page_id = bpm.lock().new_page()?.reader().get_page_id();
@@ -70,8 +71,9 @@ impl Table {
 
     pub fn drop(&self, txn: TxnId) {
         if !RECOVERING.load(Ordering::SeqCst) {
-            let log_record = LogRecord::new(txn, Record::DropTable(self.name.clone()));
-            LogManager::get().lock().append(log_record);
+            LogManager::get()
+                .lock()
+                .append(txn, Record::DropTable(self.name.clone()));
         }
     }
 
@@ -399,14 +401,12 @@ impl Table {
 
                 // catalog rows are rebuilt from CreateTable/DropTable records;
                 // logging them too would double-apply on replay
-                if !RECOVERING.load(Ordering::SeqCst)
-                    && self.name != CATALOG_NAME {
-                        let log_record = LogRecord::new(
-                            txn,
-                            Record::Operation(RowOperation::Insert(self.name.clone(), values)),
-                        );
-                        LogManager::get().lock().append(log_record);
-                    }
+                if !RECOVERING.load(Ordering::SeqCst) && self.name != CATALOG_NAME {
+                    LogManager::get().lock().append(
+                        txn,
+                        Record::Operation(RowOperation::Insert(self.name.clone(), values)),
+                    );
+                }
 
                 return Ok(id);
             }
@@ -436,17 +436,15 @@ impl Table {
 
         let tuple = self.get_tuple(id).unwrap();
 
-        if self.name != CATALOG_NAME
-            && !RECOVERING.load(Ordering::SeqCst) {
-                let log_record = LogRecord::new(
-                    txn,
-                    Record::Operation(RowOperation::Delete(
-                        self.name.clone(),
-                        self.get_portable_values(&tuple)?,
-                    )),
-                );
-                LogManager::get().lock().append(log_record);
-            }
+        if self.name != CATALOG_NAME && !RECOVERING.load(Ordering::SeqCst) {
+            LogManager::get().lock().append(
+                txn,
+                Record::Operation(RowOperation::Delete(
+                    self.name.clone(),
+                    self.get_portable_values(&tuple)?,
+                )),
+            );
+        }
 
         let mut page: TablePage = self
             .bpm
@@ -523,8 +521,9 @@ impl Table {
     /// Needs to return a duplicate because of how catalog handles ownership
     pub fn truncate(&self, txn: TxnId) -> Result<Table> {
         if !RECOVERING.load(Ordering::SeqCst) {
-            let log_record = LogRecord::new(txn, Record::Truncate(self.name.clone()));
-            LogManager::get().lock().append(log_record);
+            LogManager::get()
+                .lock()
+                .append(txn, Record::Truncate(self.name.clone()));
         }
 
         let first_page = self.bpm.lock().new_page()?.reader().get_page_id();

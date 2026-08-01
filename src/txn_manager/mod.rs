@@ -9,7 +9,7 @@ use parking_lot::FairMutex;
 use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
 use crate::pages::PageId;
 use crate::wal::manager::{LogManager, RECOVERING};
-use crate::wal::record::{LogRecord, Record};
+use crate::wal::record::Record;
 
 pub type TxnId = u64;
 
@@ -85,9 +85,7 @@ impl TransactionManager {
         // durable before visible: the txn only counts as committed once its
         // COMMIT record is synced; only then may the swap publish its writes
         if !RECOVERING.load(Ordering::SeqCst) {
-            let lsn = LogManager::get()
-                .lock()
-                .append(LogRecord::new(txn_id, Record::Commit));
+            let lsn = LogManager::get().lock().append(txn_id, Record::Commit);
             LogManager::get().lock().commit(lsn)?;
         }
 
@@ -121,9 +119,7 @@ impl TransactionManager {
         // crash mid-txn, and recovery treats both as rolled back
 
         if !RECOVERING.load(Ordering::SeqCst) {
-            LogManager::get()
-                .lock()
-                .append(LogRecord::new(txn_id, Record::Abort));
+            LogManager::get().lock().append(txn_id, Record::Abort);
         }
 
         self.bpm.lock().rollback_txn(txn_id)?;
