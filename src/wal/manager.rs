@@ -212,6 +212,16 @@ impl LogManager {
 }
 
 #[cfg(test)]
+impl LogManager {
+    /// Create a second LogManager to similuate recovery after crash
+    fn duplicate(&self) -> LogManager {
+        let path = self.path.clone();
+        let dir = path.parent().unwrap().to_str().unwrap();
+        LogManager::new(dir)
+    }
+}
+
+#[cfg(test)]
 impl Drop for LogManager {
     fn drop(&mut self) {
         // delete only the log file, the dir is shared with the disk
@@ -236,14 +246,18 @@ mod tests {
         LogManager::new(&test_path())
     }
 
+    fn dummy_record(int: i32) -> Record {
+        Record::Operation(RowOperation::Insert(
+            "test".into(),
+            vec![lit!(Int, format!("{int}")).unwrap()],
+        ))
+    }
+
     #[test]
     fn test_append_advances_next_lsn() -> Result<()> {
         let mut lm = test_log_manager();
         let next_lsn = lm.next_lsn;
-        lm.append(
-            0,
-            Record::Operation(RowOperation::Insert("test".into(), vec![lit!(Int, "30")?])),
-        );
+        lm.append(0, dummy_record(30));
 
         assert_ne!(next_lsn, lm.next_lsn);
 
@@ -255,17 +269,15 @@ mod tests {
         let mut lm = test_log_manager();
         let record_type =
             Record::Operation(RowOperation::Insert("test".into(), vec![lit!(Int, "30")?]));
-        let lsn = lm.append(0, record_type.clone());
+        let lsn = lm.append(10, record_type.clone());
         lm.commit(lm.next_lsn)?;
 
-        let path = lm.path.clone();
-        let dir = path.parent().unwrap().to_str().unwrap();
-        let mut new_lm = LogManager::new(dir);
+        let mut new_lm = lm.duplicate();
 
         let expected = LogRecord {
             lsn,
             prev_lsn: 0,
-            txn_id: 0,
+            txn_id: 10,
             record_type,
         };
 
@@ -277,6 +289,56 @@ mod tests {
             )
             .unwrap(),
             serialize(&expected).unwrap(),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn torn_record() -> Result<()> {
+        let mut lm = test_log_manager();
+
+        let r1 = dummy_record(10);
+        let r2 = dummy_record(20);
+        let lsn1 = lm.append(1, r1.clone());
+        let lsn2 = lm.append(2, r2.clone());
+
+        lm.handle.write_all(b"garbage").unwrap();
+
+        let mut new_lm = lm.duplicate();
+
+        let e1 = LogRecord {
+            lsn: lsn1,
+            prev_lsn: 0,
+            txn_id: 1,
+            record_type: r1,
+        };
+
+        let e2 = LogRecord {
+            lsn: lsn2,
+            prev_lsn: 0,
+            txn_id: 2,
+            record_type: r2,
+        };
+
+        assert_eq!(
+            serialize(
+                &new_lm
+                    .next_record()
+                    .expect("expected LM to produce a record")
+            )
+            .unwrap(),
+            serialize(&e1).unwrap()
+        );
+
+        assert_eq!(
+            serialize(
+                &new_lm
+                    .next_record()
+                    .expect("expected LM to produce a record")
+            )
+            .unwrap(),
+            serialize(&e2).unwrap()
         );
 
         Ok(())

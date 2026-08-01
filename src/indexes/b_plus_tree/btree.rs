@@ -320,7 +320,7 @@ mod tests {
     use crate::buffer_pool::tests::test_arc_bpm;
     use crate::pages::indexes::b_plus_tree::KEYS_PER_NODE;
     use crate::txn_manager::tests::test_arc_transaction_manager;
-    use anyhow::{bail, Result};
+    use anyhow::Result;
     use rand::seq::SliceRandom;
     use rand::thread_rng;
 
@@ -494,13 +494,8 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore = "slow in debug mode, run with --release")]
     fn test_insert_and_verify_height_three_tree() -> Result<()> {
-        if cfg!(debug_assertions) {
-            bail!(
-                "Skipping this test as it is slow in debug mode. Consider running in release mode"
-            );
-        }
-
         let mut btree = setup_bplus_tree();
 
         // Insert keys up to height 3 threshold
