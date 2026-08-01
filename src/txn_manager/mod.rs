@@ -3,12 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use lazy_static::lazy_static;
 use parking_lot::FairMutex;
 
-use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
+use crate::buffer_pool::ArcBufferPool;
 use crate::pages::PageId;
-use crate::wal::manager::{LogManager, RECOVERING};
+use crate::wal::manager::ArcLogManager;
 use crate::wal::record::Record;
 
 pub type TxnId = u64;
@@ -16,26 +15,18 @@ pub type TxnId = u64;
 pub struct TransactionManager {
     next_txn_id: AtomicU64,
     bpm: ArcBufferPool,
+    lm: ArcLogManager,
     locked_pages: HashMap<TxnId, Vec<PageId>>,
 }
 
 pub type ArcTransactionManager = Arc<FairMutex<TransactionManager>>;
 
-lazy_static! {
-    static ref TM: ArcTransactionManager = Arc::new(FairMutex::new(TransactionManager::new(
-        BufferPoolManager::get()
-    )));
-}
-
 impl TransactionManager {
-    pub fn get() -> ArcTransactionManager {
-        TM.clone()
-    }
-
-    pub fn new(bpm: ArcBufferPool) -> Self {
+    pub fn new(bpm: ArcBufferPool, lm: ArcLogManager) -> Self {
         Self {
             next_txn_id: AtomicU64::new(0),
             bpm,
+            lm,
             locked_pages: HashMap::new(),
         }
     }
@@ -84,9 +75,9 @@ impl TransactionManager {
     pub fn commit(&mut self, txn_id: TxnId) -> Result<()> {
         // durable before visible: the txn only counts as committed once its
         // COMMIT record is synced; only then may the swap publish its writes
-        if !RECOVERING.load(Ordering::SeqCst) {
-            let lsn = LogManager::get().lock().append(txn_id, Record::Commit);
-            LogManager::get().lock().commit(lsn)?;
+        if !self.lm.recovering() {
+            let lsn = self.lm.lock().append(txn_id, Record::Commit);
+            self.lm.lock().commit(lsn)?;
         }
 
         for page_id in self.locked_pages.get(&txn_id).unwrap().iter() {
@@ -118,8 +109,8 @@ impl TransactionManager {
         // no fsync needed: an un-synced abort is indistinguishable from a
         // crash mid-txn, and recovery treats both as rolled back
 
-        if !RECOVERING.load(Ordering::SeqCst) {
-            LogManager::get().lock().append(txn_id, Record::Abort);
+        if !self.lm.recovering() {
+            self.lm.lock().append(txn_id, Record::Abort);
         }
 
         self.bpm.lock().rollback_txn(txn_id)?;
@@ -143,6 +134,12 @@ pub mod tests {
     use super::*;
 
     pub fn test_arc_transaction_manager(bpm: ArcBufferPool) -> ArcTransactionManager {
-        Arc::new(FairMutex::new(TransactionManager::new(bpm)))
+        use crate::disk_manager::test_path;
+        use crate::wal::manager::LogManager;
+
+        Arc::new(FairMutex::new(TransactionManager::new(
+            bpm,
+            LogManager::new(&test_path()),
+        )))
     }
 }

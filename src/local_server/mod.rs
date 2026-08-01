@@ -1,4 +1,5 @@
 use crate::context::Context;
+use crate::engine::Engine;
 use crate::printdbg;
 use anyhow::Result;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,17 +13,18 @@ use tokio::net::TcpStream;
 pub async fn entry() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     let next_client_id = Arc::new(AtomicUsize::new(1));
+    let engine = Arc::new(Engine::new(crate::engine::DISK_STORAGE));
 
     loop {
         let (socket, _) = listener.accept().await?;
         let client_id = next_client_id.fetch_add(1, Ordering::SeqCst);
 
-        tokio::spawn(handle_client(socket, client_id));
+        tokio::spawn(handle_client(socket, client_id, engine.clone()));
     }
 }
 
-async fn handle_client(socket: TcpStream, client_id: usize) {
-    let mut ctx = Context::default();
+async fn handle_client(socket: TcpStream, client_id: usize, engine: Arc<Engine>) {
+    let mut ctx = engine.context();
     let (reader, mut writer) = socket.into_split();
 
     let mut reader = BufReader::new(reader);

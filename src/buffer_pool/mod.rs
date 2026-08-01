@@ -2,7 +2,7 @@ mod frame;
 mod replacer;
 
 use crate::catalog::CATALOG_PAGE;
-use crate::disk_manager::{DiskManager, DISK_STORAGE};
+use crate::disk_manager::DiskManager;
 #[cfg(debug_assertions)]
 use crate::get_caller_name;
 use crate::pages::{Page, PageId, INVALID_PAGE};
@@ -10,13 +10,12 @@ use crate::printdbg;
 use crate::txn_manager::TxnId;
 use anyhow::{anyhow, Result};
 use frame::Frame;
-use lazy_static::lazy_static;
 use parking_lot::FairMutex;
 use std::collections::{HashMap, HashSet, LinkedList};
 use std::mem::take;
 use std::sync::Arc;
 
-const BUFFER_POOL_SIZE: usize = 10_000;
+pub(crate) const BUFFER_POOL_SIZE: usize = 10_000;
 const BUFFER_POOL_PAGE: PageId = 1;
 // 0 is the invalid page, 1 is for bpm, 2 is for catalog
 const STARTING_PAGE_ID: PageId = 3;
@@ -39,10 +38,6 @@ pub struct BufferPoolManager {
 }
 
 impl BufferPoolManager {
-    pub fn get() -> ArcBufferPool {
-        BUFFER_POOL.clone()
-    }
-
     #[cfg(test)]
     pub fn inspect(&self) {
         println!("Free Frames: {:?}", self.free_frames);
@@ -349,13 +344,6 @@ impl BufferPoolManager {
                 self.disk_manager.write_to_file(p, None)
             })
     }
-}
-
-lazy_static! {
-    static ref BUFFER_POOL: ArcBufferPool = Arc::new(FairMutex::new(BufferPoolManager::new(
-        BUFFER_POOL_SIZE,
-        DISK_STORAGE
-    )));
 }
 
 /// static items are never dropped, this is mainly for testing

@@ -1,6 +1,7 @@
 mod buffer_pool;
 mod catalog;
 mod disk_manager;
+pub mod engine;
 mod errors;
 mod indexes;
 mod latch;

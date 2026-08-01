@@ -3,17 +3,15 @@
 use anyhow::{Context, Result};
 use bincode::{deserialize, serialize};
 use crc32fast::hash;
-use lazy_static::lazy_static;
-use parking_lot::FairMutex;
+use parking_lot::{FairMutex, FairMutexGuard};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::disk_manager::DISK_STORAGE;
 use crate::txn_manager::TxnId;
 use crate::wal::record::{LogRecord, Record};
 use crate::wal::Lsn;
@@ -28,15 +26,28 @@ const CHECKSUM_FIELD_SIZE: u64 = 4;
 /// change to the record wire format that isn't an appended enum variant.
 const MAGIC: [u8; 8] = *b"NIWIDDB\x01";
 
-pub type ArcLogManager = Arc<FairMutex<LogManager>>;
+pub type ArcLogManager = Arc<LogManagerHandle>;
 
-lazy_static! {
-    static ref LM: ArcLogManager = Arc::new(FairMutex::new(LogManager::new(DISK_STORAGE)));
+/// Wraps the manager so the recovery flag is readable without taking the
+/// lock: replay holds the mutex while call sites must check the flag first.
+pub struct LogManagerHandle {
+    inner: FairMutex<LogManager>,
+    recovering: AtomicBool,
 }
 
-/// A global atomic boolean that signals to the system that a recovery is in process
-/// so no methods should attempt to access the LogManager since that may cause a deadlock.
-pub static RECOVERING: AtomicBool = AtomicBool::new(false);
+impl LogManagerHandle {
+    pub fn lock(&self) -> FairMutexGuard<'_, LogManager> {
+        self.inner.lock()
+    }
+
+    pub fn recovering(&self) -> bool {
+        self.recovering.load(Ordering::Relaxed)
+    }
+
+    pub fn set_recovering(&self, on: bool) {
+        self.recovering.store(on, Ordering::Relaxed);
+    }
+}
 
 pub struct LogManager {
     handle: File,
@@ -51,11 +62,14 @@ pub struct LogManager {
 }
 
 impl LogManager {
-    pub fn get() -> ArcLogManager {
-        LM.clone()
+    pub fn new(data_dir: &str) -> ArcLogManager {
+        Arc::new(LogManagerHandle {
+            inner: FairMutex::new(Self::open(data_dir)),
+            recovering: AtomicBool::new(false),
+        })
     }
 
-    fn new(data_dir: &str) -> Self {
+    fn open(data_dir: &str) -> Self {
         let dir = Path::new(data_dir);
 
         create_dir_all(dir).unwrap_or_else(|e| panic!("Failed to write to {}: {e}", dir.display()));
@@ -180,7 +194,7 @@ impl LogManager {
 
     /// None means end of log: clean EOF or a torn tail from a crash
     /// mid-append; either way, nothing at or past the cursor is trusted
-    pub fn next_record(&mut self) -> Option<LogRecord> {
+    pub(crate) fn next_record(&mut self) -> Option<LogRecord> {
         let record_len = &mut [0; LEN_FIELD_SIZE as usize];
         self.handle.read_exact_at(record_len, self.cursor).ok()?;
         let record_len = u64::from_be_bytes(*record_len);
@@ -217,7 +231,7 @@ impl LogManager {
     fn duplicate(&self) -> LogManager {
         let path = self.path.clone();
         let dir = path.parent().unwrap().to_str().unwrap();
-        LogManager::new(dir)
+        LogManager::open(dir)
     }
 }
 
@@ -243,7 +257,7 @@ mod tests {
     use crate::wal::record::RowOperation;
 
     pub fn test_log_manager() -> LogManager {
-        LogManager::new(&test_path())
+        LogManager::open(&test_path())
     }
 
     fn dummy_record(int: i32) -> Record {

@@ -1,10 +1,10 @@
-use crate::catalog::{ArcCatalog, Catalog};
+use crate::catalog::ArcCatalog;
 use crate::errors::Error;
 use crate::execution::result_set::ResultSet;
 use crate::sql::logical_plan::optimizer::optimize_logical_plan;
 use crate::sql::logical_plan::LogicalPlanBuilder;
 use crate::sql::parser::parse;
-use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
+use crate::txn_manager::{ArcTransactionManager, TxnId};
 use anyhow::{ensure, Result};
 use sqlparser::ast::Statement;
 
@@ -13,15 +13,6 @@ pub struct Context {
     txn_manager: ArcTransactionManager,
     active_txn: Option<TxnId>,
     catalog_changed: bool,
-}
-
-impl Default for Context {
-    fn default() -> Self {
-        let catalog = Catalog::get();
-        let txn_manager = TransactionManager::get();
-
-        Self::new(catalog, txn_manager)
-    }
 }
 
 impl Context {

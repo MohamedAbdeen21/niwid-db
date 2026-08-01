@@ -3,10 +3,11 @@ mod html_formatter;
 
 use anyhow::Result;
 use html_formatter::{format_error, format_index, format_result_and_info};
-use idk::context::Context;
+use idk::engine::{Engine, DISK_STORAGE};
 use lambda_http::{run, service_fn, Body, Error, Request, RequestPayloadExt, Response};
 use lambda_runtime::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 // concat the css into a single string in compile time
 const CSS: &str = concat!(
@@ -76,7 +77,8 @@ async fn serve_frontend() -> Result<Response<Body>, Error> {
 async fn execute_query(query: &str) -> Result<Response<Body>, Error> {
     println!("Query: {query}");
 
-    let mut ctx = Context::default();
+    static ENGINE: OnceLock<Engine> = OnceLock::new();
+    let mut ctx = ENGINE.get_or_init(|| Engine::new(DISK_STORAGE)).context();
 
     let html = match ctx.execute_sql(query) {
         Ok(result) => format_result_and_info(result),

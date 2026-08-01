@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use crate::buffer_pool::ArcBufferPool;
 use crate::catalog::CATALOG_NAME;
 use crate::errors::Error;
@@ -12,7 +10,7 @@ use crate::tuple::{schema::Schema, Entry, Tuple};
 use crate::tuple::{TupleExt, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{Str, StrAddr, Types, Value, ValueFactory};
-use crate::wal::manager::{LogManager, RECOVERING};
+use crate::wal::manager::ArcLogManager;
 use crate::wal::record::{Record, RowOperation};
 use anyhow::{bail, ensure, Result};
 
@@ -26,6 +24,7 @@ pub struct Table {
     bpm: ArcBufferPool,
     txn_manager: ArcTransactionManager,
     schema: Schema,
+    lm: ArcLogManager,
     active_txn: Option<TxnId>,
     /// Index to check uniqueness of columns, is None for tables that don't check
     /// uniqueness, such as the catalog
@@ -42,13 +41,13 @@ impl Table {
     pub fn new(
         bpm: ArcBufferPool,
         txn_manager: ArcTransactionManager,
+        lm: ArcLogManager,
         name: String,
         schema: &Schema,
         txn: TxnId,
     ) -> Result<Self> {
-        if !RECOVERING.load(Ordering::SeqCst) {
-            LogManager::get()
-                .lock()
+        if !lm.recovering() {
+            lm.lock()
                 .append(txn, Record::CreateTable(name.clone(), schema.clone()));
         }
 
@@ -64,14 +63,15 @@ impl Table {
             index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), Some(txn))),
             bpm,
             txn_manager,
+            lm,
             active_txn: None,
             schema: schema.clone(),
         })
     }
 
     pub fn drop(&self, txn: TxnId) {
-        if !RECOVERING.load(Ordering::SeqCst) {
-            LogManager::get()
+        if !self.lm.recovering() {
+            self.lm
                 .lock()
                 .append(txn, Record::DropTable(self.name.clone()));
         }
@@ -80,6 +80,7 @@ impl Table {
     pub fn fetch(
         bpm: &mut ArcBufferPool,
         txn_manager: &mut ArcTransactionManager,
+        lm: ArcLogManager,
         name: String,
         schema: &Schema,
         first_page: PageId,
@@ -97,6 +98,7 @@ impl Table {
             blob_page,
             bpm: bpm.clone(),
             txn_manager: txn_manager.clone(),
+            lm,
             active_txn: None,
             schema: schema.clone(),
             index,
@@ -401,8 +403,8 @@ impl Table {
 
                 // catalog rows are rebuilt from CreateTable/DropTable records;
                 // logging them too would double-apply on replay
-                if !RECOVERING.load(Ordering::SeqCst) && self.name != CATALOG_NAME {
-                    LogManager::get().lock().append(
+                if !self.lm.recovering() && self.name != CATALOG_NAME {
+                    self.lm.lock().append(
                         txn,
                         Record::Operation(RowOperation::Insert(self.name.clone(), values)),
                     );
@@ -436,8 +438,8 @@ impl Table {
 
         let tuple = self.get_tuple(id).unwrap();
 
-        if self.name != CATALOG_NAME && !RECOVERING.load(Ordering::SeqCst) {
-            LogManager::get().lock().append(
+        if self.name != CATALOG_NAME && !self.lm.recovering() {
+            self.lm.lock().append(
                 txn,
                 Record::Operation(RowOperation::Delete(
                     self.name.clone(),
@@ -520,8 +522,8 @@ impl Table {
 
     /// Needs to return a duplicate because of how catalog handles ownership
     pub fn truncate(&self, txn: TxnId) -> Result<Table> {
-        if !RECOVERING.load(Ordering::SeqCst) {
-            LogManager::get()
+        if !self.lm.recovering() {
+            self.lm
                 .lock()
                 .append(txn, Record::Truncate(self.name.clone()));
         }
@@ -537,6 +539,7 @@ impl Table {
             blob_page: self.blob_page,
             bpm: self.bpm.clone(),
             txn_manager: self.txn_manager.clone(),
+            lm: self.lm.clone(),
             active_txn: self.active_txn,
             schema: self.schema.clone(),
             index: Some(index),
@@ -575,6 +578,7 @@ mod tests {
         let blob_page = guard.new_page()?.reader().get_page_id();
 
         let txn_manager = test_arc_transaction_manager(bpm.clone());
+        let lm = crate::wal::manager::LogManager::new(&crate::disk_manager::test_path());
 
         drop(guard);
 
@@ -586,6 +590,7 @@ mod tests {
             index: Some(BPlusTree::new(bpm.clone(), txn_manager.clone(), None)),
             bpm,
             txn_manager,
+            lm,
             active_txn: None,
             schema: schema.clone(),
         })

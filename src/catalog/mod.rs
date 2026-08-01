@@ -1,6 +1,6 @@
 mod versioned_map;
 
-use crate::buffer_pool::{ArcBufferPool, BufferPoolManager};
+use crate::buffer_pool::ArcBufferPool;
 use crate::errors::Error;
 use crate::pages::PageId;
 use crate::printdbg;
@@ -8,10 +8,10 @@ use crate::table::Table;
 use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, TupleId};
-use crate::txn_manager::{ArcTransactionManager, TransactionManager, TxnId};
+use crate::txn_manager::{ArcTransactionManager, TxnId};
 use crate::types::{AsBytes, Types, Value, ValueFactory};
+use crate::wal::manager::ArcLogManager;
 use anyhow::{bail, Result};
-use lazy_static::lazy_static;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -23,25 +23,15 @@ pub const CATALOG_NAME: &str = "__CATALOG__";
 
 pub type ArcCatalog = Arc<RwLock<Catalog>>;
 
-lazy_static! {
-    static ref CATALOG: ArcCatalog = Arc::new(RwLock::new(Catalog::new(
-        BufferPoolManager::get(),
-        TransactionManager::get()
-    )));
-}
-
 pub struct Catalog {
     pub tables_map: VersionedMap<String, (TupleId, Table)>,
     txn_tables: HashMap<TxnId, HashSet<String>>,
     bpm: ArcBufferPool,
     txn_manager: ArcTransactionManager,
+    lm: ArcLogManager,
 }
 
 impl Catalog {
-    pub fn get() -> ArcCatalog {
-        CATALOG.clone()
-    }
-
     /// Catalog is a table itself, this gives access to the underlying table
     pub fn table(&mut self) -> &mut Table {
         // No need to track version for catalog, catalog always has the same
@@ -55,6 +45,7 @@ impl Catalog {
     fn build_catalog(
         bpm: &mut ArcBufferPool,
         txn_manager: &mut ArcTransactionManager,
+        lm: &ArcLogManager,
         table: Table,
         schema: &Schema,
     ) -> VersionedMap<String, (TupleId, Table)> {
@@ -72,6 +63,7 @@ impl Catalog {
             let table = Table::fetch(
                 bpm,
                 txn_manager,
+                lm.clone(),
                 name.clone(),
                 &schema,
                 first_page_id,
@@ -95,7 +87,7 @@ impl Catalog {
     }
 
     #[allow(clippy::new_without_default)]
-    pub fn new(bpm: ArcBufferPool, txn_manager: ArcTransactionManager) -> Self {
+    pub fn new(bpm: ArcBufferPool, txn_manager: ArcTransactionManager, lm: ArcLogManager) -> Self {
         let mut bpm = bpm.clone();
         let mut txn_manager = txn_manager.clone();
 
@@ -110,6 +102,7 @@ impl Catalog {
         let table = Table::fetch(
             &mut bpm,
             &mut txn_manager,
+            lm.clone(),
             CATALOG_NAME.to_string(),
             &schema,
             CATALOG_PAGE,
@@ -118,13 +111,14 @@ impl Catalog {
         )
         .expect("Catalog fetch failed");
 
-        let tables = Self::build_catalog(&mut bpm, &mut txn_manager, table, &schema);
+        let tables = Self::build_catalog(&mut bpm, &mut txn_manager, &lm, table, &schema);
 
         Catalog {
             tables_map: tables,
             txn_tables: HashMap::new(),
             bpm,
             txn_manager,
+            lm,
         }
     }
 
@@ -145,6 +139,7 @@ impl Catalog {
         let mut table = Table::new(
             self.bpm.clone(),
             self.txn_manager.clone(),
+            self.lm.clone(),
             table_name.to_string(),
             schema,
             txn,
@@ -291,6 +286,13 @@ pub mod tests {
     use super::*;
 
     pub fn test_arc_catalog(bpm: ArcBufferPool, txn_manager: ArcTransactionManager) -> ArcCatalog {
-        Arc::new(RwLock::new(Catalog::new(bpm, txn_manager)))
+        use crate::disk_manager::test_path;
+        use crate::wal::manager::LogManager;
+
+        Arc::new(RwLock::new(Catalog::new(
+            bpm,
+            txn_manager,
+            LogManager::new(&test_path()),
+        )))
     }
 }
