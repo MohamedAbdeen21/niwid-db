@@ -135,11 +135,11 @@ pub mod tests {
 
     pub fn test_arc_transaction_manager(bpm: ArcBufferPool) -> ArcTransactionManager {
         use crate::disk_manager::test_path;
-        use crate::wal::manager::LogManager;
+        use crate::wal::manager::LogManagerHandle;
 
         Arc::new(FairMutex::new(TransactionManager::new(
             bpm,
-            LogManager::new(&test_path()),
+            LogManagerHandle::new(&test_path()),
         )))
     }
 }

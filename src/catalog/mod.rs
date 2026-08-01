@@ -4,7 +4,7 @@ use crate::buffer_pool::ArcBufferPool;
 use crate::errors::Error;
 use crate::pages::PageId;
 use crate::printdbg;
-use crate::table::Table;
+use crate::table::{CatalogRow, Table};
 use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, TupleId};
@@ -64,11 +64,13 @@ impl Catalog {
                 bpm,
                 txn_manager,
                 lm.clone(),
-                name.clone(),
-                &schema,
-                first_page_id,
-                last_page_id,
-                Some(index_root_id),
+                CatalogRow {
+                    name: name.clone(),
+                    schema,
+                    first_page: first_page_id,
+                    last_page: last_page_id,
+                    index_page: Some(index_root_id),
+                },
             )
             .expect("Fetch failed");
 
@@ -103,11 +105,13 @@ impl Catalog {
             &mut bpm,
             &mut txn_manager,
             lm.clone(),
-            CATALOG_NAME.to_string(),
-            &schema,
-            CATALOG_PAGE,
-            CATALOG_PAGE,
-            None,
+            CatalogRow {
+                name: CATALOG_NAME.to_string(),
+                schema: schema.clone(),
+                first_page: CATALOG_PAGE,
+                last_page: CATALOG_PAGE,
+                index_page: None,
+            },
         )
         .expect("Catalog fetch failed");
 
@@ -287,12 +291,12 @@ pub mod tests {
 
     pub fn test_arc_catalog(bpm: ArcBufferPool, txn_manager: ArcTransactionManager) -> ArcCatalog {
         use crate::disk_manager::test_path;
-        use crate::wal::manager::LogManager;
+        use crate::wal::manager::LogManagerHandle;
 
         Arc::new(RwLock::new(Catalog::new(
             bpm,
             txn_manager,
-            LogManager::new(&test_path()),
+            LogManagerHandle::new(&test_path()),
         )))
     }
 }

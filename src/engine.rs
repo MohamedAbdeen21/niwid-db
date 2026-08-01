@@ -2,7 +2,7 @@ use crate::buffer_pool::{ArcBufferPool, BufferPoolManager, BUFFER_POOL_SIZE};
 use crate::catalog::{ArcCatalog, Catalog};
 use crate::context::Context;
 use crate::txn_manager::{ArcTransactionManager, TransactionManager};
-use crate::wal::manager::{ArcLogManager, LogManager};
+use crate::wal::manager::{ArcLogManager, LogManagerHandle};
 use parking_lot::{FairMutex, RwLock};
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ impl Engine {
     }
 
     pub fn with_pool_size(data_dir: &str, pool_size: usize) -> Self {
-        let log_manager = LogManager::new(data_dir);
+        let log_manager = LogManagerHandle::new(data_dir);
         let bpm = Arc::new(FairMutex::new(BufferPoolManager::new(pool_size, data_dir)));
         let txn_manager = Arc::new(FairMutex::new(TransactionManager::new(
             bpm.clone(),

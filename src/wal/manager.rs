@@ -61,14 +61,16 @@ pub struct LogManager {
     path: PathBuf,
 }
 
-impl LogManager {
+impl LogManagerHandle {
     pub fn new(data_dir: &str) -> ArcLogManager {
         Arc::new(LogManagerHandle {
-            inner: FairMutex::new(Self::open(data_dir)),
+            inner: FairMutex::new(LogManager::open(data_dir)),
             recovering: AtomicBool::new(false),
         })
     }
+}
 
+impl LogManager {
     fn open(data_dir: &str) -> Self {
         let dir = Path::new(data_dir);
 

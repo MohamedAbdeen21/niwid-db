@@ -16,6 +16,15 @@ use anyhow::{bail, ensure, Result};
 
 pub mod table_iterator;
 
+/// The catalog row describing a table: everything needed to reopen it
+pub struct CatalogRow {
+    pub name: String,
+    pub schema: Schema,
+    pub first_page: PageId,
+    pub last_page: PageId,
+    pub index_page: Option<PageId>,
+}
+
 pub struct Table {
     pub name: String,
     pub first_page: PageId,
@@ -81,12 +90,16 @@ impl Table {
         bpm: &mut ArcBufferPool,
         txn_manager: &mut ArcTransactionManager,
         lm: ArcLogManager,
-        name: String,
-        schema: &Schema,
-        first_page: PageId,
-        last_page: PageId,
-        index_page: Option<PageId>,
+        row: CatalogRow,
     ) -> Result<Self> {
+        let CatalogRow {
+            name,
+            schema,
+            first_page,
+            last_page,
+            index_page,
+        } = row;
+
         let blob_page = bpm.lock().new_page()?.reader().get_page_id();
 
         let index = index_page.map(|id| BPlusTree::fetch(id, bpm.clone(), txn_manager.clone()));
@@ -100,7 +113,7 @@ impl Table {
             txn_manager: txn_manager.clone(),
             lm,
             active_txn: None,
-            schema: schema.clone(),
+            schema,
             index,
         })
     }
@@ -578,7 +591,7 @@ mod tests {
         let blob_page = guard.new_page()?.reader().get_page_id();
 
         let txn_manager = test_arc_transaction_manager(bpm.clone());
-        let lm = crate::wal::manager::LogManager::new(&crate::disk_manager::test_path());
+        let lm = crate::wal::manager::LogManagerHandle::new(&crate::disk_manager::test_path());
 
         drop(guard);
 
