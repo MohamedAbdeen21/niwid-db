@@ -1,5 +1,5 @@
 use crate::buffer_pool::ArcBufferPool;
-use crate::catalog::CATALOG_NAME;
+use crate::catalog::{CatalogRow, CATALOG_NAME};
 use crate::errors::Error;
 use crate::indexes::b_plus_tree::btree::BPlusTree;
 use crate::pages::table_page::{TablePage, META_SIZE, PAGE_END, SLOT_SIZE};
@@ -15,15 +15,6 @@ use crate::wal::record::{Record, RowOperation};
 use anyhow::{bail, ensure, Result};
 
 pub mod table_iterator;
-
-/// The catalog row describing a table: everything needed to reopen it
-pub struct CatalogRow {
-    pub name: String,
-    pub schema: Schema,
-    pub first_page: PageId,
-    pub last_page: PageId,
-    pub index_page: Option<PageId>,
-}
 
 pub struct Table {
     pub name: String,

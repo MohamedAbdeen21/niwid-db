@@ -2,14 +2,14 @@ mod versioned_map;
 
 use crate::buffer_pool::ArcBufferPool;
 use crate::errors::Error;
-use crate::pages::PageId;
+use crate::pages::{PageId, INVALID_PAGE};
 use crate::printdbg;
-use crate::table::{CatalogRow, Table};
+use crate::table::Table;
 use crate::tuple::constraints::Constraints;
 use crate::tuple::schema::{Field, Schema};
 use crate::tuple::{Entry, TupleId};
 use crate::txn_manager::{ArcTransactionManager, TxnId};
-use crate::types::{AsBytes, Types, Value, ValueFactory};
+use crate::types::{Types, Value, ValueFactory};
 use crate::wal::manager::ArcLogManager;
 use anyhow::{bail, Result};
 use parking_lot::RwLock;
@@ -20,6 +20,55 @@ use versioned_map::VersionedMap;
 // preserve page_id 1 for catalog, bpm starts assigning at 2
 pub const CATALOG_PAGE: PageId = 2;
 pub const CATALOG_NAME: &str = "__CATALOG__";
+
+/// One row of the catalog table: everything needed to reopen a Table.
+/// The column layout is defined here and nowhere else.
+pub struct CatalogRow {
+    pub name: String,
+    pub schema: Schema,
+    pub first_page: PageId,
+    pub last_page: PageId,
+    pub index_page: Option<PageId>,
+}
+
+impl CatalogRow {
+    /// Schema of the catalog table itself
+    pub fn catalog_schema() -> Schema {
+        Schema::new(vec![
+            Field::new("table_name", Types::Str, Constraints::nullable(false)),
+            Field::new("first_page", Types::UInt, Constraints::nullable(false)),
+            Field::new("last_page", Types::UInt, Constraints::nullable(false)),
+            Field::new("index_root", Types::UInt, Constraints::nullable(false)),
+            Field::new("schema", Types::Str, Constraints::nullable(false)),
+        ])
+    }
+
+    pub fn to_values(&self) -> Result<Vec<Value>> {
+        let serialized_schema = String::from_utf8(self.schema.to_bytes().to_vec())?;
+
+        Ok(vec![
+            ValueFactory::from_string(&Types::Str, &self.name)?,
+            ValueFactory::from_string(&Types::UInt, self.first_page.to_string())?,
+            ValueFactory::from_string(&Types::UInt, self.last_page.to_string())?,
+            ValueFactory::from_string(
+                &Types::UInt,
+                self.index_page.unwrap_or(INVALID_PAGE).to_string(),
+            )?,
+            ValueFactory::from_string(&Types::Str, &serialized_schema)?,
+        ])
+    }
+
+    /// values must be portable (strings resolved), i.e. from get_portable_values
+    pub fn from_values(values: &[Value]) -> Self {
+        CatalogRow {
+            name: values[0].str(),
+            first_page: values[1].u32(),
+            last_page: values[2].u32(),
+            index_page: Some(values[3].u32()),
+            schema: Schema::from_bytes(values[4].str().as_bytes()),
+        }
+    }
+}
 
 pub type ArcCatalog = Arc<RwLock<Catalog>>;
 
@@ -47,32 +96,14 @@ impl Catalog {
         txn_manager: &mut ArcTransactionManager,
         lm: &ArcLogManager,
         table: Table,
-        schema: &Schema,
     ) -> VersionedMap<String, (TupleId, Table)> {
         let mut tables = VersionedMap::new();
 
         let table_builder = |(id, (_, tuple)): &(TupleId, Entry)| {
-            let values = tuple.get_values(schema)?;
-            let name = table.fetch_string(values[0].str_addr()).0;
-            let first_page_id = ValueFactory::from_bytes(&Types::UInt, &values[1].to_bytes()).u32();
-            let last_page_id = ValueFactory::from_bytes(&Types::UInt, &values[2].to_bytes()).u32();
-            let index_root_id = ValueFactory::from_bytes(&Types::UInt, &values[3].to_bytes()).u32();
-            let schema = table.fetch_string(values[4].str_addr());
-            let schema = Schema::from_bytes(schema.0.to_string().as_bytes());
+            let row = CatalogRow::from_values(&table.get_portable_values(tuple)?);
+            let name = row.name.clone();
 
-            let table = Table::fetch(
-                bpm,
-                txn_manager,
-                lm.clone(),
-                CatalogRow {
-                    name: name.clone(),
-                    schema,
-                    first_page: first_page_id,
-                    last_page: last_page_id,
-                    index_page: Some(index_root_id),
-                },
-            )
-            .expect("Fetch failed");
+            let table = Table::fetch(bpm, txn_manager, lm.clone(), row).expect("Fetch failed");
 
             tables.insert(None, name, (*id, table));
 
@@ -93,13 +124,7 @@ impl Catalog {
         let mut bpm = bpm.clone();
         let mut txn_manager = txn_manager.clone();
 
-        let schema = Schema::new(vec![
-            Field::new("table_name", Types::Str, Constraints::nullable(false)),
-            Field::new("first_page", Types::UInt, Constraints::nullable(false)),
-            Field::new("last_page", Types::UInt, Constraints::nullable(false)),
-            Field::new("index_root", Types::UInt, Constraints::nullable(false)),
-            Field::new("schema", Types::Str, Constraints::nullable(false)),
-        ]);
+        let schema = CatalogRow::catalog_schema();
 
         let table = Table::fetch(
             &mut bpm,
@@ -107,7 +132,7 @@ impl Catalog {
             lm.clone(),
             CatalogRow {
                 name: CATALOG_NAME.to_string(),
-                schema: schema.clone(),
+                schema,
                 first_page: CATALOG_PAGE,
                 last_page: CATALOG_PAGE,
                 index_page: None,
@@ -115,7 +140,7 @@ impl Catalog {
         )
         .expect("Catalog fetch failed");
 
-        let tables = Self::build_catalog(&mut bpm, &mut txn_manager, &lm, table, &schema);
+        let tables = Self::build_catalog(&mut bpm, &mut txn_manager, &lm, table);
 
         Catalog {
             tables_map: tables,
@@ -148,14 +173,14 @@ impl Catalog {
             schema,
             txn,
         )?;
-        let serialized_schema = String::from_utf8(schema.to_bytes().to_vec())?;
-        let tuple_data: Vec<Value> = vec![
-            ValueFactory::from_string(&Types::Str, table_name)?,
-            ValueFactory::from_string(&Types::UInt, table.get_first_page_id().to_string())?,
-            ValueFactory::from_string(&Types::UInt, table.get_last_page_id().to_string())?,
-            ValueFactory::from_string(&Types::UInt, table.get_index_page_id().to_string())?,
-            ValueFactory::from_string(&Types::Str, &serialized_schema)?,
-        ];
+        let row = CatalogRow {
+            name: table_name.to_string(),
+            schema: schema.clone(),
+            first_page: table.get_first_page_id(),
+            last_page: table.get_last_page_id(),
+            index_page: Some(table.get_index_page_id()),
+        };
+
         table.start_txn(txn)?;
         self.table().start_txn(txn)?;
         self.txn_tables
@@ -163,7 +188,7 @@ impl Catalog {
             .or_default()
             .insert(CATALOG_NAME.to_string());
 
-        let tuple_id = self.table().insert(tuple_data)?;
+        let tuple_id = self.table().insert(row.to_values()?)?;
 
         self.tables_map
             .insert(Some(txn), table_name.to_string(), (tuple_id, table));
