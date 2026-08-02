@@ -9,6 +9,7 @@ use crate::pages::traits::Serialize;
 use crate::pages::{Page, PageId, INVALID_PAGE};
 use crate::printdbg;
 use crate::txn_manager::TxnId;
+use crate::wal::Lsn;
 use anyhow::{anyhow, Result};
 use frame::Frame;
 use parking_lot::FairMutex;
@@ -326,33 +327,33 @@ impl BufferPoolManager {
         Ok(())
     }
 
-    pub fn flush(&mut self, page_id: Option<PageId>) -> Result<()> {
-        // TODO: do we need to check txns?
-        if let Some(id) = page_id {
-            let frame_id = self.page_table.get(&id).unwrap();
-            let page = self.frames[*frame_id].reader();
-            self.disk_manager.write_to_file(page, None)?;
-            return Ok(());
-        }
+    /// Stages every dirty page, then publishes them in one marked step.
+    pub fn checkpoint(&mut self, lsn: Lsn) -> Result<()> {
+        let staging = self.disk_manager.begin_checkpoint()?;
 
-        self.frames
+        for frame in self
+            .frames
             .iter_mut()
             .filter(|f| f.reader().get_page_id() != INVALID_PAGE && f.reader().is_dirty())
-            .inspect(|f| {
-                let pins = f.get_pin_count();
-                if pins != 0 {
-                    panic!(
-                        "Internal Error: Frame {} has pin count {}",
-                        f.get_page_id(),
-                        pins
-                    );
-                }
-            })
-            .map(|f| f.writer())
-            .try_for_each(|p| {
-                p.mark_clean();
-                self.disk_manager.write_to_file(p, None)
-            })
+        {
+            let page = frame.writer();
+            self.disk_manager.write_to_staging(&staging, page)?;
+            page.mark_clean();
+        }
+
+        self.disk_manager.publish_checkpoint(lsn)
+    }
+
+    /// How far the log is covered by the pages on disk
+    pub fn image_lsn(&self) -> Lsn {
+        self.disk_manager.image_lsn()
+    }
+
+    pub fn flush(&mut self, page_id: PageId) -> Result<()> {
+        let frame_id = self.page_table.get(&page_id).unwrap();
+        let page = self.frames[*frame_id].reader();
+        self.disk_manager.write_to_file(page, None)?;
+        Ok(())
     }
 }
 

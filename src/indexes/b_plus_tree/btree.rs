@@ -38,7 +38,7 @@ impl BPlusTree {
 
         // flush the page type
         if txn.is_none() {
-            tree.bpm.lock().flush(Some(root_page_id)).unwrap();
+            tree.bpm.lock().flush(root_page_id).unwrap();
         }
 
         tree
@@ -64,7 +64,7 @@ impl BPlusTree {
         leaf.delete(key)?;
 
         if txn.is_none() {
-            self.bpm.lock().flush(Some(leaf.get_page_id()))?;
+            self.bpm.lock().flush(leaf.get_page_id())?;
         }
 
         self.unpin_page(leaf.get_page_id(), txn);
@@ -225,7 +225,7 @@ impl BPlusTree {
         };
 
         if txn.is_none() {
-            self.bpm.lock().flush(Some(page.get_page_id()))?;
+            self.bpm.lock().flush(page.get_page_id())?;
         }
 
         res

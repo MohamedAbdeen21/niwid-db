@@ -3,7 +3,7 @@ use crate::pages::traits::Serialize;
 use crate::pages::{PageId, INVALID_PAGE};
 use crate::txn_manager::TxnId;
 use anyhow::{anyhow, bail, Context, Result};
-use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, OpenOptions};
+use std::fs::{create_dir_all, read_dir, remove_dir_all, rename, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -19,6 +19,8 @@ pub fn test_path() -> String {
     let id = Uuid::new_v4(); // Generate a unique UUID
     format!("data/test/test_{id}/")
 }
+
+const DONE: &str = "DONE";
 
 #[derive(Debug)]
 pub struct DiskManager {
@@ -48,11 +50,113 @@ impl DiskManager {
             path: path.to_str().unwrap().to_string(),
         };
 
+        create_dir_all(disk.pages_dir()).unwrap();
+        create_dir_all(disk.ckpt_dir()).unwrap();
+
+        disk.finish_checkpoint().unwrap();
         disk.recover_txns().unwrap();
 
         create_dir_all(disk.txn_dir()).unwrap();
 
         disk
+    }
+
+    fn pages_dir(&self) -> PathBuf {
+        Path::new(&self.path).join("pages")
+    }
+
+    fn ckpt_dir(&self) -> PathBuf {
+        Path::new(&self.path).join("ckpt")
+    }
+
+    fn lsn_file(&self) -> PathBuf {
+        Path::new(&self.path).join("checkpoint")
+    }
+
+    /// How far the log is covered by the pages on disk
+    pub fn image_lsn(&self) -> u64 {
+        let mut bytes = [0u8; 8];
+
+        match File::open(self.lsn_file()).and_then(|mut f| f.read_exact(&mut bytes)) {
+            Ok(()) => u64::from_be_bytes(bytes),
+            Err(_) => 0,
+        }
+    }
+
+    /// A checkpoint that got as far as its DONE marker is applied, one that
+    /// did not never happened. At most one is ever in flight.
+    fn finish_checkpoint(&self) -> Result<()> {
+        let mut bytes = [0u8; 8];
+
+        let done =
+            File::open(self.ckpt_dir().join(DONE)).and_then(|mut file| file.read_exact(&mut bytes));
+
+        match done {
+            Ok(()) => self.apply_checkpoint(u64::from_be_bytes(bytes)),
+            Err(_) => self.clear_checkpoint(),
+        }
+    }
+
+    fn clear_checkpoint(&self) -> Result<()> {
+        remove_dir_all(self.ckpt_dir()).ok();
+        create_dir_all(self.ckpt_dir())?;
+
+        Ok(())
+    }
+
+    /// Somewhere to collect the pages a checkpoint rewrites
+    pub fn begin_checkpoint(&self) -> Result<PathBuf> {
+        self.clear_checkpoint()?;
+
+        Ok(self.ckpt_dir())
+    }
+
+    pub fn write_to_staging<T: DiskWritable>(&self, staging: &Path, page: &T) -> Result<()> {
+        let mut file = File::create(staging.join(page.get_page_id().to_string()))?;
+
+        file.write_all(page.to_bytes())?;
+        file.sync_all()?;
+
+        Ok(())
+    }
+
+    /// Renaming DONE into place is the commit point: after it the staged
+    /// pages count as the truth, and a crash mid-copy is finished at startup.
+    /// It carries the lsn so a crash can still tell what was checkpointed.
+    pub fn publish_checkpoint(&self, lsn: u64) -> Result<()> {
+        File::open(self.ckpt_dir())?.sync_all()?;
+
+        let marker = self.ckpt_dir().join("DONE.tmp");
+        let mut file = File::create(&marker)?;
+        file.write_all(&lsn.to_be_bytes())?;
+        file.sync_all()?;
+
+        rename(marker, self.ckpt_dir().join(DONE))?;
+        File::open(self.ckpt_dir())?.sync_all()?;
+
+        self.apply_checkpoint(lsn)
+    }
+
+    /// Idempotent: a page that already moved is simply not there any more,
+    /// and DONE goes last so an interrupted apply is repeated, not lost.
+    fn apply_checkpoint(&self, lsn: u64) -> Result<()> {
+        for page in read_dir(self.ckpt_dir())?.flatten() {
+            if page.file_name() == DONE {
+                continue;
+            }
+
+            rename(page.path(), self.pages_dir().join(page.file_name()))?;
+        }
+
+        File::open(self.pages_dir())?.sync_all()?;
+
+        let temp = self.lsn_file().with_extension("tmp");
+        let mut file = File::create(&temp)?;
+        file.write_all(&lsn.to_be_bytes())?;
+        file.sync_all()?;
+        rename(temp, self.lsn_file())?;
+
+        self.clear_checkpoint()
     }
 
     fn recover_txns(&self) -> Result<()> {
@@ -72,10 +176,9 @@ impl DiskManager {
                 read_dir(txn.path())?
                     .try_for_each(|page| -> Result<()> {
                         let page = page?;
-                        let original = Path::join(
-                            Path::new(&self.path),
-                            Path::new(page.file_name().to_str().unwrap()),
-                        );
+                        let original = self
+                            .pages_dir()
+                            .join(Path::new(page.file_name().to_str().unwrap()));
 
                         rename(page.path(), &original)?;
 
@@ -99,11 +202,11 @@ impl DiskManager {
         }
 
         let root = match txn_id {
-            None => Path::new(&self.path),
-            Some(txn_id) => &Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string())),
+            None => self.pages_dir(),
+            Some(txn_id) => Path::join(Path::new(&self.txn_dir()), Path::new(&txn_id.to_string())),
         };
 
-        let path = Path::join(root, Path::new(&page.get_page_id().to_string()));
+        let path = Path::join(&root, Path::new(&page.get_page_id().to_string()));
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -122,7 +225,7 @@ impl DiskManager {
             return Err(anyhow!("Asked to read a page with invalid ID {}", page_id));
         }
 
-        let path = Path::join(Path::new(&self.path), Path::new(&page_id.to_string()));
+        let path = Path::join(&self.pages_dir(), Path::new(&page_id.to_string()));
 
         let mut file = OpenOptions::new()
             .read(true)
@@ -178,10 +281,9 @@ impl DiskManager {
             .into_iter()
             .try_for_each(|page| -> Result<()> {
                 let page = page?;
-                let original = Path::join(
-                    Path::new(&self.path),
-                    Path::new(page.file_name().to_str().unwrap()),
-                );
+                let original = self
+                    .pages_dir()
+                    .join(Path::new(page.file_name().to_str().unwrap()));
 
                 rename(page.path(), &original)?;
 
