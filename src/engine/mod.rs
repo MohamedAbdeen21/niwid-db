@@ -66,9 +66,15 @@ impl Engine {
         self.bpm.lock().image_lsn().max(LOG_START)
     }
 
+    /// Writes every dirty page out, then drops the log the pages now cover.
     pub fn checkpoint(&self) -> Result<()> {
-        let lsn = self.log_manager.lock().next_lsn();
+        // held throughout: nothing may be appended between the lsn we
+        // checkpoint at and throwing away the log it covers
+        let mut log = self.log_manager.lock();
+        let lsn = log.next_lsn();
 
-        self.bpm.lock().checkpoint(lsn)
+        self.bpm.lock().checkpoint(lsn)?;
+
+        log.truncate(lsn)
     }
 }

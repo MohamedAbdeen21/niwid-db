@@ -5,19 +5,16 @@ use bincode::{deserialize, serialize};
 use crc32fast::hash;
 use parking_lot::{FairMutex, FairMutexGuard};
 use std::collections::HashMap;
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::txn_manager::TxnId;
 use crate::wal::record::{LogRecord, Record};
 use crate::wal::Lsn;
-
-#[cfg(test)]
-use std::path::PathBuf;
 
 const LEN_FIELD_SIZE: u64 = 8;
 const CHECKSUM_FIELD_SIZE: u64 = 4;
@@ -26,8 +23,11 @@ const CHECKSUM_FIELD_SIZE: u64 = 4;
 /// change to the record wire format that isn't an appended enum variant.
 const MAGIC: [u8; 8] = *b"NIWIDDB\x01";
 
-/// First byte past the file header: where the first record lives
-pub(crate) const LOG_START: Lsn = MAGIC.len() as Lsn;
+/// magic + the lsn the first record in the file carries
+const HEADER_SIZE: u64 = MAGIC.len() as u64 + 8;
+
+/// The lsn of the very first record ever written
+pub(crate) const LOG_START: Lsn = HEADER_SIZE;
 
 pub type ArcLogManager = Arc<LogManagerHandle>;
 
@@ -53,15 +53,15 @@ impl LogManagerHandle {
 }
 
 pub struct LogManager {
+    dir: PathBuf,
     handle: File,
+    /// lsn of the first record in the file; truncation moves it forward
+    base: Lsn,
     prev_lsn: HashMap<TxnId, Lsn>,
     next_lsn: Lsn,
     last_synced_lsn: Lsn,
     /// iterator cursor
     cursor: Lsn,
-
-    #[cfg(test)]
-    path: PathBuf,
 }
 
 impl LogManagerHandle {
@@ -79,51 +79,88 @@ impl LogManager {
 
         create_dir_all(dir).unwrap_or_else(|e| panic!("Failed to write to {}: {e}", dir.display()));
 
-        let path = dir.join("wal.log");
+        let mut handle = Self::open_file(dir);
+        let len = handle.metadata().expect("Failed to stat WAL").len();
 
-        let mut handle = OpenOptions::new()
-            .read(true)
-            .append(true)
-            .create(true)
-            .open(&path)
-            .expect("Failed to open WAL file");
-
-        let len = handle.metadata().expect("Failed to stat WAL file").len();
-
-        let next_lsn = if len == 0 {
-            handle
-                .write_all(&MAGIC)
-                .expect("Failed to write WAL header");
-            handle.sync_all().expect("Failed to sync WAL header");
-            MAGIC.len() as Lsn
+        let base = if len == 0 {
+            Self::write_header(&mut handle, LOG_START);
+            LOG_START
         } else {
-            let mut header = [0u8; MAGIC.len()];
-            handle.seek(SeekFrom::Start(0)).expect("Failed to seek WAL");
-            handle
-                .read_exact(&mut header)
-                .expect("WAL file shorter than its header");
-            assert_eq!(
-                header, MAGIC,
-                "WAL header mismatch: not a WAL file or unsupported format version"
-            );
-            len
+            Self::read_header(&mut handle)
         };
 
         LogManager {
+            dir: dir.to_path_buf(),
             handle,
+            base,
             prev_lsn: HashMap::new(),
-            next_lsn,
+            next_lsn: base + len.saturating_sub(HEADER_SIZE),
             // bytes already in the file survived the last process; they
             // need no fsync, so the watermark starts fully caught up
-            last_synced_lsn: next_lsn,
-            cursor: MAGIC.len() as Lsn,
-            #[cfg(test)]
-            path,
+            last_synced_lsn: base + len.saturating_sub(HEADER_SIZE),
+            cursor: base,
         }
     }
 
-    pub fn truncate(&mut self, checkpoint: Lsn) -> Result<()> {
-        todo!()
+    fn path(dir: &Path) -> PathBuf {
+        dir.join("wal.log")
+    }
+
+    fn open_file(dir: &Path) -> File {
+        OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(Self::path(dir))
+            .expect("Failed to open WAL file")
+    }
+
+    fn write_header(file: &mut File, base: Lsn) {
+        file.write_all(&MAGIC).expect("Failed to write WAL header");
+        file.write_all(&base.to_be_bytes())
+            .expect("Failed to write WAL base");
+        file.sync_all().expect("Failed to sync WAL header");
+    }
+
+    fn read_header(file: &mut File) -> Lsn {
+        let mut header = [0u8; HEADER_SIZE as usize];
+
+        file.seek(SeekFrom::Start(0)).expect("Failed to seek WAL");
+        file.read_exact(&mut header)
+            .expect("WAL shorter than its header");
+
+        assert_eq!(
+            header[..MAGIC.len()],
+            MAGIC,
+            "WAL header mismatch: not a WAL file or unsupported format version"
+        );
+
+        Lsn::from_be_bytes(header[MAGIC.len()..].try_into().unwrap())
+    }
+
+    /// Throws the log away and starts a new one at `covered`. The caller holds
+    /// the lock across the checkpoint, so there is never anything past it.
+    pub fn truncate(&mut self, covered: Lsn) -> Result<()> {
+        debug_assert_eq!(covered, self.next_lsn, "records would be lost");
+
+        remove_file(Self::path(&self.dir))?;
+
+        self.handle = Self::open_file(&self.dir);
+        Self::write_header(&mut self.handle, covered);
+
+        self.base = covered;
+        self.cursor = covered;
+
+        Ok(())
+    }
+
+    /// The oldest lsn still on disk; anything before it has been truncated
+    pub fn oldest_lsn(&self) -> Lsn {
+        self.base
+    }
+
+    fn offset(&self, lsn: Lsn) -> u64 {
+        HEADER_SIZE + (lsn - self.base)
     }
 
     pub fn append(&mut self, txn_id: TxnId, record_type: Record) -> Lsn {
@@ -170,7 +207,7 @@ impl LogManager {
         self.next_lsn += LEN_FIELD_SIZE + CHECKSUM_FIELD_SIZE + len;
 
         debug_assert_eq!(
-            self.next_lsn,
+            self.offset(self.next_lsn),
             self.handle.metadata().unwrap().len(),
             "next_lsn drifted from the real file length"
         );
@@ -204,33 +241,30 @@ impl LogManager {
     /// None means end of log: clean EOF or a torn tail from a crash
     /// mid-append; either way, nothing at or past the cursor is trusted
     fn next_record(&mut self) -> Option<LogRecord> {
-        let record_len = &mut [0; LEN_FIELD_SIZE as usize];
-        self.handle.read_exact_at(record_len, self.cursor).ok()?;
-        let record_len = u64::from_be_bytes(*record_len);
+        let mut offset = self.offset(self.cursor);
 
-        self.cursor += LEN_FIELD_SIZE;
+        let record_len = &mut [0; LEN_FIELD_SIZE as usize];
+        self.handle.read_exact_at(record_len, offset).ok()?;
+        let record_len = u64::from_be_bytes(*record_len);
+        offset += LEN_FIELD_SIZE;
 
         let checksum = &mut [0; CHECKSUM_FIELD_SIZE as usize];
-        self.handle.read_exact_at(checksum, self.cursor).ok()?;
+        self.handle.read_exact_at(checksum, offset).ok()?;
         let checksum = u32::from_be_bytes(*checksum);
-
-        self.cursor += CHECKSUM_FIELD_SIZE;
+        offset += CHECKSUM_FIELD_SIZE;
 
         let mut record = vec![0u8; record_len as usize];
-        self.handle.read_exact_at(&mut record, self.cursor).ok()?;
+        self.handle.read_exact_at(&mut record, offset).ok()?;
 
-        self.cursor += record_len;
-
-        let record_checksum = hash(&record);
-        if record_checksum != checksum {
-            // Skip broken record
+        if hash(&record) != checksum {
+            // torn or corrupt: nothing past here is trusted
             return None;
         }
 
-        // checksum was checked, we don't expect this to fail
-        let record = deserialize(&record).expect("Record deserialization somehow failed");
+        self.cursor += LEN_FIELD_SIZE + CHECKSUM_FIELD_SIZE + record_len;
 
-        Some(record)
+        // checksum was checked, we don't expect this to fail
+        Some(deserialize(&record).expect("Record deserialization somehow failed"))
     }
 
     /// Stops at the first torn or corrupt record
@@ -244,21 +278,17 @@ impl LogManager {
 impl LogManager {
     /// Create a second LogManager to similuate recovery after crash
     fn duplicate(&self) -> LogManager {
-        let path = self.path.clone();
-        let dir = path.parent().unwrap().to_str().unwrap();
-        LogManager::open(dir)
+        LogManager::open(self.dir.to_str().unwrap())
     }
 }
 
 #[cfg(test)]
 impl Drop for LogManager {
     fn drop(&mut self) {
-        // delete only the log file, the dir is shared with the disk
-        // manager's pages; remove_dir only succeeds once the dir is empty
-        use std::fs::{remove_dir, remove_file};
-
-        remove_file(&self.path).unwrap_or_default();
-        remove_dir(self.path.parent().unwrap()).unwrap_or_default();
+        // delete only the log, the dir is shared with the disk manager's
+        // pages; remove_dir only succeeds once the dir is empty
+        remove_file(Self::path(&self.dir)).unwrap_or_default();
+        std::fs::remove_dir(&self.dir).unwrap_or_default();
     }
 }
 

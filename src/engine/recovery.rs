@@ -124,6 +124,34 @@ mod tests {
     use anyhow::Result;
 
     #[test]
+    fn checkpoint_drops_the_covered_log_and_survives_reopen() -> Result<()> {
+        let dir = test_path();
+
+        let first = Engine::with_pool_size(&dir, 50);
+        let mut ctx = first.context();
+        ctx.execute_sql("CREATE TABLE t (a int)")?;
+        ctx.execute_sql("INSERT INTO t VALUES (1)")?;
+
+        first.checkpoint()?;
+
+        let covered = first.checkpoint_lsn();
+        assert!(covered > crate::wal::manager::LOG_START);
+        assert_eq!(first.log_manager.lock().oldest_lsn(), covered);
+
+        // nothing left to replay, and the rows are in the pages
+        let second = Engine::with_pool_size(&dir, 50);
+        let rows = second
+            .context()
+            .execute_sql("SELECT * FROM t")?
+            .rows()
+            .len();
+
+        assert_eq!(rows, 1);
+
+        Ok(())
+    }
+
+    #[test]
     fn reopening_replays_committed_rows_once() -> Result<()> {
         let dir = test_path();
 
